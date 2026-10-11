@@ -32,7 +32,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   await waitFor(async()=>await panel.locator('#installed option').count()===1);await panel.locator('#select').click();
   await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');return getContext().onlineStatus==='fixture-kobold-model'}));
   const connected=await page.evaluate(()=>({api:document.querySelector('#main_api').value,type:document.querySelector('#textgen_type').value,url:document.querySelector('#koboldcpp_api_url_text').value}));
-  if(connected.api!=='textgenerationwebui'||connected.type!=='koboldcpp'||connected.url!=='http://127.0.0.1:5001')throw Error('Incorrect auto connection: '+JSON.stringify(connected));
+  if(connected.api!=='textgenerationwebui'||connected.type!=='koboldcpp'||new URL(connected.url).origin!=='http://127.0.0.1:5001')throw Error('Incorrect auto connection: '+JSON.stringify(connected));
   const generated=await page.evaluate(async()=>{const {getRequestHeaders}=await import('/script.js');const r=await fetch('/api/backends/text-completions/generate',{method:'POST',headers:getRequestHeaders(),body:JSON.stringify({api_server:'http://127.0.0.1:5001',api_type:'koboldcpp',prompt:'hello',max_tokens:8,stream:false})});if(!r.ok)throw Error('Generation route failed');return r.json()});
   if(!JSON.stringify(generated).includes('Fixture generation works.'))throw Error('Generation did not reach the engine');
   await panel.locator('#stop').click();await waitFor(async()=>await panel.locator('#start').isEnabled());

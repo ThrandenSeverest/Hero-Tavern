@@ -1,6 +1,6 @@
 # Hero Tavern
 
-A Windows launcher that installs **SillyTavern + KoboldCpp** together and provides one-button GGUF model downloads. The default is **Qwen3 8B Abliterated Q4_K_M**.
+A unified local AI application built on **SillyTavern**, with a Hero Tavern navigation shell, embedded model/hardware controls and a managed **KoboldCpp** engine. The default is **Qwen3 8B Abliterated Q4_K_M**.
 
 This is the first development version: the setup executable is built by GitHub Actions. Full installation and generation on a Windows PC still need a smoke test before a stable release.
 
@@ -10,19 +10,20 @@ This is the first development version: the setup executable is built by GitHub A
 2. Double-click **Install.cmd**. It installs portable Node.js, SillyTavern and KoboldCpp without administrator rights, Git or Python.
 3. Setup opens **Hero Tavern / SillyTavern immediately**, even with no model installed.
 4. Click **Hero Tavern · Models** in the bottom-right corner. In the embedded panel, click **Download Qwen default** once.
-5. The approximately **5.03 GB** file downloads with progress, resume and SHA-256 verification. The first selected model starts in the background after verification. Once the panel says AI ready, click **Connect** in SillyTavern's API Connections if requested.
+5. The approximately **5.03 GB** file downloads with progress, resume and SHA-256 verification. The first selected model starts in the background after verification. Hero Tavern automatically switches the chat to Text Completion / KoboldCpp at port 5001 and connects it, including for existing profiles that previously used KoboldAI Classic.
 
 On subsequent runs, use the **Hero Tavern** desktop shortcut. The chat UI opens first; a previously selected model loads in the background.
 
 Alternatively, open [Actions](https://github.com/ThrandenSeverest/Hero-Tavern/actions/workflows/build-windows.yml), select a successful run and download `Hero-Tavern-Setup-Windows-x64`. Extract and run `Hero-Tavern-Setup.exe`. Artifact downloads require a GitHub login.
 
-The launcher starts SillyTavern and the local model service, then opens your browser without waiting for a model. Keep its window open; press Enter there to stop the servers. The Models panel provides downloads, installed-model selection, progress and Start AI / Stop AI controls. An Advanced manager button opens the Windows manager for custom links and deletion.
+The launcher starts SillyTavern and the local model service, then opens your browser without waiting for a model. Keep its window open; press Enter there to stop the servers. The Models panel provides downloads, installed-model selection, progress and Start AI / Stop AI controls. Custom Hugging Face links, model deletion, CPU/CUDA/Vulkan settings and engine diagnostics are handled in this same UI.
 
 ## Included behavior
 
 - Shared installation folder: `%LOCALAPPDATA%\Hero-Tavern`.
 - Built-in Models panel in SillyTavern with one-button default Qwen downloads, additional Qwen quantizations and installed-model selection.
-- Advanced Windows manager for custom public Hugging Face GGUF links and deletion.
+- Hero Tavern navigation, welcome dashboard and automatic local API connection for both fresh and existing profiles.
+- Embedded hardware settings and engine logs; the Windows manager remains only as a standalone fallback.
 - Download progress, cancellation, resume, free-space checks and automatic model selection.
 - GGUF header and version checks, exact size checks when metadata exists, SHA-256 verification. The default model has a fixed published checksum.
 - Fresh Qwen ChatML profile with non-thinking assistant prefix and local KoboldCpp endpoint.
@@ -40,7 +41,7 @@ Edit `%LOCALAPPDATA%\Hero-Tavern\backend.json` while the app is stopped:
 {"mode":"cpu","gpuLayers":0,"contextSize":4096}
 ```
 
-For NVIDIA acceleration use `"mode":"cuda"`; for a supported Vulkan GPU use `"mode":"vulkan"`. Set `"gpuLayers":-1` for KoboldCpp autofit. Lower context or switch back to CPU if GPU memory is insufficient. The first version exposes this through the configuration file; a hardware-settings UI is planned.
+For NVIDIA acceleration use `"mode":"cuda"`; for a supported Vulkan GPU use `"mode":"vulkan"`. Set `"gpuLayers":-1` for KoboldCpp autofit. Lower context or switch back to CPU if GPU memory is insufficient. You can also change these settings in **Hardware** inside Hero Tavern.
 
 If you increase backend context, adjust SillyTavern's context setting too. When switching to a non-Qwen model, choose that model's appropriate instruction template in SillyTavern.
 
@@ -60,7 +61,7 @@ Models live on your computer and are not committed to GitHub. Custom downloads c
 
 Our launcher and integration code are MIT licensed. Upstream components retain their licenses; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-`Install.cmd` and the compiled bootstrap package the same published scripts. CI parses every PowerShell script with Windows PowerShell, tests PowerShell 5.1 catalog/dropdown behavior, model verification/path restrictions, UI startup without a model and profile preservation and compiles the executable from embedded source resources.
+`Install.cmd` and the compiled bootstrap package the same published scripts. CI parses every PowerShell script with Windows PowerShell, tests PowerShell 5.1 catalog/dropdown behavior, model verification/path restrictions, UI startup without a model and profile preservation and tests a real child-process engine fixture, then runs a Chromium integration test against upstream SillyTavern. The browser test reproduces a stale Classic/5000 profile, verifies automatic connection to KoboldCpp/5001 and routes a generation request through SillyTavern. The fixture test validates integration, not model quality or real GGUF inference. CI then compiles the executable from embedded source resources.
 
 Local profile test:
 

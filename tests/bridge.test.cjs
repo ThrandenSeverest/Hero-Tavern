@@ -16,7 +16,7 @@ test('Library opens without a selected model and rejects unauthorized control re
         await once(server, 'listening');
         const origin = 'http://127.0.0.1:' + server.address().port;
         const page = await (await fetch(origin)).text();
-        assert.match(page, /Your chat interface is already open/);
+        assert.match(page, /chat connection is configured automatically/);
         const token = /const token='([a-f0-9]+)'/.exec(page)[1];
         const headers = { 'X-Hero-Token': token, 'Content-Type': 'application/json', Origin: origin };
         const state = await (await fetch(origin + '/status', { headers })).json();
@@ -52,4 +52,45 @@ test('Web downloader validates GGUF bytes, version, size and hash', async () => 
         await assert.rejects(verifyModel(file), /Invalid GGUF/);
         assert.throws(() => resolveModel(root, '../outside.gguf'), /Invalid model name/);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+async function waitFor(check, ms = 10000) {
+    const until = Date.now() + ms;
+    while (Date.now() < until) { if (await check()) return; await new Promise(r => setTimeout(r, 100)); }
+    throw new Error('Timed out waiting for engine state');
+}
+async function freePort() {
+    const server = require('node:net').createServer().listen(0, '127.0.0.1');
+    await once(server, 'listening'); const port = server.address().port;
+    await new Promise(r => server.close(r)); return port;
+}
+test('Selected model auto-starts a real child process with a spaced path and becomes ready', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hero engine with spaces '));
+    let server, headers, origin;
+    try {
+        for (const name of ['models.json', 'ModelPanel.html']) fs.copyFileSync(path.join(__dirname, '../manager', name), path.join(root, name));
+        fs.mkdirSync(path.join(root, 'Models'));
+        const model = path.join(root, 'Models/model with spaces.gguf'), bytes = Buffer.alloc(1024*1024);
+        bytes.write('GGUF');bytes.writeUInt32LE(3,4);fs.writeFileSync(model,bytes);
+        fs.writeFileSync(path.join(root,'Models/selected-model.txt'),model);
+        fs.writeFileSync(path.join(root,'backend.json'),JSON.stringify({mode:'cpu',gpuLayers:0,contextSize:4096}));
+        const enginePort=await freePort();
+        server=createBridge(root,{port:0,backendPort:enginePort,backendCommand:process.execPath,backendPrefix:[path.join(__dirname,'fixtures/fake-kobold.cjs')],pollInterval:100});
+        await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
+        const page=await(await fetch(origin)).text(),token=/const token='([a-f0-9]+)'/.exec(page)[1];
+        headers={'X-Hero-Token':token,'Content-Type':'application/json',Origin:origin};
+        let state;
+        await waitFor(async()=>{state=await(await fetch(origin+'/status',{headers})).json();return state.backendReady});
+        assert.equal(state.runningModel,'model with spaces.gguf');assert.equal(state.engineState,'ready');assert.equal(state.backendError,'');
+        assert.equal((await(await fetch('http://127.0.0.1:'+enginePort+'/api/v1/model')).json()).result,'fixture-kobold-model');
+        const logs=await(await fetch(origin+'/logs',{headers})).json();assert.match(logs.output,/Fixture model loaded/);
+        const hardware=await fetch(origin+'/hardware',{method:'POST',headers,body:JSON.stringify({mode:'cuda',gpuLayers:-1,contextSize:8192})});assert.equal(hardware.status,400);
+        await fetch(origin+'/stop',{method:'POST',headers,body:'{}'});
+        await waitFor(async()=>!(await(await fetch(origin+'/status',{headers})).json()).backendRunning);
+        const saved=await fetch(origin+'/hardware',{method:'POST',headers,body:JSON.stringify({mode:'cpu',gpuLayers:0,contextSize:2048})});assert.equal(saved.status,200);
+    } finally {
+        if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});
+        // Windows may need a moment to release inherited log handles.
+        fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+    }
 });

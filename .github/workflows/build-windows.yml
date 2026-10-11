@@ -34,6 +34,33 @@ jobs:
       - name: Test fresh SillyTavern profile configuration
         shell: pwsh
         run: node --test tests/configure.test.cjs tests/bridge.test.cjs
+      - name: Checkout upstream SillyTavern for browser integration test
+        uses: actions/checkout@v4
+        with:
+          repository: SillyTavern/SillyTavern
+          ref: release
+          path: .ci/SillyTavern
+      - name: Install integration test dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix .ci/SillyTavern --omit=dev --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'SillyTavern dependencies failed' }
+          npm install --prefix .ci/browser --no-audit --no-fund playwright
+          if ($LASTEXITCODE -ne 0) { throw 'Browser test dependencies failed' }
+          node .ci/browser/node_modules/playwright/cli.js install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Browser install failed' }
+      - name: Test real SillyTavern UI and automatic local engine connection
+        shell: pwsh
+        run: node tests/ui-smoke.cjs
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hero-Tavern-UI-QA
+          path: |
+            .ci/*-qa.png
+            .ci/sillytavern-smoke.log
+          if-no-files-found: ignore
       - name: Compile installer and embed published PowerShell script
         shell: pwsh
         run: |

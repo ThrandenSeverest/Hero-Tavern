@@ -5,6 +5,7 @@ function configure(st) {
     const destination = path.join(st, 'data', 'default-user', 'settings.json');
     if (fs.existsSync(destination)) return false;
     const settings = JSON.parse(fs.readFileSync(path.join(st, 'default', 'content', 'settings.json'), 'utf8'));
+    settings.firstRun = false;
     settings.main_api = 'textgenerationwebui';
     settings.max_context = 4096;
     settings.amount_gen = 512;

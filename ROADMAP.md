@@ -15,10 +15,12 @@
 
 ## Next: make first-run entirely graphical
 
-- Hardware selector and RAM/VRAM/context estimates.
-- One main window for install, models, hardware, start/stop and logs.
+- [x] CPU/CUDA/Vulkan selector, GPU layers and context controls.
+- RAM/VRAM estimates and automatic hardware recommendations.
+- [x] Unified SillyTavern-based navigation with models, hardware, start/stop and logs.
 - [x] SillyTavern extension exposing the model library inside its UI.
-- Explicit connection readiness and generation smoke test in the UI.
+- [x] Managed direct engine process with readiness, visible failures and automatic chat connection.
+- [x] Browser regression test with upstream SillyTavern and a real engine process fixture.
 - Graceful shutdown when closing the launcher, including console-window close events.
 
 ## Reliable releases

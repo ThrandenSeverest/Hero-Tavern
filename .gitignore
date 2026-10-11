@@ -12,3 +12,5 @@
 .env.*
 node_modules/
 CleanBrowserProfile/
+
+.ci/

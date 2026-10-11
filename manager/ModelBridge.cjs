@@ -25,7 +25,25 @@ function resolveModel(models, name) {
     if (fs.existsSync(file) && path.dirname(fs.realpathSync(file)) !== fs.realpathSync(models)) throw new Error('Model path escapes the Models folder.');
     return file;
 }
-function createBridge(root, { port = 8001, autoStart = true } = {}) {
+function backendArguments(root, model, port = 5001) {
+    const configPath = path.join(root, 'backend.json');
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '')) : { mode: 'cpu', gpuLayers: 0, contextSize: 4096 };
+    if (!['cpu', 'cuda', 'vulkan'].includes(config.mode)) throw new Error('Choose CPU, CUDA or Vulkan in Hardware settings.');
+    if (!Number.isInteger(config.contextSize) || config.contextSize < 512 || config.contextSize > 32768) throw new Error('Context size must be 512–32768.');
+    if (!Number.isInteger(config.gpuLayers) || config.gpuLayers < -1 || config.gpuLayers > 999) throw new Error('Invalid GPU layer count.');
+    const args = ['--model', model, '--contextsize', String(config.contextSize), '--host', '127.0.0.1', '--port', String(port), '--skiplauncher'];
+    if (config.mode === 'cpu') args.push('--gpulayers', '0');
+    else args.push(config.mode === 'cuda' ? '--usecuda' : '--usevulkan', '--gpulayers', String(config.gpuLayers));
+    return { config, args };
+}
+function logTail(file) {
+    if (!fs.existsSync(file)) return '';
+    const size = fs.statSync(file).size, length = Math.min(size, 12000);
+    const fd = fs.openSync(file, 'r'), bytes = Buffer.alloc(length);
+    try { fs.readSync(fd, bytes, 0, length, size - length); } finally { fs.closeSync(fd); }
+    return bytes.toString('utf8').trim();
+}
+function createBridge(root, { port = 8001, autoStart = true, backendCommand, backendPrefix = [], backendPort = 5001, pollInterval = 2000, readinessTimeout = 600000 } = {}) {
     const models = path.join(root, 'Models');
     const logs = path.join(root, 'Logs');
     fs.mkdirSync(models, { recursive: true });
@@ -33,7 +51,8 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
     const catalog = JSON.parse(fs.readFileSync(path.join(root, 'models.json'), 'utf8'));
     const token = crypto.randomBytes(32).toString('hex');
     let download = null, backend = null, state = 'No model selected', lastAttempt = '', backendReady = false, checking = false;
-    let manager = null, starting = false;
+    let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle';
+    const backendURL = 'http://127.0.0.1:' + backendPort;
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
         if (!fs.existsSync(selection)) return '';
@@ -46,7 +65,8 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
         const file = resolveModel(models, name);
         await verifyModel(file);
         fs.writeFileSync(selection, file, 'utf8');
-        state = backend ? 'Model selected. Stop AI, then Start AI to switch.' : 'Model selected; starting AI…';
+        state = backend ? 'Model selected. Click Load model to switch the running AI.' : 'Model selected; starting AI…';
+        if (!backend && autoStart) { lastAttempt = name; await runBackend(); }
     };
     const runBackend = async () => {
         if (backend || starting) return;
@@ -57,18 +77,26 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
         await verifyModel(resolveModel(models, name));
         // Do not start while another process owns KoboldCpp's port.
         try {
-            await fetch('http://127.0.0.1:5001/api/v1/model', { signal: AbortSignal.timeout(1500) });
+            await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
             throw new Error('Port 5001 is occupied. Close the other AI server first.');
         } catch (e) { if (e.message.startsWith('Port 5001')) throw e; }
+        const executable = backendCommand || path.join(root, 'KoboldCpp', 'koboldcpp.exe');
+        if (!fs.existsSync(executable)) throw new Error('KoboldCpp engine is missing. Run Hero Tavern setup to repair it.');
+        const { args } = backendArguments(root, resolveModel(models, name), backendPort);
+        backendError = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
         const out = fs.openSync(path.join(logs, 'koboldcpp.log'), 'w');
         const err = fs.openSync(path.join(logs, 'koboldcpp-error.log'), 'w');
         try {
-            backend = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'LaunchLocalAI.ps1')], { windowsHide: true, stdio: ['ignore', out, err] });
+            backend = spawn(executable, [...backendPrefix, ...args], { cwd: root, windowsHide: true, stdio: ['ignore', out, err] });
         } finally { fs.closeSync(out); fs.closeSync(err); }
         state = 'Loading AI model… The chat interface remains available.';
         backendReady = false;
-        backend.on('error', e => { state = e.message; backend = null; });
-        backend.on('exit', code => { backend = null; backendReady = false; state = code ? 'AI stopped with an error. Check Logs/koboldcpp-error.log.' : 'AI stopped.'; });
+        backend.on('error', e => { backendError = e.message; state = 'Could not start KoboldCpp: ' + e.message; engineState = 'error'; backend = null; });
+        backend.on('exit', code => {
+            backend = null; backendReady = false; engineState = code ? 'error' : 'stopped';
+            backendError = code ? (logTail(path.join(logs, 'koboldcpp-error.log')) || logTail(path.join(logs, 'koboldcpp.log')) || 'KoboldCpp exited with code ' + code) : '';
+            state = code ? 'KoboldCpp failed to load. Open Diagnostics for the error.' : 'AI stopped.';
+        });
         } finally { starting = false; }
     };
     const stopBackend = () => {
@@ -81,8 +109,8 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
         if (manager) throw new Error('Close the advanced manager before downloading here.');
         if (!Number.isInteger(index) || !catalog[index]) throw new Error('Invalid model choice.');
         const model = catalog[index];
-        const file = resolveModel(models, model.File);
-        if (fs.existsSync(file)) { await verifyModel(file, 0, model.Hash); await choose(model.File); return; }
+        const file = resolveModel(models, model.LocalFile || model.File);
+        if (fs.existsSync(file)) { await verifyModel(file, 0, model.Hash); await choose(model.LocalFile || model.File); return; }
         const pending = { name: model.File, file, part: file + '.part', size: 0, process: null, hash: model.Hash || '', cancelled: false, verifying: false, bytes: 0 };
         download = pending; // Reserve before awaiting metadata: double clicks cannot start two downloads.
         try {
@@ -111,7 +139,7 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
                     state = 'Verifying model SHA-256…'; pending.verifying = true;
                     await verifyModel(pending.part, pending.size, pending.hash);
                     fs.renameSync(pending.part, file);
-                    await choose(model.File);
+                    await choose(model.LocalFile || model.File);
                 } catch (e) {
                     if (fs.existsSync(pending.part)) fs.renameSync(pending.part, pending.part + '.corrupt-' + Date.now());
                     state = e.message;
@@ -125,6 +153,8 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
             catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
+            engineState, runningModel, backendError, apiURL: backendURL,
+            hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
     const server = http.createServer(async (req, res) => {
@@ -138,18 +168,44 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
-        if (req.method === 'GET' && req.url === '/status') { json(200, snapshot()); return; }
+        if (req.method === 'GET' && req.url === '/status') { try { json(200, snapshot()); } catch (e) { json(400, {error:e.message}); } return; }
+        if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 4096) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if (req.url === '/download') await beginDownload(data.index);
+            else if (req.url === '/custom') {
+                const url = new URL(data.url);
+                const match = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/resolve\/main\/([A-Za-z0-9_./-]+\.gguf)$/.exec(url.pathname);
+                if (url.protocol !== 'https:' || url.hostname !== 'huggingface.co' || url.username || url.password || url.search || url.hash || !match || url.pathname.includes('..')) throw new Error('Use a public HTTPS Hugging Face direct GGUF link.');
+                const repo = match[1] + '/' + match[2], remote = match[3];
+                const index = catalog.push({ Label: 'Custom: ' + path.basename(remote), Repo: repo, File: remote, LocalFile: match[1] + '_' + match[2] + '__' + path.basename(remote), Size: 0, License: 'See model card' }) - 1;
+                await beginDownload(index);
+            } else if (req.url === '/delete') {
+                if (backend && runningModel === data.name) throw new Error('Stop AI before deleting the loaded model.');
+                const file = resolveModel(models, data.name);
+                if (data.name === selected()) fs.unlinkSync(selection);
+                fs.unlinkSync(file); state = 'Model deleted.';
+            }
             else if (req.url === '/cancel') {
                 if (download?.verifying) throw new Error('Verification is finishing; please wait.');
                 if (download) { download.cancelled = true; download.process?.kill(); }
             } else if (req.url === '/select') await choose(data.name);
-            else if (req.url === '/start') { lastAttempt = selected(); await runBackend(); }
+            else if (req.url === '/start') {
+                if (backend && runningModel !== selected()) {
+                    const old = backend; const done = new Promise(resolve => old.once('exit', resolve)); stopBackend(); await done;
+                }
+                lastAttempt = selected(); await runBackend();
+            }
             else if (req.url === '/stop') { lastAttempt = selected(); stopBackend(); }
+            else if (req.url === '/hardware') {
+                if (backend || starting) throw new Error('Stop AI before changing hardware settings.');
+                const current = fs.existsSync(path.join(root, 'backend.json')) ? fs.readFileSync(path.join(root, 'backend.json')) : null;
+                try { fs.writeFileSync(path.join(root, 'backend.json'), JSON.stringify(data)); backendArguments(root, ''); }
+                catch (e) { if (current) fs.writeFileSync(path.join(root, 'backend.json'), current); else fs.unlinkSync(path.join(root, 'backend.json')); throw e; }
+                state = 'Hardware settings saved. Load your model to apply them.';
+            }
             else if (req.url === '/advanced') {
                 if (download) throw new Error('Finish or cancel the browser download first.');
                 if (!manager) {
@@ -166,16 +222,17 @@ function createBridge(root, { port = 8001, autoStart = true } = {}) {
             const name = selected();
             if (!backend && name && name !== lastAttempt) { lastAttempt = name; await runBackend(); }
             if (backend && !backendReady) {
-                const result = await fetch('http://127.0.0.1:5001/api/v1/model', { signal: AbortSignal.timeout(1500) });
-                if (result.ok) { backendReady = true; state = 'AI ready. Click Connect in SillyTavern API Connections.'; }
+                if (Date.now() - loadingSince > readinessTimeout) { backendError = 'Model loading timed out. Lower context or choose CPU in Hardware settings.'; state = backendError; stopBackend(); return; }
+                const result = await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
+                if (result.ok) { const data = await result.json(); if (data.result && data.result !== 'ReadOnly') { backendReady = true; engineState = 'ready'; state = 'AI ready. Hero Tavern is connecting your chat automatically.'; } }
             }
-        } catch (e) { if (!backend) state = e.message; } finally { checking = false; }
-    }, 2000);
+        } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
+    }, pollInterval);
     server.on('close', () => { clearInterval(timer); download?.process?.kill(); stopBackend(); manager?.kill(); });
     server.listen(port, '127.0.0.1');
     return server;
 }
-module.exports = { createBridge, verifyModel, resolveModel };
+module.exports = { createBridge, verifyModel, resolveModel, backendArguments };
 if (require.main === module) {
     const server = createBridge(process.argv[2] || __dirname);
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit()));

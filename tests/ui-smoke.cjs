@@ -39,7 +39,10 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');
   await page.mouse.move(1400,950);
   await page.screenshot({path:path.join(repo,'.ci/hero-models-qa.png')});
-  await page.locator('.hero-nav[data-hero="chat"]').click();await page.locator('#hero-welcome').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});
+  await page.locator('.hero-nav[data-hero="chat"]').click();await page.locator('#hero-welcome').waitFor({state:'visible'});
+  const front=await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')});
+  if(!front)throw Error('Hero Tavern welcome dashboard is covered by the native welcome view');
+  await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});
   if(errors.some(e=>/Hero Tavern|hero-|ModelBridge/.test(e)))throw Error(errors.join('\n'));
   console.log('PASS: real SillyTavern UI opens without a model, integrates model controls, starts engine fixture, repairs old API settings, connects and routes generation.');
  }finally{

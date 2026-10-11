@@ -1,0 +1,37 @@
+# Hero Tavern development plan
+
+## First development build
+
+- [x] Combined Windows setup for portable Node, SillyTavern and KoboldCpp.
+- [x] Default Qwen3 8B Abliterated Q4_K_M with a dedicated download button and published SHA-256.
+- [x] Model selection, cancellation/resume and custom public GGUF downloads.
+- [x] Fresh local API profile and Qwen instruction format.
+- [x] Shared launcher with startup checks, logs, loopback bindings and owned-process cleanup.
+- [x] Windows compilation workflow and regression tests.
+- [ ] Real Windows install → default download → character import → first generated reply smoke test.
+
+## Next: make first-run entirely graphical
+
+- Hardware selector and RAM/VRAM/context estimates.
+- One main window for install, models, hardware, start/stop and logs.
+- SillyTavern extension exposing the model library inside its UI.
+- Explicit connection readiness and generation smoke test in the UI.
+- Graceful shutdown when closing the launcher, including console-window close events.
+
+## Reliable releases
+
+- Lock tested SillyTavern, Node and KoboldCpp versions per release.
+- Transactional updates with rollback and backup/restore controls.
+- Installer cancellation and resumable component downloads, not only models.
+- Prevent simultaneous setup/model-manager instances from competing for files.
+- Build and sign release executables; publish downloadable release assets and SHA-256 manifests.
+- Automated fresh-install/repair tests using small fixture servers, plus a hardware smoke-test matrix.
+
+## Broader platform and model support
+
+- Linux/macOS installers and launchers.
+- Older-CPU and AMD-specific backend build selection.
+- More verified model presets, model-specific instruction templates and split GGUF support.
+- Optional offline bundle with upstream license notices and corresponding source supplied as required.
+
+The initial repository combines installation and operation. Upstream SillyTavern and KoboldCpp are downloaded unchanged. A source-level fork or deeply integrated UI is a later decision, not a requirement for the first launcher.

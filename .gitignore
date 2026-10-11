@@ -1,0 +1,14 @@
+# Never commit runtime installs, model weights, private chat data, API keys
+/dist/
+/Downloads/
+/Models/
+/SillyTavern/
+/Runtime/
+/KoboldCpp/
+*.gguf
+*.safetensors
+*.log
+*.env
+.env.*
+node_modules/
+CleanBrowserProfile/

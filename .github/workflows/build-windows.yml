@@ -1,0 +1,51 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout published source
+        uses: actions/checkout@v4
+      - name: Validate Windows PowerShell scripts
+        shell: powershell
+        run: |
+          $paths = @(Get-ChildItem installer,manager,tests -Filter '*.ps1' -Recurse | Select-Object -ExpandProperty FullName)
+          foreach ($path in $paths) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $errors | Format-List | Out-String | Write-Host
+              throw "PowerShell parse error: $path"
+            }
+          }
+      - name: Test model verification and profile preservation
+        shell: powershell
+        run: ./tests/ModelTools.Tests.ps1
+      - name: Test fresh SillyTavern profile configuration
+        shell: pwsh
+        run: node --test tests/configure.test.cjs
+      - name: Compile installer and embed published PowerShell script
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $compiler)) { throw 'Windows .NET Framework C# compiler not available' }
+          & $compiler /nologo /target:exe /platform:x64 /optimize+ "/out:dist\Hero-Tavern-Setup.exe" "/resource:installer\Install.ps1,InstallScript" "/resource:manager\ModelManager.ps1,ModelManagerScript" "/resource:manager\LaunchLocalAI.ps1,LocalAILaunchScript" "/resource:manager\StartHeroTavern.ps1,StartHeroTavern.ps1" "/resource:manager\ModelTools.ps1,ModelTools.ps1" "/resource:manager\models.json,models.json" "/resource:manager\ConfigureTavern.cjs,ConfigureTavern.cjs" "launcher\Bootstrap.cs"
+          if ($LASTEXITCODE -ne 0) { throw 'Compilation failed' }
+          Get-FileHash 'dist\Hero-Tavern-Setup.exe' -Algorithm SHA256 | Format-List
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hero-Tavern-Setup-Windows-x64
+          path: dist/Hero-Tavern-Setup.exe
+          if-no-files-found: error

@@ -1,0 +1,27 @@
+[
+  {
+    "Label": "DEFAULT: Qwen3 8B Abliterated Q4_K_M | ~5.03 GB | Apache-2.0",
+    "Repo": "richardyoung/Qwen3-8B-Abliterated-GGUF",
+    "File": "qwen3-8b-abliterated-Q4_K_M.gguf",
+    "Size": 5030000000,
+    "License": "Apache-2.0",
+    "Hash": "8625e48da4c4be9bcba2414fd8cad4095ff3a538d5b0111c2b26b5f6209538b9",
+    "Default": true
+  },
+  {
+    "Label": "Qwen3 4B Q4_K_M | ~2.5 GB | Apache-2.0",
+    "Repo": "Qwen/Qwen3-4B-GGUF",
+    "File": "Qwen3-4B-Q4_K_M.gguf",
+    "Size": 2500000000,
+    "License": "Apache-2.0",
+    "Default": false
+  },
+  {
+    "Label": "Qwen3 4B Q8_0 | ~4.3 GB | Apache-2.0",
+    "Repo": "Qwen/Qwen3-4B-GGUF",
+    "File": "Qwen3-4B-Q8_0.gguf",
+    "Size": 4280000000,
+    "License": "Apache-2.0",
+    "Default": false
+  }
+]

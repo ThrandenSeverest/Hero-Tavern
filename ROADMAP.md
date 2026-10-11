@@ -6,6 +6,9 @@
 - [x] Default Qwen3 8B Abliterated Q4_K_M with a dedicated download button and published SHA-256.
 - [x] Model selection, cancellation/resume and custom public GGUF downloads.
 - [x] Fresh local API profile and Qwen instruction format.
+- [x] UI-first launcher: SillyTavern opens without requiring a model; selected AI loads in the background.
+- [x] Embedded Models panel with browser downloads, progress and AI start/stop controls.
+- [x] PowerShell 5.1 JSON catalog/dropdown regression test.
 - [x] Shared launcher with startup checks, logs, loopback bindings and owned-process cleanup.
 - [x] Windows compilation workflow and regression tests.
 - [ ] Real Windows install → default download → character import → first generated reply smoke test.
@@ -14,7 +17,7 @@
 
 - Hardware selector and RAM/VRAM/context estimates.
 - One main window for install, models, hardware, start/stop and logs.
-- SillyTavern extension exposing the model library inside its UI.
+- [x] SillyTavern extension exposing the model library inside its UI.
 - Explicit connection readiness and generation smoke test in the UI.
 - Graceful shutdown when closing the launcher, including console-window close events.
 

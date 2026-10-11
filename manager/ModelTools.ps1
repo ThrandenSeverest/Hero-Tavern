@@ -25,3 +25,13 @@ function Get-SelectedModel([string]$Models) {
     Test-GgufFile $path
     return $path
 }
+
+function Read-ModelCatalog([string]$Path) {
+    # PS 5.1 emits a JSON array as one pipeline value. Enumerate explicitly.
+    $parsed = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    foreach ($entry in $parsed) {
+        if ($entry.Label -isnot [string] -or $entry.Size -is [array]) { throw 'Invalid model catalog entry.' }
+        [long]$entry.Size | Out-Null
+        $entry
+    }
+}

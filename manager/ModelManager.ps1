@@ -12,7 +12,7 @@ $SelectedFile = Join-Path $Models 'selected-model.txt'
 $Curl = Join-Path $env:SystemRoot 'System32\curl.exe'
 
 . (Join-Path $PSScriptRoot 'ModelTools.ps1')
-$catalog = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'models.json') -Raw | ConvertFrom-Json)
+$catalog = @(Read-ModelCatalog (Join-Path $PSScriptRoot 'models.json'))
 
 $form = New-Object Windows.Forms.Form
 $form.Text = 'Hero Tavern - Model Library'
@@ -106,7 +106,7 @@ function Get-InfoForModel([string]$repo,[string]$filename) {
     $result = [pscustomobject]@{Size=0L;Hash=$null}
     try {
         $api = 'https://huggingface.co/api/models/' + $repo + '/tree/main?recursive=true'
-        $response = @(Invoke-RestMethod -Uri $api -TimeoutSec 18 -Headers @{'User-Agent'='HeroTavern-ModelManager/1.1'})
+        $response = Invoke-RestMethod -Uri $api -TimeoutSec 18 -Headers @{'User-Agent'='HeroTavern-ModelManager/1.2'}
         $file = $response | Where-Object { $_.path -eq $filename } | Select-Object -First 1
         if($file) {
             if($file.size) { $result.Size=[long]$file.size }
@@ -253,6 +253,11 @@ $remove.Add_Click({
 $folder.Add_Click({Start-Process explorer.exe -ArgumentList ('"'+$Models+'"')})
 $start.Add_Click({
     $chat=Join-Path $Root 'Start-Chat.cmd'
+    try {
+        Invoke-WebRequest 'http://127.0.0.1:8000/' -UseBasicParsing -TimeoutSec 2 | Out-Null
+        Start-Process 'http://127.0.0.1:8000/'
+        return
+    } catch {}
     if(Test-Path -LiteralPath $chat) {Start-Process -FilePath $chat} else {Show-Error 'Start-Chat.cmd not found. Run the installer first.'}
 })
 $form.Add_FormClosing({

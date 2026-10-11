@@ -1,0 +1,9 @@
+{
+  "display_name": "Hero Tavern Models",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "Hero Tavern contributors",
+  "version": "0.2.0"
+}

@@ -112,7 +112,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -174,6 +174,10 @@ if errorlevel 1 pause
     if (-not (Test-Path (Join-Path $Root 'backend.json'))) {
         '{"mode":"cpu","gpuLayers":0,"contextSize":4096}' | Set-Content (Join-Path $Root 'backend.json')
     }
+    $extensionPath = Join-Path $ST 'public\scripts\extensions\hero-tavern'
+    New-Item -ItemType Directory -Force $extensionPath | Out-Null
+    Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.js') -Destination (Join-Path $extensionPath 'index.js') -Force
+    Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.json') -Destination (Join-Path $extensionPath 'manifest.json') -Force
     # Seed only a new default profile, never rewrite an existing profile.
     & $nodeExe (Join-Path $Root 'ConfigureTavern.cjs') $ST
     if ($LASTEXITCODE -ne 0) { throw 'Could not configure the local KoboldCpp connection.' }
@@ -188,8 +192,9 @@ HERO TAVERN
 ===========
 Installation: __ROOT__
 
-Manage-Models.cmd: download the default Qwen or another GGUF model.
-Start-Chat.cmd: start the selected local AI and SillyTavern together.
+Open Hero Tavern first, then click Models to download Qwen in the chat UI.
+Manage-Models.cmd remains available for advanced/custom downloads.
+Start-Chat.cmd: open SillyTavern immediately; AI loads separately.
 Hero Tavern desktop shortcut starts the same launcher.
 Keep the launcher window open; press Enter there to stop both servers.
 
@@ -219,8 +224,8 @@ Re-running setup preserves chats, settings, characters and models.
         Move-Item -LiteralPath $temporaryBackend -Destination $kcpp
         $latest.tag_name | Set-Content (Join-Path $Root 'koboldcpp-version.txt')
     }
-    Write-Host 'Hero Tavern installed. Download the default Qwen model, then click Start chat.' -ForegroundColor Green
-    Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'ModelManager.ps1') + '"')
+    Write-Host 'Hero Tavern installed. Opening the chat UI; use Models to download Qwen.' -ForegroundColor Green
+    Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'StartHeroTavern.ps1') + '"')
 } catch {
     $failed = $true
     Write-Host ''

@@ -71,6 +71,6 @@ const initHeroTavern = async () => {
         if(engine.backendReady)connectLocalAI(engine);
         else lastEngine='';
     });
-    setInterval(()=>{try{const c=context?.();if(c)welcome.hidden=c.characterId!==undefined&&c.characterId!==null||!!c.groupId;}catch{}},1000);
+    setInterval(()=>{try{const c=context?.();if(c)welcome.hidden=!!c.groupId||!!c.characters?.[c.characterId];}catch{}},1000);
 };
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initHeroTavern);else initHeroTavern();

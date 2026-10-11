@@ -35,9 +35,11 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   if(connected.api!=='textgenerationwebui'||connected.type!=='koboldcpp'||new URL(connected.url).origin!=='http://127.0.0.1:5001')throw Error('Incorrect auto connection: '+JSON.stringify(connected));
   const generated=await page.evaluate(async()=>{const {getRequestHeaders}=await import('/script.js');const r=await fetch('/api/backends/text-completions/generate',{method:'POST',headers:getRequestHeaders(),body:JSON.stringify({api_server:'http://127.0.0.1:5001',api_type:'koboldcpp',prompt:'hello',max_tokens:8,stream:false})});if(!r.ok)throw Error('Generation route failed');return r.json()});
   if(!JSON.stringify(generated).includes('Fixture generation works.'))throw Error('Generation did not reach the engine');
-  await panel.locator('#stop').click();await waitFor(async()=>await panel.locator('#start').isEnabled());
+  await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
+  if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');
+  await page.mouse.move(1400,950);
   await page.screenshot({path:path.join(repo,'.ci/hero-models-qa.png')});
-  await page.locator('.hero-nav[data-hero="chat"]').click();await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});
+  await page.locator('.hero-nav[data-hero="chat"]').click();await page.locator('#hero-welcome').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});
   if(errors.some(e=>/Hero Tavern|hero-|ModelBridge/.test(e)))throw Error(errors.join('\n'));
   console.log('PASS: real SillyTavern UI opens without a model, integrates model controls, starts engine fixture, repairs old API settings, connects and routes generation.');
  }finally{

@@ -51,7 +51,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const catalog = JSON.parse(fs.readFileSync(path.join(root, 'models.json'), 'utf8'));
     const token = crypto.randomBytes(32).toString('hex');
     let download = null, backend = null, state = 'No model selected', lastAttempt = '', backendReady = false, checking = false;
-    let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle';
+    let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
@@ -83,7 +83,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         const executable = backendCommand || path.join(root, 'KoboldCpp', 'koboldcpp.exe');
         if (!fs.existsSync(executable)) throw new Error('KoboldCpp engine is missing. Run Hero Tavern setup to repair it.');
         const { args } = backendArguments(root, resolveModel(models, name), backendPort);
-        backendError = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
+        backendError = ''; stopIntent = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
         const out = fs.openSync(path.join(logs, 'koboldcpp.log'), 'w');
         const err = fs.openSync(path.join(logs, 'koboldcpp-error.log'), 'w');
         try {
@@ -93,14 +93,20 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         backendReady = false;
         backend.on('error', e => { backendError = e.message; state = 'Could not start KoboldCpp: ' + e.message; engineState = 'error'; backend = null; });
         backend.on('exit', code => {
-            backend = null; backendReady = false; engineState = code ? 'error' : 'stopped';
-            backendError = code ? (logTail(path.join(logs, 'koboldcpp-error.log')) || logTail(path.join(logs, 'koboldcpp.log')) || 'KoboldCpp exited with code ' + code) : '';
-            state = code ? 'KoboldCpp failed to load. Open Diagnostics for the error.' : 'AI stopped.';
+            backend = null; backendReady = false;
+            if (stopIntent === 'stop') { engineState = 'stopped'; backendError = ''; state = 'AI stopped.'; }
+            else if (stopIntent === 'timeout') { engineState = 'error'; state = backendError; }
+            else {
+                engineState = code ? 'error' : 'stopped';
+                backendError = code ? (logTail(path.join(logs, 'koboldcpp-error.log')) || logTail(path.join(logs, 'koboldcpp.log')) || 'KoboldCpp exited with code ' + code) : '';
+                state = code ? 'KoboldCpp failed to load. Open Diagnostics for the error.' : 'AI stopped.';
+            }
         });
         } finally { starting = false; }
     };
-    const stopBackend = () => {
+    const stopBackend = (intent = 'stop') => {
         if (!backend) return;
+        stopIntent = intent;
         if (process.platform === 'win32') spawn('taskkill.exe', ['/PID', String(backend.pid), '/T', '/F'], { windowsHide: true });
         else backend.kill();
     };
@@ -222,7 +228,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const name = selected();
             if (!backend && name && name !== lastAttempt) { lastAttempt = name; await runBackend(); }
             if (backend && !backendReady) {
-                if (Date.now() - loadingSince > readinessTimeout) { backendError = 'Model loading timed out. Lower context or choose CPU in Hardware settings.'; state = backendError; stopBackend(); return; }
+                if (Date.now() - loadingSince > readinessTimeout) { backendError = 'Model loading timed out. Lower context or choose CPU in Hardware settings.'; state = backendError; stopBackend('timeout'); return; }
                 const result = await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
                 if (result.ok) { const data = await result.json(); if (data.result && data.result !== 'ReadOnly') { backendReady = true; engineState = 'ready'; state = 'AI ready. Hero Tavern is connecting your chat automatically.'; } }
             }

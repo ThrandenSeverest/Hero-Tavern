@@ -87,6 +87,7 @@ test('Selected model auto-starts a real child process with a spaced path and bec
         const hardware=await fetch(origin+'/hardware',{method:'POST',headers,body:JSON.stringify({mode:'cuda',gpuLayers:-1,contextSize:8192})});assert.equal(hardware.status,400);
         await fetch(origin+'/stop',{method:'POST',headers,body:'{}'});
         await waitFor(async()=>!(await(await fetch(origin+'/status',{headers})).json()).backendRunning);
+        const stopped=await(await fetch(origin+'/status',{headers})).json();assert.equal(stopped.engineState,'stopped');assert.equal(stopped.backendError,'');
         const saved=await fetch(origin+'/hardware',{method:'POST',headers,body:JSON.stringify({mode:'cpu',gpuLayers:0,contextSize:2048})});assert.equal(saved.status,200);
     } finally {
         if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});

@@ -110,9 +110,28 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
             if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:renderPrompt(inspected,profile),template:profile.Template,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
-            const raw=await sendChecked({...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:mode==='adventure-json'?0.35:settings.temperature,top_p:mode==='adventure-json'?0.9:settings.top_p,top_k:mode==='adventure-json'?20:settings.top_k,min_p:mode==='adventure-json'?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty});
+            const request={...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:mode==='adventure-json'?0.35:settings.temperature,top_p:mode==='adventure-json'?0.9:settings.top_p,top_k:mode==='adventure-json'?20:settings.top_k,min_p:mode==='adventure-json'?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
+            const raw=await sendChecked(request);
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);
+            if(!text){
+                // Thinking-only generations exhaust the answer budget on some Qwen/RP checkpoints.
+                // Re-prompt once, with no hidden reasoning and a larger bounded reply budget.
+                // The original empty/hidden reasoning is never displayed or saved as dialogue.
+                stage('recovering-empty-reply');
+                lastRun.emptyReplyRecovery={originalLength:raw.length,reason:raw.trim()?'Only hidden reasoning/tokens were produced.':'Local engine returned empty text.'};
+                let recoveryBodyPrompt=body.prompt;
+                if(/Qwen3/i.test(profile.Family||'')){
+                    recoveryBodyPrompt=recoveryBodyPrompt.replace(/(<\|im_end\|>\s*<\|im_start\|>assistant\s*)$/i,'\n/no_think\n$1');
+                }
+                const retryPrompt=replyPrompt(recoveryBodyPrompt,extra+'\n[Output recovery: The previous attempt produced no visible answer. Disable thinking. Answer the latest task DIRECTLY. Never emit <think> tags, scratchpad, or analysis. For image-prompt tasks return only the visual prompt; for JSON tasks return only one complete JSON object. /no_think]');
+                const capacity=Math.max(128,contextSize-await countTokens(retryPrompt)-64);
+                const retryTokens=Math.min(capacity,Math.max(replyTokens,mode==='adventure-json'?2048:1024));
+                const retryRaw=await sendChecked({...request,prompt:retryPrompt,stream:false,max_tokens:retryTokens,temperature:0.45,top_p:0.9,min_p:0,top_k:20});
+                text=filterReply(retryRaw,{...filters,stopMarkers:[]});
+                lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text};
+                if(!text)throw Error('Both initial and recovery generations returned only hidden reasoning or empty text. Try a non-thinking model or turn off reasoning in the model settings.');
+            }
             const history=body.hero_context?.messages||[...body.prompt.matchAll(/<\|im_start\|>(user|assistant)\n([\s\S]*?)<\|im_end\|>/g)].map(x=>({role:x[1],text:x[2]}));
             const repetitive=mode==='chat'&&settings.avoidRepetition?repetitionIssue(text,history,settings.repetitionSensitivity):'';
             const meta=mode==='chat'&&settings.repairMetaReplies&&isMetaReply(text);

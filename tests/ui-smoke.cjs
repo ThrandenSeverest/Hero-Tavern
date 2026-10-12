@@ -5,7 +5,7 @@ const {chromium}=require('../.ci/browser/node_modules/playwright');
 const {configure}=require('../manager/ConfigureTavern.cjs');
 const {createBridge}=require('../manager/ModelBridge.cjs');
 const repo=path.resolve(__dirname,'..'),st=path.join(repo,'.ci/SillyTavern'),root=path.join(repo,'.ci/Hero Tavern UI');
-async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}throw Error('Timed out waiting for UI/engine')}
+async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}let detail='';try{const html=await(await fetch('http://127.0.0.1:8001/')).text(),token=/const token='([^']+)'/.exec(html)?.[1];detail=JSON.stringify(await(await fetch('http://127.0.0.1:8001/status',{headers:{'X-Hero-Token':token}})).json())}catch{}throw Error('Timed out waiting for UI/engine: '+detail)}
 (async()=>{
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
  for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));

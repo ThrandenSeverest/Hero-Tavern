@@ -113,7 +113,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     };
     const stopBackend = (intent = 'stop') => {
         if (!backend) return;
-        stopIntent = intent;
+        stopIntent = intent; backendReady=false; engineState=intent==='stop'?'stopping':'error'; state=intent==='stop'?'Stopping AI…':backendError; pipeline.abort();
         if (process.platform === 'win32') spawn('taskkill.exe', ['/PID', String(backend.pid), '/T', '/F'], { windowsHide: true });
         else backend.kill();
     };
@@ -256,10 +256,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             const name = selected();
             if (!backend && name && name !== lastAttempt) { lastAttempt = name; await runBackend(); }
-            if (backend && !backendReady) {
+            if (backend && !backendReady && !stopIntent) {
                 if (Date.now() - loadingSince > readinessTimeout) { backendError = 'Model loading timed out. Lower context or choose CPU in Hardware settings.'; state = backendError; stopBackend('timeout'); return; }
+                const checkedBackend=backend;
                 const result = await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
-                if (result.ok) { const data = await result.json(); if (data.result && data.result !== 'ReadOnly') { backendReady = true; engineState = 'ready'; state = 'AI ready. Hero Tavern is connecting your chat automatically.'; } }
+                if (result.ok && backend===checkedBackend && !stopIntent) { const data = await result.json(); if (data.result && data.result !== 'ReadOnly') { backendReady = true; engineState = 'ready'; state = 'AI ready. Hero Tavern is connecting your chat automatically.'; } }
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);

@@ -200,10 +200,10 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
       let actualEngine='koboldcpp';
-      const requiresComfy=!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint';
+      const requiresComfy=!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint';
       if(engine!=='koboldcpp'||requiresComfy){
         const ok=await comfy.available();
-        if(ok&&comfyCheckpoint)actualEngine='comfyui';
+        if(ok&&(comfyCheckpoint||input.workflowId))actualEngine='comfyui';
         else if(engine==='comfyui'||requiresComfy)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or choose a basic KoboldCpp text-to-image job.');
       }
       if(requiresComfy&&actualEngine!=='comfyui')throw Error('LoRA, batches, upscaling and image editing require ComfyUI.');
@@ -315,6 +315,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog()});return;}
+         if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
          if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true'}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/studio/progress'){const st=studio.snapshot(),img=images.snapshot();let progress=null,step=null,totalSteps=null;
@@ -329,7 +330,9 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
-            if(req.url==='/comfy/free'){json(200,await comfy.freeMemory(data));return;}
+            if(req.url==='/comfy/workflow-import'){json(200,comfy.workflows.importWorkflow(data));return;}
+             if(req.url==='/comfy/workflow-delete'){json(200,comfy.workflows.remove(data));return;}
+             if(req.url==='/comfy/free'){json(200,await comfy.freeMemory(data));return;}
              if(req.url==='/comfy/cancel'){json(200,await comfy.cancel());return;}
              if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
             if(req.url==='/storage/clean-runtime'){if(backend||starting||images.snapshot().running||thinking.snapshot().running||imageJob)throw Error('Stop text, image and planning AI engines before cleaning their extraction caches.');json(200,diskCare.cleanRuntime({confirm:data.confirm,enginesStopped:true}));return;}

@@ -40,12 +40,15 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  }
  const checkpoints=()=>modelList('checkpoints').then(names=>names.filter(n=>/\.safetensors$/i.test(n)));
  async function catalog(){
-  if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.localStatus(),modelHub:models.snapshot(),offlineInventory:true};
+  if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.localStatus().map(pack=>({...pack,downloaded:pack.installed})),modelHub:models.snapshot(),offlineInventory:true};
   const groups=['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'];
   const entries=await Promise.allSettled(groups.map(group=>modelList(group)));
   const lists=Object.fromEntries(groups.map((name,i)=>[name,entries[i].status==='fulfilled'?entries[i].value:[]]));
   return {available:true,checkpoints:lists.checkpoints,loras:lists.loras,upscalers:lists.upscale_models,
-    packs:models.composeStatus(lists),modelHub:models.snapshot(),lists,
+    packs:models.composeStatus(lists).map(pack=>{
+      const disk=models.localStatus().find(item=>item.id===pack.id);
+      return {...pack,downloaded:!!disk?.installed,installed:pack.installed,missing:pack.missing};
+    }),modelHub:models.snapshot(),lists,
     devices:(lastStats?.devices||[]).map(x=>({name:x.name,type:x.type,vramTotal:x.vram_total,vramFree:x.vram_free})),
     warnings:entries.filter(x=>x.status==='rejected').map(x=>x.reason.message)};
  }

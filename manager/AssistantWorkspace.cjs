@@ -147,6 +147,8 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
   finally{active=null;phase='idle'}
  }
  async function action(route,data={}){
+  if(active&&['/assistant/new','/assistant/select','/assistant/delete','/assistant/file-import','/assistant/file-delete','/assistant/file-apply','/assistant/file-restore'].includes(route))
+   throw Error('An assistant response is active. Finish or cancel it before changing conversations or files.');
   if(route==='/assistant/status')return snapshot();
   if(route==='/assistant/chats')return sessions();
   if(route==='/assistant/new')return createChat();

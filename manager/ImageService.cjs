@@ -2,6 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const {engineFetch}=require('./EngineHTTP.cjs');
 const CATALOG=[
+ {name:'Juggernaut XL v9 · SDXL quality · ~7.11 GB · no LoRA needed',file:'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',repo:'RunDiffusion/Juggernaut-XL-v9',revision:'e5bdb43736462585b2f05d1d97a0527c84c5a147',hash:'c9e3e68f89b8e38689e1097d4be4573cf308de4e3fd044c64ca697bdb4aa8bca',size:7110000000,steps:32,cfg:5,width:832,height:1216,sampler:'DPM++ 2M Karras'},
  {name:'DreamShaper 8 · recommended · 2.13 GB',file:'DreamShaper_8_pruned.safetensors',repo:'Lykon/DreamShaper',hash:'879db523c30d3b9017143d56705015e15a2cb5628762c11d086fed9538abd7fd',size:2130000000,steps:24,cfg:7,width:512,height:768,sampler:'DPM++ 2M Karras'},
  {name:'DreamShaper XL Turbo · higher detail · 6.94 GB',file:'DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors',repo:'Lykon/DreamShaper',hash:'676f0d60c8e860146d5e8a0d802599cadd04e7cadf85c283f189f41f01c9e359',size:6940000000,steps:8,cfg:2,width:768,height:1024,sampler:'LCM'},
  {name:'SDXL Base 1.0 · natural digital art · 6.94 GB',file:'sd_xl_base_1.0.safetensors',repo:'stabilityai/stable-diffusion-xl-base-1.0',revision:'462165984030d82259a11f4367a4eed129e94a7b',hash:'31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b',size:6938078334,steps:28,cfg:6,width:1024,height:1024,sampler:'DPM++ 2M Karras'}

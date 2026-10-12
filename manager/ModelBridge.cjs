@@ -318,7 +318,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
          if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
-        if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true'}))}catch(e){json(400,{error:e.message})}return;}
+        if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true',limit:Math.min(200,Math.max(1,Number(qs.get('limit'))||100))}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/studio/progress'){const st=studio.snapshot(),img=images.snapshot();let progress=null,step=null,totalSteps=null;
           const liveComfy=comfy.snapshot().active;
           if(img.busy){try{const response=await engineFetch('http://127.0.0.1:'+imagePort+'/sdapi/v1/progress',{timeoutMs:1200});if(response.ok){const p=await response.json();if(Number.isFinite(p.progress))progress=Math.max(0,Math.min(1,p.progress));step=p.state?.sampling_step??null;totalSteps=p.state?.sampling_steps??null;}}catch{}}

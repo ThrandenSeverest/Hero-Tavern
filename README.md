@@ -92,6 +92,14 @@ Generate portraits or scenes, adjust prompt, negative prompt, dimensions, steps,
 
 **Character studio** offers simple character fields and advanced JSON, AI drafts, isolated test replies and reviewed episode openings with starting state and persona constraints. Save edits to a selected native card, or export/import compatible V2 JSON. Portrait editing remains in native Characters.
 
+## Managed ComfyUI and simple model switching (October 2026)
+
+**Image Studio → ComfyUI · model hub** now offers named local image models: SDXL / Stable Diffusion, FLUX.2 Klein 4B (including reference editing), and Z-Image Turbo (text-to-image). The app builds the corresponding ComfyUI core-node workflow internally; no node graph or API JSON import is needed for those built-in choices. Chat image generation also has the model picker.
+
+Already-running ComfyUI on `127.0.0.1:8188` can be reused. Otherwise the UI can install official Windows NVIDIA ComfyUI Portable with explicit user confirmation, disk preflight, and 7-Zip or compatible Windows archive extraction; it can manage the process lifecycle afterward. On-demand startup occurs after the GPU text engine unloads to preserve 12 GB VRAM. A separate managed model hub checks installed components, downloads missing weights from official Hugging Face packages with size/SHA-256 verification and resume, and keeps all downloaded user assets.
+
+See [managed ComfyUI guide](docs/MANAGED_COMFYUI_ONE_CLICK_2026-10-13.md). **Actual Windows inference, downloadable installer build, and long-cycle VRAM/disk acceptance testing remain unverified** until CI and on-device smoke tests pass. New source commits alone are not a validated EXE.
+
 ## Development
 
 Our launcher and integration code are MIT licensed. Upstream components retain their licenses; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

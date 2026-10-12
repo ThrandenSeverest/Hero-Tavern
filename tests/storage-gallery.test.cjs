@@ -63,3 +63,15 @@ test('Image Studio includes gallery and disk cleanup route, progress stage and s
  for(const route of ['/gallery/list','/storage/report','/storage/cleanup','/studio/progress'])assert.ok(bridge.includes(route),route);
  assert.match(html,/confirm\('Delete only confirmed temporary files/);
 });
+test('npm cache cleanup needs separate consent and does not alter installed modules or Hero Tavern models',()=>{
+ const root=temp(),local=temp(),old=process.env.LOCALAPPDATA;
+ try{
+  const cache=path.join(local,'npm-cache');fs.mkdirSync(cache);fs.writeFileSync(path.join(cache,'entry'),'cached package');
+  fs.mkdirSync(path.join(root,'Models'));fs.writeFileSync(path.join(root,'Models','text.gguf'),'saved model');
+  process.env.LOCALAPPDATA=local;const care=createDiskCare(root);
+  assert.throws(()=>care.clearNpmCache(),/consent/);
+  assert.ok(fs.existsSync(cache));
+  const result=care.clearNpmCache({confirm:true});assert.ok(result.freedBytes>0);
+  assert.equal(fs.existsSync(cache),false);assert.ok(fs.existsSync(path.join(root,'Models','text.gguf')));
+ }finally{if(old===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=old;fs.rmSync(root,{recursive:true,force:true});fs.rmSync(local,{recursive:true,force:true})}
+});

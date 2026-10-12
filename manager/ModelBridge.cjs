@@ -10,6 +10,10 @@ const {createStoryAPI}=require('./StoryAPI.cjs');
 const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
+const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
+const {systemInfo,performancePreset}=require('./Performance.cjs');
+const {createAutoTune}=require('./AutoTune.cjs');
+const {createStudio}=require('./ImageStudio.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
@@ -36,11 +40,16 @@ function backendArguments(root, model, port = 5001) {
     const configPath = path.join(root, 'backend.json');
     const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '')) : { mode: 'cpu', gpuLayers: 0, contextSize: 4096 };
     if (!['cpu', 'cuda', 'vulkan'].includes(config.mode)) throw new Error('Choose CPU, CUDA or Vulkan in Hardware settings.');
-    if (!Number.isInteger(config.contextSize) || config.contextSize < 512 || config.contextSize > 32768) throw new Error('Context size must be 512–32768.');
+    if (!Number.isInteger(config.contextSize) || config.contextSize < 512 || config.contextSize > 524288) throw new Error('Context size must be 512–524288.');
     if (!Number.isInteger(config.gpuLayers) || config.gpuLayers < -1 || config.gpuLayers > 999) throw new Error('Invalid GPU layer count.');
     const args = ['--model', model, '--contextsize', String(config.contextSize), '--host', '127.0.0.1', '--port', String(port), '--skiplauncher'];
     if (config.mode === 'cpu') args.push('--gpulayers', '0');
     else args.push(config.mode === 'cuda' ? '--usecuda' : '--usevulkan', '--gpulayers', String(config.gpuLayers));
+    if(config.flashAttention===false)args.push('--noflashattention');else if(config.flashAttention===true)args.push('--flashattention');
+    if(config.quantKV!==undefined){if(![0,1,2].includes(config.quantKV))throw Error('Choose F16, Q8 or Q4 KV cache.');args.push('--quantkv',String(config.quantKV));}
+    for(const [key,flag]of [['threads','--threads'],['batchThreads','--blasthreads']])if(config[key]){if(!Number.isInteger(config[key])||config[key]<1||config[key]>256)throw Error('Invalid CPU thread count.');args.push(flag,String(config[key]));}
+    if(config.batchSize!==undefined){if(![16,32,64,128,256,512,1024,2048,4096].includes(config.batchSize))throw Error('Unsupported prompt batch size.');args.push('--blasbatchsize',String(config.batchSize));}
+    if(config.requestTimeoutSeconds!==undefined&&(!Number.isInteger(config.requestTimeoutSeconds)||config.requestTimeoutSeconds<30||config.requestTimeoutSeconds>7200))throw Error('Use a 30–7200 second request timeout.');
     return { config, args };
 }
 function logTail(file) {
@@ -60,7 +69,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let download = null, backend = null, state = 'No model selected', lastAttempt = '', backendReady = false, checking = false;
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
-    let generationState = 'idle', contextDiagnostics = null;
+    let generationState = 'idle', contextDiagnostics = null,imageJob=false,textPausedForImages=false,launchConfig=null,launchArgs=[];
     const {profileFor}=require('./ModelProfiles.cjs');let loadedContext=0;
     const story=createStoryStore(root,{tavernPath});
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
@@ -91,13 +100,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         await verifyModel(resolveModel(models, name));
         // Do not start while another process owns KoboldCpp's port.
         try {
-            await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
+            await engineFetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
             throw new Error('Port 5001 is occupied. Close the other AI server first.');
         } catch (e) { if (e.message.startsWith('Port 5001')) throw e; }
         const executable = backendCommand || path.join(root, 'KoboldCpp', 'koboldcpp.exe');
         if (!fs.existsSync(executable)) throw new Error('KoboldCpp engine is missing. Run Hero Tavern setup to repair it.');
         const { args,config } = backendArguments(root, resolveModel(models, name), backendPort);
-        loadedContext=config.contextSize;backendError = ''; stopIntent = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
+        launchConfig=config;launchArgs=args;loadedContext=config.contextSize;backendError = ''; stopIntent = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
         const out = fs.openSync(path.join(logs, 'koboldcpp.log'), 'w');
         const err = fs.openSync(path.join(logs, 'koboldcpp-error.log'), 'w');
         try {
@@ -135,7 +144,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         download = pending; // Reserve before awaiting metadata: double clicks cannot start two downloads.
         try {
             try {
-                const meta = await fetch('https://huggingface.co/api/models/' + model.Repo + '/tree/'+(model.Revision||'main')+'?recursive=true', { signal: AbortSignal.timeout(15000) });
+                const meta = await engineFetch('https://huggingface.co/api/models/' + model.Repo + '/tree/'+(model.Revision||'main')+'?recursive=true', { signal: AbortSignal.timeout(15000) });
                 if (meta.ok) {
                     const files = await meta.json();
                     const entry = files.find(x => x.path === model.File);
@@ -168,19 +177,29 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             state = 'Downloading ' + model.File;
         } catch (e) { if (download === pending) download = null; throw e; }
     };
+    const waitUntil=async(check,signal,limit=600000)=>{const end=Date.now()+limit;while(!check()){if(signal?.aborted)throw Error('Job cancelled.');if(Date.now()>end)throw Error('Engine readiness timed out. Check startup logs.');await new Promise(r=>setTimeout(r,100));}};
+    const ensureText=async signal=>{if(backendReady)return;if(images.snapshot().running&&studio.snapshot().settings.releaseGPU){await images.action('/images/stop',{});await waitUntil(()=>!images.snapshot().running,signal,30000);}if(!backend)await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Text engine exited while loading.');return backendReady;},signal);};
+    const generateStudioImage=async(input,signal,releaseGPU,onReady)=>{if(imageJob)throw Error('Another image job is active.');if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');imageJob=true;const restoreText=!!backend||textPausedForImages,restorePlanner=thinking.snapshot().running;try{if(releaseGPU&&backend){lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,signal,30000);}if(releaseGPU&&thinking.snapshot().running){thinking.stop();await waitUntil(()=>!thinking.snapshot().running,signal,30000);}if(!images.snapshot().ready)await images.action('/images/start',{});await waitUntil(()=>{const s=images.snapshot();if(s.error)throw Error(s.error);return s.ready;},signal);onReady?.();const cancel=()=>images.action('/images/cancel',{}).catch(()=>{});signal?.addEventListener('abort',cancel,{once:true});try{return await images.action('/images/generate',input);}finally{signal?.removeEventListener('abort',cancel);}}finally{if(releaseGPU){await images.action('/images/stop',{});await waitUntil(()=>!images.snapshot().running,null,30000);onReady?.('restoring-text');if(restoreText){try{await ensureText();}catch(e){backendError='Could not restore text model: '+e.message;}}}if(restorePlanner){try{await thinking.start();}catch(e){backendError='Planning model restore failed: '+e.message;}}textPausedForImages=false;imageJob=false;}};
+    const studio=createStudio(root,{pipeline,ensureText,generateImage:generateStudioImage});
+    const tuner=createAutoTune(root,{systemInfo,readGeneration:()=>readSettings(root),saveGeneration:value=>saveSettings(root,value),abort:()=>pipeline.abort(),stop:async()=>{lastAttempt=selected();stopBackend();if(images.snapshot().running)await images.action('/images/stop',{});await waitUntil(()=>!backend&&!images.snapshot().running,null,30000);},load:async(signal,limit)=>{await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Engine failed to load.');return backendReady;},signal,limit);},benchmark:async signal=>{const started=Date.now();const r=await pipeline.generate({prompt:'<|im_start|>user\n'+('A traveller enters an inn and remembers a blue cloak. '.repeat(120))+'\nWrite a brief vivid continuation with a new action.<|im_end|>\n<|im_start|>assistant\n',stream:false,seed:1234},signal,{mode:'utility'});return {...r,elapsedMs:Date.now()-started};}});
+    const diagnosticEnvironment=async()=>({system:await systemInfo(),text:{running:!!backend,ready:backendReady,model:runningModel,pid:backend?.pid,phase:generationState,configured:backendArguments(root,'').config,loaded:launchConfig,args:launchArgs,url:backendURL,error:backendError},image:images.snapshot(),planner:thinking.snapshot(),pipeline:pipeline.runSnapshot(),context:contextDiagnostics,enginePerformance:backendReady?await engineFetch(backendURL+'/api/extra/perf',{timeoutMs:3000}).then(r=>r.json()).catch(e=>({error:e.message})):null,logs:{text:logTail(path.join(logs,'koboldcpp.log')),textError:logTail(path.join(logs,'koboldcpp-error.log')),image:logTail(path.join(logs,'image-engine.log'))}});
     const snapshot = () => {
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
-            profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
+            tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
             engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(), thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
+    async function nativeImages(req,res){const reply=(status,value)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};if(req.headers.origin){reply(403,{error:'Use the chat server for image API calls.'});return;}const endpoint=req.url.split('?')[0];try{const names=images.snapshot().installed;if(req.method==='GET'){if(endpoint.endsWith('/sd-models')){reply(200,names.map(name=>({title:name,model_name:name,filename:name})));return;}if(endpoint.endsWith('/samplers')){reply(200,['Euler','Euler a','DPM++ 2M Karras','DPM++ 2S ancestral Karras','LCM'].map(name=>({name,aliases:[],options:{}})));return;}if(endpoint.endsWith('/schedulers')){reply(200,[{name:'normal',label:'Normal'},{name:'karras',label:'Karras'}]);return;}if(endpoint.endsWith('/options')){reply(200,{sd_model_checkpoint:images.snapshot().selected});return;}if(endpoint.endsWith('/sd-vae')||endpoint.endsWith('/upscalers')||endpoint.endsWith('/latent-upscale-modes')){reply(200,[]);return;}if(endpoint.endsWith('/progress')){reply(200,{progress:studio.snapshot().busy?0.5:0,state:{job:studio.snapshot().phase}});return;}}
+      let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>2000000)throw Error('Image request too large.');}const data=JSON.parse(raw||'{}');if(endpoint.endsWith('/interrupt')){studio.cancel();await images.action('/images/cancel',{});reply(200,{});return;}if(endpoint.endsWith('/options')){if(data.sd_model_checkpoint&&names.includes(data.sd_model_checkpoint))await images.action('/images/select',{name:data.sd_model_checkpoint});reply(200,{});return;}if(endpoint.endsWith('/txt2img')){const result=await studio.action('/studio/generate',data),bytes=fs.readFileSync(path.join(images.outputs,path.basename(result.url)));reply(200,{images:[bytes.toString('base64')],info:JSON.stringify(result),parameters:data});return;}reply(404,{error:'Unsupported image endpoint.'});}catch(e){reply(400,{error:e.message,failure:errorDetails(e)});}}
     const server = http.createServer(async (req, res) => {
         const host = req.headers.host;
         if (host !== '127.0.0.1:' + server.address().port) { res.writeHead(403); res.end('Invalid host'); return; }
+        if(tuner.snapshot()?.status==='running'&&req.url==='/inference/v1/completions'){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Hardware tuning is running; wait or cancel it in Hardware.'}}));return;}
         if (await pipeline.handle(req,res)) return;
+        if(req.url.startsWith('/sdapi/v1/')){await nativeImages(req,res);return;}
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors http://127.0.0.1:8000 http://localhost:8000");
         const json = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -198,16 +217,21 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:2000000)) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
+            if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
+            if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}
+            if(req.url==='/performance/system'){json(200,await diagnosticEnvironment());return;}
+            if(req.url==='/performance/apply'){const preset=performancePreset(data.preset,await systemInfo());if(data.contextSize!==undefined)preset.contextSize=data.contextSize;lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,null,30000);const configFile=path.join(root,'backend.json'),before=fs.existsSync(configFile)?fs.readFileSync(configFile):null;fs.writeFileSync(configFile,JSON.stringify(preset));try{backendArguments(root,'');}catch(e){if(before)fs.writeFileSync(configFile,before);throw e;}const gen=readSettings(root),isQwen=profileFor(root,selected()).Family?.includes('Qwen');saveSettings(root,{...gen,temperature:isQwen?0.7:0.8,top_p:isQwen?0.8:0.95,min_p:isQwen?0:0.05,top_k:20,maxReplyTokens:768,memoryTokens:384,recentMessages:24,thinkingMode:'off'});await runBackend();json(200,{preset,environment:await diagnosticEnvironment()});return;}
             if(req.url.startsWith('/story/')){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});json(200,await storyAPI.action(req.url,data,controller.signal));return;}
-            if(req.url==='/diagnostics/check'){const probe=async(url)=>{try{const r=await fetch(url,{signal:AbortSignal.timeout(3000)});return {ok:r.ok,status:r.status,detail:await r.json()};}catch(e){return {ok:false,error:e.message}}};json(200,{at:new Date().toISOString(),text:await probe(backendURL+'/api/v1/model'),image:await probe('http://127.0.0.1:'+imagePort+'/sdapi/v1/sd-models'),model:runningModel,profile:profileFor(root,runningModel),contextSize:loadedContext,thinking:thinking.snapshot(),generation:readSettings(root),context:contextDiagnostics});return;}
+            if(req.url==='/diagnostics/check'){const probe=async(url)=>{try{const r=await engineFetch(url,{signal:AbortSignal.timeout(3000)});return {ok:r.ok,status:r.status,detail:await r.json()};}catch(e){return {ok:false,error:e.message}}};json(200,{environment:await diagnosticEnvironment(),at:new Date().toISOString(),text:await probe(backendURL+'/api/v1/model'),image:await probe('http://127.0.0.1:'+imagePort+'/sdapi/v1/sd-models'),model:runningModel,profile:profileFor(root,runningModel),contextSize:loadedContext,thinking:thinking.snapshot(),generation:readSettings(root),context:contextDiagnostics});return;}
             if(req.url==='/diagnostics/text'||req.url==='/diagnostics/image'){
-                const started=Date.now();let report;try{if(req.url.endsWith('/text')){if(!backendReady)throw Error('Load a text model in Models first.');if(typeof data.prompt!=='string'||!data.prompt.trim()||data.prompt.length>60000)throw Error('Enter a test prompt (up to 60000 characters).');const turns=Math.max(0,Math.min(100,Math.floor(Number(data.historyTurns)||0))),messages=Array.from({length:turns},(_,i)=>({role:i%2?'assistant':'user',text:'Diagnostic history turn '+i+': '+('A traveller promised a blue cloak beside the old inn. '.repeat(25))}));messages.push({role:'user',text:data.prompt});const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});const result=await pipeline.generate({prompt:'<|im_start|>system\nThis is an isolated local diagnostic, not an event in any saved story.<|im_end|>\n<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'diagnostics-'+crypto.randomUUID(),messages,generationType:'normal'},stream:false},controller.signal);report={ok:true,type:'text',model:runningModel,template:profileFor(root,runningModel).Template,usage:result.usage,context:contextDiagnostics,text:result.choices[0].text};}else{const image=await images.action('/images/generate',{prompt:data.prompt||'A quiet fantasy tavern, detailed illustration.',negative_prompt:'blurry, low quality',width:data.width||512,height:data.height||512,steps:data.steps||20,seed:12345});report={ok:true,type:'image',model:images.snapshot().running,...image};}}catch(e){report={ok:false,type:req.url.endsWith('/text')?'text':'image',error:e.message};}report.elapsedMs=Date.now()-started;if(report.usage)report.endToEndTokensPerSecond=Number((report.usage.completion_tokens/(report.elapsedMs/1000||1)).toFixed(2));report.at=new Date().toISOString();const folder=path.join(root,'Diagnostics');fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'latest-'+report.type+'.json'),JSON.stringify(report,null,2));json(200,report);return;
+                const started=Date.now();let report;try{if(req.url.endsWith('/text')){if(!backendReady)throw Error('Load a text model in Models first.');if(typeof data.prompt!=='string'||!data.prompt.trim()||data.prompt.length>60000)throw Error('Enter a test prompt (up to 60000 characters).');const turns=Math.max(0,Math.min(100,Math.floor(Number(data.historyTurns)||0))),messages=Array.from({length:turns},(_,i)=>({role:i%2?'assistant':'user',text:'Diagnostic history turn '+i+': '+('A traveller promised a blue cloak beside the old inn. '.repeat(25))}));messages.push({role:'user',text:data.prompt});const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});const result=await pipeline.generate({prompt:'<|im_start|>system\nThis is an isolated local diagnostic, not an event in any saved story.<|im_end|>\n<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'diagnostics-'+crypto.randomUUID(),messages,generationType:'normal'},stream:false},controller.signal);report={ok:true,type:'text',model:runningModel,template:profileFor(root,runningModel).Template,usage:result.usage,context:contextDiagnostics,text:result.choices[0].text};}else{const image=await studio.action('/studio/generate',{prompt:data.prompt||'A quiet fantasy tavern, detailed illustration.',negative_prompt:'blurry, low quality',width:data.width||512,height:data.height||512,steps:data.steps||20,seed:12345});report={ok:true,type:'image',model:images.snapshot().running,...image};}}catch(e){report={ok:false,type:req.url.endsWith('/text')?'text':'image',error:e.message,failure:errorDetails(e),failedStage:pipeline.runSnapshot()?.failedStage,suggestion:e.code==='ENGINE_DEADLINE'?'Engine exceeded configured request timeout. Check CUDA/offload, prompt length and logs.':e.code==='ECONNREFUSED'?'Engine stopped or crashed; inspect the included startup/error logs.':'Inspect failure causes, engine state and logs below.'};}report.environment=await diagnosticEnvironment();report.elapsedMs=Date.now()-started;if(report.usage)report.endToEndTokensPerSecond=Number((report.usage.completion_tokens/(report.elapsedMs/1000||1)).toFixed(2));report.at=new Date().toISOString();const folder=path.join(root,'Diagnostics');fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'latest-'+report.type+'.json'),JSON.stringify(report,null,2));json(200,report);return;
             }
-            if(req.url==='/generation/abort'){pipeline.abort();await Promise.allSettled([backendURL,thinking.snapshot().url].map(url=>fetch(url+'/api/extra/abort',{method:'POST',signal:AbortSignal.timeout(2000)})));json(200,{stopped:true});return;}
+            if(req.url==='/generation/abort'){pipeline.abort();await Promise.allSettled([backendURL,thinking.snapshot().url].map(url=>engineFetch(url+'/api/extra/abort',{method:'POST',signal:AbortSignal.timeout(2000)})));json(200,{stopped:true});return;}
             if(req.url==='/thinking/configure'){json(200,await thinking.configure(data));return;}
             if(req.url==='/thinking/start'){json(200,await thinking.start());return;}
             if(req.url==='/thinking/stop'){thinking.stop();json(200,thinking.snapshot());return;}
-            if(req.url.startsWith('/images/')){json(200,await images.action(req.url,data));return;}
+            if(req.url==='/images/start'&&studio.snapshot().settings.releaseGPU&&backend){textPausedForImages=true;lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,null,30000);}if(req.url==='/images/generate'){json(200,await studio.action('/studio/generate',data));return;}if(req.url.startsWith('/images/')){const result=await images.action(req.url,data);if(req.url==='/images/stop'&&textPausedForImages){await waitUntil(()=>!images.snapshot().running,null,30000);textPausedForImages=false;await ensureText();}json(200,result);return;}
             if(req.url==='/memory/get'){json(200,readMemory(root,data.id));return;}
             if(req.url==='/memory/save'){json(200,editMemory(root,data.id,data));return;}
             if(req.url==='/task'){
@@ -276,12 +300,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if (backend && !backendReady && !stopIntent) {
                 if (Date.now() - loadingSince > readinessTimeout) { backendError = 'Model loading timed out. Lower context or choose CPU in Hardware settings.'; state = backendError; stopBackend('timeout'); return; }
                 const checkedBackend=backend;
-                const result = await fetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
+                const result = await engineFetch(backendURL + '/api/v1/model', { signal: AbortSignal.timeout(1500) });
                 if (result.ok && backend===checkedBackend && !stopIntent) { const data = await result.json(); if (data.result && data.result !== 'ReadOnly') { backendReady = true; engineState = 'ready'; state = 'AI ready. Hero Tavern is connecting your chat automatically.'; } }
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { studio.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('listening',async()=>{const marker=path.join(root,'performance-first-run.json');try{if(!autoStart||fs.existsSync(marker)||!selected())return;const hardware=backendArguments(root,'').config;if(hardware.preset)return;const info=await systemInfo(),gpu=info.gpus.find(g=>/RTX\s*5070/i.test(g.name)&&!/Ti/i.test(g.name));if(!gpu||info.totalRAMGiB<24)return;fs.writeFileSync(marker,JSON.stringify({at:new Date().toISOString(),gpu:gpu.name,reason:'First-run calibration for the requested RTX 5070 / 32 GB profile'}));await tuner.start({maxContext:32768});}catch(e){backendError='Automatic calibration could not start: '+e.message;}});
     server.listen(port, '127.0.0.1');
     return server;
 }

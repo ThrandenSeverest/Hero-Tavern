@@ -27,7 +27,7 @@ const initHeroTavern = async () => {
     `;
     document.head.append(style);
     const rail = document.createElement('nav');rail.id='hero-shell';rail.setAttribute('aria-label','Hero Tavern navigation');
-    rail.innerHTML='<div class="hero-brand">Hero Tavern</div><div class="hero-tagline">Your stories. Your AI.</div><div class="hero-rail-foot">Powered by SillyTavern<br>Local AI · KoboldCpp<br>Hero Tavern 0.7</div>';
+    rail.innerHTML='<div class="hero-brand">Hero Tavern</div><div class="hero-tagline">Your stories. Your AI.</div><div class="hero-rail-foot">Powered by SillyTavern<br>Local AI · KoboldCpp<br>Hero Tavern 0.8</div>';
     const header=document.createElement('header');header.id='hero-header';
     header.innerHTML='<strong id="hero-page-title">Your tavern</strong><button id="hero-engine-chip" class="hero-chip">Checking local AI…</button>';
     const workspace=document.createElement('main');workspace.id='hero-workspace';
@@ -91,6 +91,7 @@ const initHeroTavern = async () => {
         c.eventSource.on(c.eventTypes.GENERATION_STARTED,(type)=>{generationType=type;});
         c.eventSource.on(c.eventTypes.GENERATE_AFTER_DATA,(data,dryRun)=>{
             const current=context?.(),id=chatIdentity();
+            if(generationType==='quiet')data.hero_mode='utility';
             if(dryRun||!engine?.backendReady||!id||!current||['quiet','impersonate'].includes(generationType)||typeof data.prompt!=='string'||data.api_type!=='koboldcpp')return;
             let messages=current.chat.filter(m=>!m.is_system||m.mes).map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name||'',text:m.mes||''}));
             if(generationType==='swipe'&&messages.at(-1)?.role==='assistant')messages=messages.slice(0,-1);
@@ -124,6 +125,7 @@ const initHeroTavern = async () => {
         }
     });
     await (await import('./story.js')).initStory({getContext:context,frame,show});
+    await (await import('./images.js')).initChatImages({getContext:context,bridgeRequest,show});
     const updateDock = () => {
         const panel=document.getElementById('right-nav-panel');
         const isOpen=panel&&getComputedStyle(panel).display!=='none'&&panel.getBoundingClientRect().width>0&&!panel.classList.contains('closedDrawer');

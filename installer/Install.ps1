@@ -112,7 +112,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -176,6 +176,7 @@ if errorlevel 1 pause
     }
     $extensionPath = Join-Path $ST 'public\scripts\extensions\hero-tavern'
     New-Item -ItemType Directory -Force $extensionPath | Out-Null
+    Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroImages.js') -Destination (Join-Path $extensionPath 'images.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroStory.js') -Destination (Join-Path $extensionPath 'story.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.js') -Destination (Join-Path $extensionPath 'index.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.json') -Destination (Join-Path $extensionPath 'manifest.json') -Force

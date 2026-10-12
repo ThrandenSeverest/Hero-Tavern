@@ -127,3 +127,9 @@ Native JSONL and existing settings remain in SillyTavern. Versioned derived stor
 Rocinante-X 12B Q5/Q4 and Qwen3 14B Q4 now have verified one-click downloads. Cydonia/Magidonia 24B are optional RAM-offload experiments. Qwen 8B remains the baseline. Prompt formats are selected per model; custom files have an editable format. New installations use 8K context; existing installs can apply 8K and reload in Hardware.
 
 **Diagnostics** tests isolated text generation, long-history compaction and image generation, checks engine connections, and exports reports. Welcome/settings panels can be closed with their buttons or Escape. Cancel reply also stops memory work. See [implementation and remaining work](docs/LOCAL_AI_IMPLEMENTATION.md) and [full supplied model specification](docs/LOCAL_AI_MODELS_SPEC.md).
+
+## Hardware calibration and chat image studio (0.8)
+
+Detailed diagnostics now retain failure causes, stages, launch arguments, VRAM/RAM, driver and logs. Local inference uses explicit timeouts instead of the hidden five-minute fetch header limit. Hardware offers actual KV-cache/Flash Attention/thread/batch controls and a local tuner with rollback. A detected RTX 5070 / 32 GB profile receives a first-run calibration; Hardware also provides manual tuning and cancellation.
+
+Chat now has Generate image, and native SillyTavern image actions use the managed local provider. Images supports optional AI prompt refinement, natural-art/fantasy/photo/turbo presets and custom preset saving. The default sequential GPU workflow unloads text/planning models for the image job and restores them afterwards. SDXL Base is available as a verified download. See [performance and image studio guide](docs/PERFORMANCE_AND_IMAGE_STUDIO.md).

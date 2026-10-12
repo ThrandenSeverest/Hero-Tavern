@@ -2,15 +2,16 @@
 const fs = require('node:fs'), path = require('node:path');
 const { filterReply, isMetaReply, repetitionIssue } = require('./ReplyFilters.cjs');
 const {profileFor,renderPrompt,modelRequest}=require('./ModelProfiles.cjs');
+const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
-const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
+const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
 function validateSettings(input = {}) {
     const value = {};
     for (const key of Object.keys(DEFAULTS)) value[key] = input[key] === undefined ? DEFAULTS[key] : input[key];
     if(!['same','different'].includes(value.planningSource))throw Error('Choose the reply model or a separate planning model.');
     if (!['off','separate'].includes(value.thinkingMode)) throw new Error('Choose disabled thinking or separate planning.');
     if (!['mixed','dialogue'].includes(value.replyStyle)) throw new Error('Choose dialogue with narration or dialogue only.');
-    for (const [key,min,max] of [['repetitionSensitivity',0.7,0.98],['temperature',0,2],['top_p',0.01,1],['min_p',0,1],['repetition_penalty',1,2],['maxReplyTokens',32,4096],['memoryTokens',128,1024],['recentMessages',2,100],['planningTokens',32,1024]]) {
+    for (const [key,min,max] of [['top_k',0,200],['repetitionSensitivity',0.7,0.98],['temperature',0,2],['top_p',0.01,1],['min_p',0,1],['repetition_penalty',1,2],['maxReplyTokens',32,4096],['memoryTokens',128,1024],['recentMessages',2,100],['planningTokens',32,1024]]) {
         if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < min || value[key] > max || ((key.endsWith('Tokens')||key==='recentMessages') && !Number.isInteger(value[key]))) throw new Error('Invalid '+key+' value.');
     }
     for (const key of ['removeModelTokens','stopAtSpeaker','dedupeParagraphs','repairMetaReplies','memoryEnabled','avoidRepetition']) if (typeof value[key] !== 'boolean') throw new Error('Invalid filter setting.');
@@ -59,26 +60,27 @@ async function completionText(response) {
     const item=await response.json();if(item.error)throw new Error(item.error.message||'Generation failed.');
     return item.choices?.[0]?.text??item.choices?.[0]?.message?.content??item.results?.[0]?.text??'';
 }
-function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
-    let active = null;
+function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
+    let active = null,lastRun=null;const runSnapshot=()=>lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
     async function generate(body, signal, {mode='chat'}={}) {
         if(active)throw new Error('A reply is already being generated. Stop it before starting another.');
         if(typeof body.prompt!=='string')throw new Error('The local reply pipeline requires a text prompt.');
+        lastRun={id:'run-'+Date.now(),started:Date.now(),stage:'preflight',timeline:[],requests:[],mode};
         const settings=readSettings(root), controller=new AbortController();active=controller;
         const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
         if(signal?.aborted)controller.abort();
         try {
             let plan='',storyContext=null;
             if(body.hero_context?.sessionId){storyContext=getStoryContext(body.hero_context.sessionId,body.hero_context.messages.slice(-6).map(m=>m.text).join('\n'));}
-            const profile=getModelProfile();const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest((({hero_context,...value})=>value)(request),profile)),signal:controller.signal}));
+            const profile=getModelProfile();lastRun.profile=profile.Template;const timeoutSeconds=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).requestTimeoutSeconds||1200:1200;const trace=e=>{lastRun.requests.push(e);lastRun.requests=lastRun.requests.slice(-100);};stage('tokenizing');const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest((({hero_context,hero_mode,...value})=>value)(request),profile)),signal:controller.signal,timeoutMs:timeoutSeconds*1000,onEvent:trace}));
             const contextSize=getContextSize?getContextSize():fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/, '')).contextSize||4096:4096;
-            const countTokens=async (prompt,format=true)=>{
-                const response=await fetchBackend(backendURL+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:format?renderPrompt(prompt,profile):prompt}),signal:controller.signal});
-                if(response.ok){const value=await response.json();if(Number.isFinite(value.value)&&value.value>=0)return value.value;if(Array.isArray(value.ids))return value.ids.length;}
+            const tokenCache=new Map();const countTokens=async (prompt,format=true)=>{const key=(format?'formatted:':'raw:')+prompt;if(tokenCache.has(key))return tokenCache.get(key);
+                const response=await fetchBackend(backendURL+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:format?renderPrompt(prompt,profile):prompt}),signal:controller.signal,timeoutMs:10000,onEvent:trace});
+                if(response.ok){const value=await response.json();if(Number.isFinite(value.value)&&value.value>=0){tokenCache.set(key,value.value);return value.value;}if(Array.isArray(value.ids)){tokenCache.set(key,value.ids.length);return value.ids.length;}}
                 // UTF-8 byte count is a conservative fallback, never a guessed 4-chars-per-token limit.
                 return Buffer.byteLength(prompt,'utf8');
             };
-            const taskInstruction=mode==='adventure'?'Follow the requested Ilreon schema and rules exactly. Return valid JSON when requested, otherwise the requested narration or compact notes. Preserve authoritative game state; never output reasoning. /no_think':mode==='character'?'Create the requested character card as valid JSON. Return only the requested object without reasoning. /no_think':mode==='preview'?'Write the requested natural in-character test reply, without reasoning or JSON. /no_think':mode==='state'?'Return only the requested state-analysis JSON. Evidence must be exact, established and associated with the declared message and character. Do not invent state or include reasoning. /no_think':mode==='summary'?'Summarize the supplied established facts, without inventing details. Return factual notes only, no reasoning. /no_think':instructions(settings);
+            const taskInstruction=['image-prompt','utility'].includes(mode)?'Follow the requested task precisely. Return only its requested output, without model reasoning or roleplay commentary. /no_think':mode==='adventure'?'Follow the requested Ilreon schema and rules exactly. Return valid JSON when requested, otherwise the requested narration or compact notes. Preserve authoritative game state; never output reasoning. /no_think':mode==='character'?'Create the requested character card as valid JSON. Return only the requested object without reasoning. /no_think':mode==='preview'?'Write the requested natural in-character test reply, without reasoning or JSON. /no_think':mode==='state'?'Return only the requested state-analysis JSON. Evidence must be exact, established and associated with the declared message and character. Do not invent state or include reasoning. /no_think':mode==='summary'?'Summarize the supplied established facts, without inventing details. Return factual notes only, no reasoning. /no_think':instructions(settings);
             const directionInstruction=(body.hero_context?.oneReply?'\n[One reply only] '+String(body.hero_context.oneReply).slice(0,3000):'')+(body.hero_context?.generationType==='continue'?'\nContinue the last assistant reply without repeating its existing text.':'');
             const stateInstruction=storyContext?'\n'+storyContext.text:'';
             const budgeted=enforceContext||!!body.hero_context||mode!=='chat';
@@ -88,11 +90,11 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
             if(budget<128)throw Error('Reply and planning budgets leave no room for history. Lower Generation reply length or increase Hardware context.');
             const sendChecked=async request=>{if(budgeted&&await countTokens(request.prompt)+request.max_tokens>contextSize)throw Error('Prompt exceeds the loaded context. Increase Hardware context or shorten the character card/instructions. Chat history was not silently discarded.');return send(request)};
             if(body.hero_context){
-                const memory=createMemory({root,countTokens,setDiagnostics,complete:async(prompt,max_tokens)=>filterReply(await sendChecked({prompt:replyPrompt('<|im_start|>user\n'+prompt+'<|im_end|>\n<|im_start|>assistant\n', 'Return compact continuity facts only. /no_think'),max_tokens,temperature:0.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})});
-                setState('remembering');body={...body,prompt:await memory.prepare(body,budget,{...settings,summaryInputBudget:contextSize-settings.memoryTokens-256})};
+                const memory=createMemory({root,countTokens,setDiagnostics,complete:async(prompt,max_tokens)=>{stage('summarizing');return filterReply(await sendChecked({prompt:replyPrompt('<|im_start|>user\n'+prompt+'<|im_end|>\n<|im_start|>assistant\n', 'Return compact continuity facts only. /no_think'),max_tokens,temperature:0.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})}});
+                stage('remembering');body={...body,prompt:await memory.prepare(body,budget,{...settings,summaryInputBudget:contextSize-settings.memoryTokens-256})};
             }
             if(mode==='chat'&&settings.thinkingMode==='separate'){
-                setState('planning');
+                stage('planning');
                 const prompt=replyPrompt(body.prompt,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');
                 if(settings.planningSource==='different'){
                     const worker=getPlanningBackend();const planningProfile=worker?.settings?.name?profileFor(root,worker.settings.name):{Template:'chatml'};if(!worker?.ready)throw Error('Load a separate planning model in Generation, or choose Use reply model.');
@@ -102,13 +104,13 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
                     plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']},planningProfile)),signal:controller.signal})),settings).slice(0,6000);
                 }else plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
             }
-            setState(mode==='state'?'analyzing':'responding');
+            stage(mode==='state'?'analyzing':'responding');
             const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
             let prompt=replyPrompt(body.prompt,extra);
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
             if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:renderPrompt(inspected,profile),template:profile.Template,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
-            const raw=await sendChecked({...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:settings.temperature,top_p:settings.top_p,min_p:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty});
+            const raw=await sendChecked({...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:settings.temperature,top_p:settings.top_p,top_k:settings.top_k,min_p:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty});
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);
             const history=body.hero_context?.messages||[...body.prompt.matchAll(/<\|im_start\|>(user|assistant)\n([\s\S]*?)<\|im_end\|>/g)].map(x=>({role:x[1],text:x[2]}));
@@ -121,10 +123,11 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
                 if(settings.repairMetaReplies&&isMetaReply(text))throw new Error('The model is still returning writer commentary. Review the character card and Generation writing instructions, then retry.');
             }
             if(!text)throw new Error('The model returned only hidden reasoning or an empty reply. Try again or adjust Generation settings.');
-            return {id:'hero-'+Date.now(),object:'text_completion',model:body.model||'local-model',usage:budgeted?{prompt_tokens:await countTokens(prompt),completion_tokens:await countTokens(text,false),context_size:contextSize}:undefined,choices:[{index:0,text,finish_reason:'stop'}]};
-        } finally {signal?.removeEventListener('abort',abort);active=null;setState('idle');}
+            let usage;if(budgeted){try{usage={prompt_tokens:await countTokens(prompt),completion_tokens:await countTokens(text,false),context_size:contextSize};}catch(error){lastRun.metricsWarning=errorDetails(error);}}
+            return {id:'hero-'+Date.now(),object:'text_completion',model:body.model||'local-model',usage,choices:[{index:0,text,finish_reason:'stop'}]};
+        } catch(error){lastRun.error=errorDetails(error);lastRun.failedStage=lastRun.stage;throw error;} finally {lastRun.elapsedMs=Date.now()-lastRun.started;lastRun.finished=Date.now();signal?.removeEventListener('abort',abort);active=null;stage('idle');}
     }
-    function abort(){active?.abort()}
+    function abort(){active?.abort();if(fetchBackend===engineFetch){engineFetch(backendURL+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});const worker=getPlanningBackend();if(worker?.ready)engineFetch(worker.url+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});}}
     async function handle(req,res){
         if(!req.url.startsWith('/inference/'))return false;
         if(req.headers.origin){res.writeHead(403);res.end('Browser inference requests are not allowed.');return true;}
@@ -136,7 +139,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
             let payload='';for await(const chunk of req){payload+=chunk;if(payload.length>2000000)throw new Error('Prompt is too large.')}
             if(endpoint==='/api/extra/abort')abort();
             if(req.method==='POST'&&endpoint==='/v1/completions'){
-                const body=JSON.parse(payload||'{}'),result=await generate(body,controller.signal);
+                const body=JSON.parse(payload||'{}'),result=await generate(body,controller.signal,{mode:body.hero_mode==='utility'?'utility':'chat'});
                 if(body.stream){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store'});res.end('data: '+JSON.stringify(result)+'\n\ndata: [DONE]\n\n');}
                 else{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));}
             }else{
@@ -146,6 +149,6 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
         }catch(e){if(!res.destroyed){res.writeHead(502,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:e.name==='AbortError'?'Reply generation stopped.':e.message}}));}}
         return true;
     }
-    return {generate,handle,abort};
+    return {generate,handle,abort,runSnapshot};
 }
 module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,createPipeline};

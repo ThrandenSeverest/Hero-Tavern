@@ -1,8 +1,10 @@
 // Independent managed image worker: model changes do not restart the text model.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
+const {engineFetch}=require('./EngineHTTP.cjs');
 const CATALOG=[
  {name:'DreamShaper 8 · recommended · 2.13 GB',file:'DreamShaper_8_pruned.safetensors',repo:'Lykon/DreamShaper',hash:'879db523c30d3b9017143d56705015e15a2cb5628762c11d086fed9538abd7fd',size:2130000000,steps:24,cfg:7,width:512,height:768,sampler:'DPM++ 2M Karras'},
- {name:'DreamShaper XL Turbo · higher detail · 6.94 GB',file:'DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors',repo:'Lykon/DreamShaper',hash:'676f0d60c8e860146d5e8a0d802599cadd04e7cadf85c283f189f41f01c9e359',size:6940000000,steps:8,cfg:2,width:768,height:1024,sampler:'DPM++ 2M Karras'}
+ {name:'DreamShaper XL Turbo · higher detail · 6.94 GB',file:'DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors',repo:'Lykon/DreamShaper',hash:'676f0d60c8e860146d5e8a0d802599cadd04e7cadf85c283f189f41f01c9e359',size:6940000000,steps:8,cfg:2,width:768,height:1024,sampler:'LCM'},
+ {name:'SDXL Base 1.0 · natural digital art · 6.94 GB',file:'sd_xl_base_1.0.safetensors',repo:'stabilityai/stable-diffusion-xl-base-1.0',revision:'462165984030d82259a11f4367a4eed129e94a7b',hash:'31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b',size:6938078334,steps:28,cfg:6,width:1024,height:1024,sampler:'DPM++ 2M Karras'}
 ];
 function safeFile(dir,name){if(typeof name!=='string'||path.basename(name)!==name||!name.endsWith('.safetensors'))throw Error('Choose a complete SD 1.5 / SDXL .safetensors checkpoint.');const file=path.join(dir,name);if(fs.existsSync(file)&&path.dirname(fs.realpathSync(file))!==fs.realpathSync(dir))throw Error('Model path escapes image library.');return file}
 async function verifyImage(file,hash='',expectedSize=0){
@@ -15,9 +17,9 @@ function imageParameters(input={},defaults={}){
  if(typeof value.prompt!=='string'||!value.prompt.trim()||value.prompt.length>8000||typeof value.negative_prompt!=='string'||value.negative_prompt.length>8000)throw Error('Enter an image prompt (max 8000 characters).');
  for(const key of ['width','height'])if(!Number.isInteger(value[key])||value[key]<256||value[key]>1536||value[key]%64)throw Error('Image dimensions must be multiples of 64, between 256 and 1536.');
  if(!Number.isInteger(value.steps)||value.steps<1||value.steps>60||!Number.isFinite(value.cfg_scale)||value.cfg_scale<1||value.cfg_scale>20||!Number.isInteger(value.seed)||value.seed< -1||value.seed>2147483647)throw Error('Invalid steps, guidance or seed.');
- if(!['Euler a','Euler','DPM++ 2M Karras','LCM'].includes(value.sampler_name))throw Error('Choose a supported image sampler.');if(value.sampler_name==='DPM++ 2M Karras'){value.sampler_name='dpm++2m';value.scheduler='karras'}return value;
+ if(!['Euler a','Euler','DPM++ 2M Karras','DPM++ 2S ancestral Karras','dpm++2m','dpm++2s_a','euler','euler_a','LCM'].includes(value.sampler_name))throw Error('Choose a supported image sampler.');if(value.sampler_name==='DPM++ 2S ancestral Karras'){value.sampler_name='dpm++2s_a';value.scheduler='karras'}if(value.sampler_name==='DPM++ 2M Karras'){value.sampler_name='dpm++2m';value.scheduler='karras'}return value;
 }
-function createImages(root,{command,prefix=[],port=5002,fetchBackend=fetch,pollInterval=2000,readinessTimeout=600000}={}){
+function createImages(root,{command,prefix=[],port=5002,fetchBackend=engineFetch,pollInterval=2000,readinessTimeout=600000}={}){
  const dir=path.join(root,'ImageModels'),outputs=path.join(root,'Images'),logs=path.join(root,'Logs');for(const d of [dir,outputs,logs])fs.mkdirSync(d,{recursive:true});
  const configFile=path.join(root,'images.json');let config=fs.existsSync(configFile)?JSON.parse(fs.readFileSync(configFile,'utf8')):{selected:'',custom:[]};
  let worker=null,ready=false,download=null,error='',state='No image model loaded',running='',busy=false,controller=null,loading=0,stopping=false,starting=false;
@@ -34,7 +36,7 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=fetch,pollI
    const executable=command||path.join(root,'KoboldCpp','koboldcpp.exe');if(!fs.existsSync(executable))throw Error('KoboldCpp is missing. Run setup to repair.');
    const hardware=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/,'')):{mode:'cpu'};
    const args=['--sdmodel',file,'--host','127.0.0.1','--port',String(port),'--skiplauncher','--sdoffloadcpu'];
-   if(hardware.mode==='cpu')args.push('--sdmaingpu','CPU','--sdclipdevice','CPU','--sdvaedevice','CPU');else args.push(hardware.mode==='cuda'?'--usecuda':'--usevulkan');
+   if(hardware.mode!=='cpu')args.push('--sdflashattention');if(hardware.mode==='cpu')args.push('--sdmaingpu','CPU','--sdclipdevice','CPU','--sdvaedevice','CPU');else args.push(hardware.mode==='cuda'?'--usecuda':'--usevulkan');
    const fd=fs.openSync(path.join(logs,'image-engine.log'),'w');try{worker=spawn(executable,[...prefix,...args],{cwd:root,windowsHide:true,stdio:['ignore',fd,fd]})}finally{fs.closeSync(fd)}
    running=config.selected;loading=Date.now();ready=false;stopping=false;error='';state='Loading image model…';
    worker.on('error',e=>{error=e.message;state='Image worker failed';worker=null;ready=false});worker.on('exit',code=>{worker=null;ready=false;if(!stopping&&code){error='Image engine exited with code '+code+'. See Logs/image-engine.log.';state='Image engine failed'}else{state='Image engine stopped';error=''}running=''});
@@ -45,10 +47,10 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=fetch,pollI
   if(fs.existsSync(file)){await verifyImage(file,model.hash);config.selected=path.basename(file);save();return snapshot()}
   const pending={file:model.file,part:file+'.part',size:0,hash:model.hash||'',process:null,verifying:false,cancelled:false};download=pending;error='';
   try{
-   try{const r=await fetchBackend('https://huggingface.co/api/models/'+model.repo+'/tree/main?recursive=true',{signal:AbortSignal.timeout(15000)});if(r.ok){const files=await r.json(),entry=files.find(x=>x.path===model.file);if(entry){pending.size=Number(entry.size)||0;pending.hash||=entry.lfs?.oid||'';}}}catch{}
+   try{const r=await fetchBackend('https://huggingface.co/api/models/'+model.repo+'/tree/'+(model.revision||'main')+'?recursive=true',{signal:AbortSignal.timeout(15000)});if(r.ok){const files=await r.json(),entry=files.find(x=>x.path===model.file);if(entry){pending.size=Number(entry.size)||0;pending.hash||=entry.lfs?.oid||'';}}}catch{}
    const space=fs.statfsSync(dir),already=fs.existsSync(pending.part)?fs.statSync(pending.part).size:0;if(space.bavail*space.bsize<(pending.size||model.size||1e9)-already+150e6)throw Error('Not enough space for image model.');if(pending.cancelled)return;
    const curl=process.platform==='win32'?path.join(process.env.SystemRoot,'System32','curl.exe'):'curl',fd=fs.openSync(path.join(logs,'image-download.log'),'w');
-   try{pending.process=spawn(curl,['--proto','=https','--proto-redir','=https','--fail','--location','--connect-timeout','30','--retry','3','--continue-at','-','--silent','--show-error','--output',pending.part,'https://huggingface.co/'+model.repo+'/resolve/main/'+model.file],{windowsHide:true,stdio:['ignore','ignore',fd]})}finally{fs.closeSync(fd)}
+   try{pending.process=spawn(curl,['--proto','=https','--proto-redir','=https','--fail','--location','--connect-timeout','30','--retry','3','--continue-at','-','--silent','--show-error','--output',pending.part,'https://huggingface.co/'+model.repo+'/resolve/'+(model.revision||'main')+'/'+model.file],{windowsHide:true,stdio:['ignore','ignore',fd]})}finally{fs.closeSync(fd)}
    pending.process.on('error',e=>{error=e.message;download=null});pending.process.on('exit',async code=>{try{if(pending.cancelled||code!==0){state=pending.cancelled?'Image download cancelled; click download to resume':'Image download failed; click download to resume';return;}pending.verifying=true;state='Verifying image checkpoint…';await verifyImage(pending.part,pending.hash,pending.size);fs.renameSync(pending.part,file);config.selected=path.basename(file);save();state='Image model downloaded. Click Load image model.';}catch(e){error=e.message;if(fs.existsSync(pending.part))fs.renameSync(pending.part,pending.part+'.corrupt-'+Date.now())}finally{download=null}});state='Downloading '+model.file;
   }catch(e){download=null;throw e}finally{if(pending.cancelled&&!pending.process)download=null}
   return snapshot();

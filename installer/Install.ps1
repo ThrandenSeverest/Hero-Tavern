@@ -96,23 +96,38 @@ try {
         $upstreamCommit | Set-Content (Join-Path $Root 'sillytavern-version.txt')
     } else { Write-Host 'Reusing SillyTavern; chats and settings stay in place.' }
 
-    Step '3/5 - Installing SillyTavern Node dependencies'
+    Step '3/5 - Checking SillyTavern Node dependencies'
+    # npm ci deletes/rebuilds node_modules. Only run on a fresh install or when lockfile changed.
+    $lockFile = Join-Path $ST 'package-lock.json'
+    if (-not (Test-Path -LiteralPath $lockFile)) { throw 'SillyTavern package-lock.json is missing.' }
+    $lockHash = (Get-FileHash -LiteralPath $lockFile -Algorithm SHA256).Hash
+    $stampFile = Join-Path $Root 'sillytavern-dependencies.sha256'
+    $modules = Join-Path $ST 'node_modules'
+    $previousHash = if (Test-Path -LiteralPath $stampFile) { (Get-Content -LiteralPath $stampFile -Raw).Trim() } else { '' }
+    $requiresNpm = (-not (Test-Path -LiteralPath $modules)) -or ($previousHash -ne $lockHash)
     Push-Location $ST
     try {
         $env:NODE_ENV = 'production'
-        & $npm ci --omit=dev --no-audit --no-fund
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host 'npm ci failed; retrying npm install.' -ForegroundColor Yellow
-            & $npm install --omit=dev --no-audit --no-fund
-            if ($LASTEXITCODE -ne 0) { throw "npm failed with code $LASTEXITCODE" }
+        if ($requiresNpm) {
+            Write-Host 'Dependencies missing or changed; installing them once.'
+            & $npm ci --omit=dev --no-audit --no-fund --prefer-offline
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed with code $LASTEXITCODE. Existing data was not deleted." }
+            # The stamp is written ONLY after a successful dependency installation.
+            [IO.File]::WriteAllText($stampFile, $lockHash)
+        } else {
+            Write-Host 'Dependencies unchanged: skipping npm ci and preserving node_modules.'
         }
-        & $npm run init
-        if ($LASTEXITCODE -ne 0) { throw 'SillyTavern configuration initialization failed.' }
+        $initMarker = Join-Path $Root 'sillytavern-init.complete'
+        if ($requiresNpm -or -not (Test-Path -LiteralPath $initMarker)) {
+            & $npm run init
+            if ($LASTEXITCODE -ne 0) { throw 'SillyTavern configuration initialization failed.' }
+            [IO.File]::WriteAllText($initMarker, (Get-Date).ToUniversalTime().ToString('o'))
+        }
     } finally { Pop-Location }
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'DiskCare.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -226,6 +241,18 @@ Re-running setup preserves chats, settings, characters and models.
         } else { Write-Host 'Upstream did not publish a binary checksum for this release.' -ForegroundColor Yellow }
         Move-Item -LiteralPath $temporaryBackend -Destination $kcpp
         $latest.tag_name | Set-Content (Join-Path $Root 'koboldcpp-version.txt')
+    }
+    # Only known, disposable installer archives; never touch model downloads or user images.
+    $readyNode = Test-Path -LiteralPath $nodeExe
+    $readyTavern = Test-Path -LiteralPath (Join-Path $ST 'server.js')
+    if ($readyNode -and $readyTavern) {
+        foreach ($oldArchive in @('SillyTavern-release.zip')) {
+            $target = Join-Path $Downloads $oldArchive
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }
+        }
+        $stagingDir = Join-Path $Downloads 'ST-extracted'
+        if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Get-ChildItem -LiteralPath $Downloads -Filter 'node-*-win-x64.zip' -File -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     }
     Write-Host 'Hero Tavern installed. Opening the chat UI; use Models to download Qwen.' -ForegroundColor Green
     Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'StartHeroTavern.ps1') + '"')

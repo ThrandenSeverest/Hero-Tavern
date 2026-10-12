@@ -3,6 +3,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {buildWorkflow,modelName}=require('./ComfyWorkflows.cjs');
+const {createWorkflowLibrary}=require('./ComfyWorkflowLibrary.cjs');
 const PNG=Buffer.from([137,80,78,71,13,10,26,10]);
 const GALLERY_NAME=/^\d{12,17}-[a-f0-9]{8,24}\.png$/;
 function checkPNG(data,max=75*1024*1024){
@@ -16,6 +17,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid ComfyUI loopback port.');
  const base='http://127.0.0.1:'+port,dir=path.join(root,'Images'),logs=path.join(root,'Logs');
  fs.mkdirSync(dir,{recursive:true});fs.mkdirSync(logs,{recursive:true});
+ const workflows=createWorkflowLibrary(root);
  let active=null,lastError='',lastCheck=0,healthy=false,lastStats=null,completed=0;
  async function request(route,options={},timeout=4000){
   const signal=AbortSignal.any([options.signal||new AbortController().signal,AbortSignal.timeout(timeout)]);
@@ -120,9 +122,10 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(signal?.aborted)throw Error('Job cancelled.');
    const free=fs.statfsSync(dir),freeBytes=free.bavail*free.bsize;
    if(freeBytes<1024*1024*1024)throw Error('Less than 1 GiB free where Hero Tavern saves images. Free disk space before generating.');
-   const availableCheckpoints=await checkpoints();
-   if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');
-   const mode=params.operation||((sourceName&&maskData)?'inpaint':sourceName?'img2img':'txt2img');
+   const custom=!!params.workflowId;
+   if(!custom){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
+   else if(params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
+   const mode=custom?'custom':params.operation||((sourceName&&maskData)?'inpaint':sourceName?'img2img':'txt2img');
    if(mode==='upscale'&&!sourceName)throw Error('Choose a gallery image to upscale.');
    if(params.lora?.length){
     const installed=await modelList('loras');
@@ -137,7 +140,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const sourceBytes=fs.readFileSync(galleryFile(sourceName));sourceDimensions=checkPNG(sourceBytes,28*1024*1024);
     if(sourceDimensions.width>2048||sourceDimensions.height>2048)throw Error('For 12 GB GPU safety, source images above 2048px need resizing first.');
     source=await upload(sourceBytes,'source',job.controller.signal);
-    if(mode==='inpaint'){
+    if(mode==='inpaint'||custom&&maskData){
      if(typeof maskData!=='string'||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(maskData)||maskData.length>38*1024*1024)throw Error('Paint a valid PNG mask to edit an area.');
      const maskBytes=Buffer.from(maskData.slice('data:image/png;base64,'.length),'base64'),size=checkPNG(maskBytes,28*1024*1024);
      if(size.width!==sourceDimensions.width||size.height!==sourceDimensions.height)throw Error('Source and painted mask dimensions differ.');
@@ -148,7 +151,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(mode==='inpaint'&&!mask)throw Error('The inpaint brush selection cannot be empty.');
    if(mode==='upscale'&&sourceDimensions&&params.upscaleFactor&&sourceDimensions.width*params.upscaleFactor>4096)throw Error('Upscale result would exceed 4096px.');
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
-   const spec=buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
+   const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
    job.phase='queued';listen(job);
    const response=await (await request('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:spec.graph,client_id:job.clientId}),signal:job.controller.signal},45000)).json();
    if(!response?.prompt_id)throw Error('ComfyUI rejected the workflow: '+JSON.stringify(response?.node_errors||response).slice(0,1500));
@@ -186,7 +189,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const name=Date.now()+'-'+crypto.randomBytes(6).toString('hex')+'.png';
     const dest=path.join(dir,name);
     fs.writeFileSync(dest,bytes,{flag:'wx'});
-    const details={engine:'comfyui',mode:spec.mode,model:checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
+    const details={engine:'comfyui',mode:spec.mode,workflowId:spec.workflowId||null,workflowName:spec.workflowName||null,model:custom?(spec.workflowName||'Custom ComfyUI workflow'):checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
       width:size.width,height:size.height,steps:params.steps,seed:spec.seed,sampler_name:params.sampler_name,denoise:params.denoise,
       lora:params.lora||[],upscaleModel:params.upscaleModel||'',batch_size:spec.batch,promptId:job.id,remoteOutput:{filename:remote.filename,subfolder:remote.subfolder||'',type:'output'},
       createdAt:new Date().toISOString()};
@@ -195,11 +198,11 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     images.push({url:'/images/output/'+name,width:size.width,height:size.height,seed:spec.seed});
    }
    completed++;lastError='';
-   return {url:images[0].url,images,engine:'comfyui',model:checkpoint,seed:spec.seed,info:JSON.stringify({count:images.length,mode:spec.mode,promptId:job.id})};
+   return {url:images[0].url,images,engine:'comfyui',model:custom?(spec.workflowName||'Custom ComfyUI'):checkpoint,seed:spec.seed,workflowId:spec.workflowId||null,info:JSON.stringify({count:images.length,mode:spec.mode,promptId:job.id})};
   }catch(e){lastError=e.message;logEvent({action:'comfy-job-error',error:e.message,promptId:job.id});throw e}
   finally{signal?.removeEventListener('abort',onAbort);try{job.socket?.close()}catch{};if(active===job)active=null}
  }
- return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,
+ return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,workflows,
   snapshot:()=>({healthy,lastCheck,error:lastError,active:active&&{id:active.id,phase:active.phase,progress:active.progress,step:active.step,totalSteps:active.totalSteps,etaMs:active.etaMs,elapsedMs:Date.now()-active.startedAt},completed,url:base,
     devices:(lastStats?.devices||[]).map(x=>({name:x.name,type:x.type,vramFree:x.vram_free,vramTotal:x.vram_total}))})};
 }

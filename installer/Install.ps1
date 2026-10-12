@@ -104,7 +104,10 @@ try {
     $stampFile = Join-Path $Root 'sillytavern-dependencies.sha256'
     $modules = Join-Path $ST 'node_modules'
     $previousHash = if (Test-Path -LiteralPath $stampFile) { (Get-Content -LiteralPath $stampFile -Raw).Trim() } else { '' }
-    $requiresNpm = (-not (Test-Path -LiteralPath $modules)) -or ($previousHash -ne $lockHash)
+    $requiresNpm = (-not (Test-Path -LiteralPath $modules)) -or ($previousHash -ne $lockHash) -or (-not (Test-Path -LiteralPath (Join-Path $modules '.package-lock.json')))
+    # A past interrupted install can leave a node_modules folder and a stale success stamp.
+    # Confirm its npm lock metadata exists before deciding to skip dependencies.
+    if ($requiresNpm -and (Test-Path -LiteralPath $modules)) { Write-Host 'Detected missing/incomplete dependency metadata: repairing SillyTavern npm modules.' -ForegroundColor Yellow }
     Push-Location $ST
     try {
         $env:NODE_ENV = 'production'
@@ -225,6 +228,13 @@ Logs: install.log and the Logs folder.
 Re-running setup preserves chats, settings, characters and models.
 '@
     Write-AsciiFile (Join-Path $Root 'README.txt') $help.Replace('__ROOT__', $Root)
+
+    # Avoid failing silently if an earlier update left JavaScript support files incomplete.
+    foreach ($required in @('ModelBridge.cjs','AssistantWorkspace.cjs','AssistantPanel.js','ComfyAdapter.cjs')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $required))) {
+            throw ('Installed support module is missing: ' + $required + '. Re-run the setup EXE.')
+        }
+    }
 
     Step '5/5 - Installing KoboldCpp backend'
     [IO.Directory]::CreateDirectory($Tools) | Out-Null

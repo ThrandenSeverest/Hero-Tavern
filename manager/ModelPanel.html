@@ -291,7 +291,7 @@ function updateStudioModelStatus(){
   if(!ckpt)status.classList.add('error');
  }else if(pack){
   const connected=!!heroHubDetails?.engine?.available;
-  status.textContent=pack.installed?(connected?'Ready · ComfyUI connected':'Model downloaded · managed ComfyUI can start when generating'):
+  status.textContent=pack.installed?(connected?'Ready · ComfyUI connected':heroHubDetails?.engine?.runtime?.mode==='managed'&&heroHubDetails?.engine?.runtime?.detected?'Downloaded · managed ComfyUI can start on Generate':'Downloaded locally · start or connect your ComfyUI server'):
    (pack.downloaded?'Downloaded to the configured model folder, but running ComfyUI cannot see the components. Check active ComfyUI installation / restart it.':'Missing '+(pack.missing||[]).join(', ')+' · open Models & Setup.');
   if(!pack.installed)status.classList.add('error');
  }else status.textContent='Checking model files and ComfyUI availability…';
@@ -621,7 +621,8 @@ async function heroComfyProbe(existing=null){
  const state=el('hero-comfy-state');state.textContent='Checking loopback ComfyUI…';
  try{
   const x=await request('/comfy/status');
-  state.textContent=x.available?'ComfyUI connected · '+x.checkpoints.length+' checkpoint(s) available'+(x.active?' · Job: '+x.active.phase:''):'ComfyUI not reachable. Auto will use KoboldCpp if no mask is requested.';
+  const ready=(x.packs||[]).filter(pack=>pack.installed).map(pack=>pack.name).join(', ');
+   state.textContent=x.available?'ComfyUI connected · '+(ready?'Ready: '+ready:'No recognized model packs')+(x.active?' · Job: '+x.active.phase:''):'ComfyUI not connected. Installed files may still be available locally; use managed Start or connect an external ComfyUI server.';
   const list=el('hero-comfy-checkpoint'),value=list.value||((await request('/studio/get')).settings.comfyCheckpoint||'');
   list.replaceChildren(new Option('Select installed checkpoint',''),...x.checkpoints.map(name=>new Option(name,name)));
   list.value=x.checkpoints.includes(value)?value:'';

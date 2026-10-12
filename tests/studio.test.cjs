@@ -10,3 +10,20 @@ test('Local POST transport sends Content-Length for Python engine handlers and p
 test('Image worker can be restarted while already running without waiting forever',async()=>{const source=fs.readFileSync(path.join(__dirname,'../manager/ImageService.cjs'),'utf8');assert.match(source,/const exited=new Promise\(resolve=>old.once\('exit',resolve\)\);stop\(\);await exited/);});
 test('Boot does not launch surprise GPU calibrations, and image stops preserve pause intent',()=>{const source=fs.readFileSync(path.join(__dirname,'../manager/ModelBridge.cjs'),'utf8');assert.doesNotMatch(source,/server\.on\('listening',async\(\)=>\{const marker=/);assert.match(source,/stopBackend\('image'\)/);assert.match(source,/if\(imageJob\)await waitUntil\(\(\)=>!imageJob/);});
 test('SD 1.5 receives reasonable image resolution defaults without overriding user settings',async()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-image-size-'));fs.mkdirSync(path.join(root,'Images'));let params;const studio=createStudio(root,{pipeline:{abort(){}},ensureText:async()=>{},getImageState:()=>({selected:'DreamShaper_8_pruned.safetensors'}),generateImage:async input=>{params=input;return {url:'/images/output/123-abcd.png',model:'test'}}});try{await studio.action('/studio/generate',{prompt:'A fantasy tavern',refine:false});assert.equal(params.width,512);assert.equal(params.height,768);await studio.action('/studio/generate',{prompt:'A fantasy tavern',refine:false,width:640,height:640});assert.equal(params.width,640);assert.equal(params.height,640);}finally{fs.rmSync(root,{recursive:true,force:true})}});
+
+test('FLUX model selection overrides stale KoboldCpp engine and never needs a checkpoint',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-flux-routing-'));fs.mkdirSync(path.join(root,'Images'));
+ const calls=[];
+ const studio=createStudio(root,{pipeline:{abort(){}},ensureText:async()=>{},generateImage:async(input,signal,releaseGPU,onReady,engine,checkpoint)=>{calls.push({input,engine,checkpoint});return {url:'/images/output/123-flux.png',model:'FLUX Klein'}}});
+ try{
+  studio.action('/studio/configure',{engine:'koboldcpp',modelPack:'sdxl',comfyCheckpoint:''});
+  const result=await studio.action('/studio/generate',{prompt:'Several heroes in a grand hall',modelPack:'flux-klein',refine:false,engine:'comfyui',width:768,height:768});
+  assert.equal(calls[0].input.modelPack,'flux-klein');
+  assert.equal(calls[0].engine,'comfyui');
+  assert.equal(calls[0].checkpoint,'');
+  assert.equal(result.model,'FLUX Klein');
+  const automatic=await studio.action('/studio/generate',{prompt:'The same grand hall',modelPack:'z-turbo',refine:false});
+  assert.equal(calls[1].engine,'comfyui');
+  assert.equal(automatic.modelPack,'z-turbo');
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

@@ -90,7 +90,10 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
   if(install)throw Error('ComfyUI setup is already running.');
   if(installed())return {alreadyInstalled:true,...status()};
   const extractor=sevenZip();
-  if(!extractor)throw Error('7-Zip is required to extract the official .7z portable package. Install it from https://7-zip.org/ and retry.');
+  // Windows 11 builds with a recent libarchive tar can extract .7z without 7-Zip.
+  // Validate the archive with that tool before attempting extraction.
+  const systemTar=path.join(process.env.SystemRoot||'C:\\Windows','System32','tar.exe');
+  if(!extractor&&!fs.existsSync(systemTar))throw Error('7-Zip (or Windows 11 archive-capable tar.exe) is required. Install 7-Zip from https://7-zip.org/ first.');
   const target=path.join(root,'ComfyUI-Portable'),staging=target+'.installing',archive=path.join(downloads,'ComfyUI_windows_portable_nvidia.7z'),partial=archive+'.part';
   if(fs.existsSync(target)||fs.existsSync(staging))throw Error('ComfyUI target or interrupted staging folder exists. Nothing was deleted; inspect it before retrying.');
   const job={phase:'preflight',bytes:0,expected:0,archive,process:null,cancel:false};install=job;
@@ -105,9 +108,11 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
    await spawnWait(curl,['--proto','=https','--proto-redir','=https','--fail','--location','--retry','3','--continue-at','-','--output',partial,ARCHIVE_URL],'comfy-install.log','downloading',job);
    job.bytes=fs.statSync(partial).size;
    if(job.expected&&job.bytes!==job.expected)throw Error('Incomplete official ComfyUI archive.');
-   await spawnWait(extractor,['t',partial], 'comfy-install.log','validating',job);
+   const with7zip=!!extractor;
+   try{await spawnWait(with7zip?extractor:systemTar,with7zip?['t',partial]:['-tf',partial],'comfy-install.log','validating',job);}
+   catch(e){if(!with7zip)throw Error('Windows tar could not read this .7z archive. Install 7-Zip and click Install again; the downloaded archive is preserved.');throw e;}
    fs.mkdirSync(staging,{recursive:true});
-   await spawnWait(extractor,['x',partial,'-o'+staging,'-y'],'comfy-install.log','extracting',job);
+   await spawnWait(with7zip?extractor:systemTar,with7zip?['x',partial,'-o'+staging,'-y']:['-xf',partial,'-C',staging],'comfy-install.log','extracting',job);
    const found=resolveRuntime(staging);if(!found)throw Error('ComfyUI Portable archive layout is unexpected; see staging folder.');
    fs.renameSync(staging,target);
    fs.renameSync(partial,archive);

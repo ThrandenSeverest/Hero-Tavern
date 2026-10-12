@@ -33,7 +33,7 @@ jobs:
         run: ./tests/ModelTools.Tests.ps1
       - name: Test fresh SillyTavern profile configuration
         shell: pwsh
-        run: node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs tests/context.test.cjs tests/images.test.cjs tests/adventure.test.cjs tests/adventure-director.test.cjs tests/repair-regressions.test.cjs tests/storage-gallery.test.cjs tests/story.test.cjs tests/thinking.test.cjs tests/models.test.cjs tests/studio.test.cjs
+        run: node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs tests/context.test.cjs tests/images.test.cjs tests/adventure.test.cjs tests/adventure-director.test.cjs tests/repair-regressions.test.cjs tests/storage-gallery.test.cjs tests/story.test.cjs tests/thinking.test.cjs tests/models.test.cjs tests/studio.test.cjs tests/comfy.test.cjs
       - name: Checkout upstream SillyTavern for browser integration test
         uses: actions/checkout@v4
         with:

@@ -198,7 +198,6 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(imageJob)throw Error('Another image job is active.');
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
-      imageJob=true;
       let actualEngine='koboldcpp';
       if(engine!=='koboldcpp'){
         const ok=await comfy.available();
@@ -206,6 +205,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         else if(engine==='comfyui'||input.sourceName)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or select KoboldCpp.');
       }
       if(input.sourceName&&actualEngine!=='comfyui')throw Error('Masked editing requires an active ComfyUI engine.');
+      imageJob=true;
       const restoreText=!!backend||textPausedForImages,restorePlanner=thinking.snapshot().running;
       try{
         if(releaseGPU&&backend){

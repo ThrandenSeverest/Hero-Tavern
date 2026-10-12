@@ -31,11 +31,15 @@ function createDiskCare(root){
  let diskBaseline=null;
  const categories=[
   ['Models',path.join(root,'Models')],['Image models',path.join(root,'ImageModels')],['ComfyUI API workflows',path.join(root,'ImageWorkflows')],
-  ['Generated images',path.join(root,'Images')],['ComfyUI API workflows',path.join(root,'ImageWorkflows')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
+  ['Generated images',path.join(root,'Images')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
   ['Story and transaction data',path.join(root,'Story')],['Adventure saves',path.join(root,'AdventureSaves')],
   ['Downloads',downloads],['Logs',logs],['Node dependencies',path.join(root,'SillyTavern','node_modules')],
-  ['npm cache',path.join(process.env.LOCALAPPDATA||root,'npm-cache')]
+  ['npm cache',path.join(process.env.LOCALAPPDATA||root,'npm-cache')],
+  ...(ownedComfyRoot()?[['ComfyUI output copies',path.join(ownedComfyRoot().base,'ComfyUI','output')],['ComfyUI input copies',path.join(ownedComfyRoot().base,'ComfyUI','input')]]:[])
  ];
+ function ownedComfyRoot(){
+  try{return require('./ComfyRuntime.cjs').resolveRuntime(path.join(root,'ComfyUI-Portable'))}catch{return null}
+ }
  function safeItems(){
   const result=[];
   const add=(target,reason)=>{
@@ -48,6 +52,7 @@ function createDiskCare(root){
   if(fs.existsSync(downloads)){
    for(const d of fs.readdirSync(downloads,{withFileTypes:true})){
      if(d.isFile()&&(d.name==='SillyTavern-release.zip'||/^node-v[\d.]+-win-x64\.zip$/i.test(d.name)))add(path.join(downloads,d.name),'Completed installer archive');
+     if(d.isFile()&&d.name==='ComfyUI_windows_portable_nvidia.7z'&&ownedComfyRoot())add(path.join(downloads,d.name),'Completed ComfyUI Portable installer archive');
      if(d.isDirectory()&&d.name==='ST-extracted'&&fs.existsSync(path.join(root,'SillyTavern','server.js')))add(path.join(downloads,d.name),'Completed setup extraction');
    }
   }
@@ -71,6 +76,7 @@ function createDiskCare(root){
    ['Downloads',path.join(root,'Downloads')],
    ['Logs',path.join(root,'Logs')],
    ['Diagnostics',path.join(root,'Diagnostics')],
+   ...(ownedComfyRoot()?[['ComfyUI local output files',path.join(ownedComfyRoot().base,'ComfyUI','output')],['ComfyUI input copies',path.join(ownedComfyRoot().base,'ComfyUI','input')]]:[]),
    ['ComfyUI file transfers',path.join(root,'Logs','image-files.jsonl')]
   ];
   const out=[];
@@ -186,6 +192,7 @@ function createDiskCare(root){
     }
     // Never remove setup archives unless the installed runtime & ST both exist.
     if(item.reason!=='Completed story transaction backup'){
+      if(item.reason==='Completed ComfyUI Portable installer archive'&&!ownedComfyRoot())continue;
       const exeDir=path.join(root,'Runtime');
       if(!fs.existsSync(path.join(root,'SillyTavern','server.js'))||!fs.existsSync(exeDir)||!fs.readdirSync(exeDir).length)continue;
     }

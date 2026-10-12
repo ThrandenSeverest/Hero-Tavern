@@ -30,7 +30,7 @@ function createDiskCare(root){
  const downloads=path.join(root,'Downloads'),transactions=path.join(root,'Story','transactions'),logs=path.join(root,'Logs');
  const categories=[
   ['Models',path.join(root,'Models')],['Image models',path.join(root,'ImageModels')],
-  ['Generated images',path.join(root,'Images')],['Chat data',path.join(root,'SillyTavern','data')],
+  ['Generated images',path.join(root,'Images')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
   ['Story and transaction data',path.join(root,'Story')],['Adventure saves',path.join(root,'AdventureSaves')],
   ['Downloads',downloads],['Logs',logs],['Node dependencies',path.join(root,'SillyTavern','node_modules')],
   ['npm cache',path.join(process.env.LOCALAPPDATA||root,'npm-cache')]
@@ -113,10 +113,60 @@ function createDiskCare(root){
   return result;
  }
 
+
+ const runtimeRoot=path.join(root,'Cache','KoboldCpp');
+ function runtimeCandidates(){
+  const found=[],now=Date.now();
+  for(const role of ['text','image','thinking']){
+   const parent=path.join(runtimeRoot,role);
+   try{
+    if(!fs.existsSync(parent)||fs.lstatSync(parent).isSymbolicLink()||!fs.statSync(parent).isDirectory())continue;
+    const parentReal=fs.realpathSync(parent);
+    for(const name of fs.readdirSync(parent)){
+     if(!/^_MEI\d+$/.test(name))continue;
+     const dir=path.join(parent,name);
+     try{
+      const st=fs.lstatSync(dir);
+      if(!st.isDirectory()||st.isSymbolicLink()||now-st.mtimeMs<15*60*1000)continue;
+      if(path.dirname(fs.realpathSync(dir))!==parentReal)continue;
+      const filenames=fs.readdirSync(dir);
+      if(!filenames.some(x=>/^koboldcpp_(?:cublas|vulkan).*\.dll$/i.test(x)))continue;
+      // Never traverse a directory containing a symbolic link/junction.
+      let unsafe=false,checked=0;
+      const scan=p=>{for(const n of fs.readdirSync(p)){if(++checked>20000){unsafe=true;return}const target=path.join(p,n),v=fs.lstatSync(target);if(v.isSymbolicLink()){unsafe=true;return}if(v.isDirectory())scan(target);if(unsafe)return}};
+      scan(dir);if(unsafe)continue;
+      found.push({role,path:dir,bytes:bytesAt(dir),ageMinutes:Math.floor((now-st.mtimeMs)/60000)});
+     }catch{}
+    }
+   }catch{}
+  }
+  return found;
+ }
+ function cleanRuntime({confirm=false,enginesStopped=false}={}){
+  if(confirm!==true)throw Error('Explicit confirmation required to remove owned runtime extraction files.');
+  if(enginesStopped!==true)throw Error('All Hero Tavern engines must be stopped first.');
+  if(process.platform==='win32'){
+   const {execFileSync}=require('node:child_process');
+   const output=execFileSync('tasklist.exe',['/FI','IMAGENAME eq koboldcpp.exe','/FO','CSV','/NH'],{encoding:'utf8',timeout:5000,windowsHide:true});
+   if(/"?koboldcpp\.exe"?/i.test(output))throw Error('KoboldCpp is still running; cannot clean extracted runtime.');
+  }else throw Error('Runtime cleanup is enabled only for Windows installations.');
+  const before=fs.statfsSync(root),items=runtimeCandidates(),removed=[],errors=[];
+  for(const item of items){
+   try{
+    if(!isWithin(runtimeRoot,item.path))continue;
+    fs.rmSync(item.path,{recursive:true,force:false,maxRetries:0});
+    removed.push(item.path);
+   }catch(e){errors.push({path:item.path,error:e.message})}
+  }
+  const after=fs.statfsSync(root);
+  return {removed,errors,estimatedBytes:items.filter(x=>removed.includes(x.path)).reduce((v,x)=>v+x.bytes,0),
+    freeBytesChange:(after.bavail*after.bsize)-(before.bavail*before.bsize)};
+ }
+
  function report(){
   const items=safeItems();
   let freeBytes=null;try{const s=fs.statfsSync(root);freeBytes=s.bavail*s.bsize}catch{}
-  return {categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),fileActivity:fileActivity(),externalCaches:externalCacheReport(),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
+  return {categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),fileActivity:fileActivity(),externalCaches:externalCacheReport(),runtimeCandidates:runtimeCandidates(),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
    note:'Only completed installer archives and committed transaction backups are eligible. Models, user images, chats, saves, npm cache and in-progress downloads are protected.'};
  }
  function cleanup({confirm=false}={}){
@@ -155,7 +205,7 @@ function createDiskCare(root){
   fs.rmSync(cache,{recursive:true,force:true,maxRetries:2});
   return {freedBytes:amount,skipped:false};
  }
- return {report,cleanup,clearNpmCache,fileActivity,externalCacheReport};
+ return {report,cleanup,clearNpmCache,fileActivity,externalCacheReport,runtimeCandidates,cleanRuntime};
 }
 module.exports={createDiskCare,bytesAt};
 if(require.main===module){

@@ -32,7 +32,7 @@ test('Revisions require explicit confirmation; original external file is never o
   const result=agent.apply({id:imported.file.id,confirm:true});
   assert.equal(result.file.revision,2);
   assert.equal(fs.readFileSync(original,'utf8'),'Original external disk data.');
-  const restored=agent.action('/assistant/file-restore',{id:imported.file.id,revision:1,confirm:true});
+  const restored=await agent.action('/assistant/file-restore',{id:imported.file.id,revision:1,confirm:true});
   assert.equal(restored.file.text,'# Old title\nRetained body.');
   assert.equal(restored.file.revision,3);
  }finally{fs.rmSync(root,{recursive:true,force:true})}

@@ -203,7 +203,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       const requiresComfy=!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint';
       if(engine!=='koboldcpp'||requiresComfy){
         const ok=await comfy.available();
-        if(ok&&(comfyCheckpoint||input.workflowId))actualEngine='comfyui';
+        if(ok&&(comfyCheckpoint||input.workflowId||input.operation==='upscale'))actualEngine='comfyui';
         else if(engine==='comfyui'||requiresComfy)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or choose a basic KoboldCpp text-to-image job.');
       }
       if(requiresComfy&&actualEngine!=='comfyui')throw Error('LoRA, batches, upscaling and image editing require ComfyUI.');

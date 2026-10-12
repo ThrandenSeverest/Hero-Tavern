@@ -91,9 +91,32 @@
  $('assistant-delete-chat').onclick=async()=>{if(!state.chat||!confirm('Delete this assistant conversation? Imported files remain.'))return;try{renderChats(await req('/assistant/delete',{id:state.chat.id,confirm:true}));setStatus('Conversation deleted.')}catch(e){setStatus(e.message)}};
  $('assistant-qwen').onclick=withBusy(async()=>{
   if(!confirm('Load Qwen3 8B Abliterated as the shared local text model? The currently loaded roleplay model will be stopped and can be reselected later. No second model will stay loaded in GPU memory.'))return;
-  const result=await req('/assistant/model-use',{confirm:true});
-  setStatus(result.status||'Qwen loading…');
-  $('assistant-model').textContent='Qwen3 8B Abliterated · loading local engine';
+  const desired='qwen3-8b-abliterated-Q4_K_M.gguf';
+  let info=await req('/status');
+  if(!info.installed?.includes(desired))throw Error('Qwen Abliterated has not been downloaded. Open Model library, download the Qwen default GGUF, then return here.');
+  if(info.generationState!=='idle'||info.imageJob)throw Error('Finish the running AI task before changing models.');
+  if(info.backendRunning&&info.runningModel!==desired){
+   setStatus('Unloading previous roleplay model…');
+   await req('/stop',{});
+   for(let i=0;i<45;i++){
+    await new Promise(r=>setTimeout(r,1000));
+    info=await req('/status');if(!info.backendRunning)break;
+   }
+   if(info.backendRunning)throw Error('Old text model did not shut down. See Diagnostics.');
+  }
+  if(info.selected!==desired)await req('/select',{name:desired});
+  info=await req('/status');
+  if(!info.backendRunning)await req('/start',{});
+  setStatus('Loading Qwen3 Abliterated. Existing chats and files stay intact…');
+  for(let i=0;i<180;i++){
+   await new Promise(r=>setTimeout(r,1000));
+   info=await req('/status');
+   if(info.backendReady&&info.runningModel===desired)break;
+   if(info.engineState==='error')throw Error(info.backendError||'Qwen model could not start.');
+  }
+  if(!info.backendReady||info.runningModel!==desired)throw Error('Qwen did not finish loading. Check Diagnostics.');
+  setStatus('Qwen3 Abliterated ready. The RP model can be restored later in Model library.');
+  $('assistant-model').textContent=desired+' · '+(info.loadedContext||8192)+' tokens';
  });
  $('assistant-web').onchange=()=>{
   $('assistant-web-settings').hidden=!$('assistant-web').checked;

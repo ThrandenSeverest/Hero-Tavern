@@ -254,6 +254,10 @@ Re-running setup preserves chats, settings, characters and models.
         if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
         Get-ChildItem -LiteralPath $Downloads -Filter 'node-*-win-x64.zip' -File -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
     }
+    # Cleanup covers only completed journals and verified obsolete installer archives.
+    # In-progress downloads, image files, models, saves and old chats stay untouched.
+    try { & $nodeExe (Join-Path $Root 'DiskCare.cjs') $Root; if ($LASTEXITCODE -ne 0) { Write-Host 'Disk cleanup skipped; use the Storage tab later.' -ForegroundColor Yellow } }
+    catch { Write-Host ('Non-critical cleanup warning: ' + $_.Exception.Message) -ForegroundColor Yellow }
     Write-Host 'Hero Tavern installed. Opening the chat UI; use Models to download Qwen.' -ForegroundColor Green
     Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'StartHeroTavern.ps1') + '"')
 } catch {

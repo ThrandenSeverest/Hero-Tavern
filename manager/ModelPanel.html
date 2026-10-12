@@ -38,7 +38,7 @@
 <label class="check"><input id="hero-runtime-lowvram" type="checkbox" checked>Low VRAM (recommended for 12 GB GPU)</label>
 </div>
 <div class="actions"><button id="hero-runtime-save">Save runtime location</button><button id="hero-runtime-install">Install official ComfyUI Portable</button><button id="hero-runtime-start">Start managed ComfyUI</button><button id="hero-runtime-stop">Stop managed ComfyUI</button><button id="hero-runtime-cancel">Cancel installation</button></div>
-<p id="hero-runtime-state"></p>
+<p id="hero-runtime-state"></p><progress id="hero-runtime-progress" max="100" value="0" style="width:100%" aria-label="ComfyUI installer progress"></progress>
 <p class="small"><a href="https://github.com/Comfy-Org/ComfyUI" target="_blank" rel="noopener noreferrer">Official ComfyUI repository</a> · <a href="https://7-zip.org/" target="_blank" rel="noopener noreferrer">7-Zip extractor</a></p>
 </details>
 </div>
@@ -382,7 +382,12 @@ async function heroHubRefresh(){
   status.textContent=running?'Downloading '+running.file+' · '+(running.bytes/1073741824).toFixed(2)+' GiB / '+(running.total/1073741824).toFixed(2)+' GiB · '+running.phase:
    active?(active.installed?'Installed and ready: ':'Missing dependencies for: ')+active.name+(active.missing?.length?' · '+active.missing.join(', '):''):'Select an image model.';
   runtimeStatus.textContent=engine.available?'ComfyUI connected on 127.0.0.1:8188':(engine.runtime?.running?'ComfyUI is loading…':'ComfyUI is not connected.');
-  if(engine.runtime?.install)runtimeStatus.textContent+=' · setup: '+engine.runtime.install.phase;
+  if(engine.runtime?.install){
+   const job=engine.runtime.install;
+   runtimeStatus.textContent+=' · setup: '+job.phase+' · '+(job.bytes/1073741824).toFixed(2)+' GiB'+(job.expected?' / '+(job.expected/1073741824).toFixed(2)+' GiB':'');
+   const bar=el('hero-runtime-progress');
+   if(job.expected>0)bar.value=Math.min(100,job.bytes/job.expected*100);else bar.removeAttribute('value');
+  }else el('hero-runtime-progress').value=0;
   return engine;
  }catch(e){status.textContent='Model Hub: '+e.message;return null}
 }

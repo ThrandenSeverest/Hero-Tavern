@@ -1,7 +1,7 @@
 'use strict';
 // Model-specific ComfyUI graphs. End users choose "FLUX" or "Z-Image"; no JSON or nodes.
 const crypto=require('node:crypto'),{buildWorkflow}=require('./ComfyWorkflows.cjs');
-function recipeGraph(pack,params,{checkpoint='',source,mask}={}){
+function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}){
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';
  if(mode!=='txt2img'){
@@ -9,7 +9,7 @@ function recipeGraph(pack,params,{checkpoint='',source,mask}={}){
   if(!['img2img','inpaint'].includes(mode)||!source||(mode==='inpaint'&&!mask))throw Error('FLUX.2 Klein reference editing requires a saved source image (plus a mask for local editing).');
  }
  if(params.lora?.length)throw Error('This preset needs a model-specific LoRA workflow. Clear standard SDXL LoRAs before generating.');
- const files=Object.fromEntries(pack.files.map(x=>[x.group,x.name]));
+ const files=Object.fromEntries(pack.files.map(x=>[x.group,resolvedFiles[x.group]||x.name]));
  const nodes={};let seq=0;
  const n=(type,inputs)=>{const id=String(++seq);nodes[id]={class_type:type,inputs};return [id,0]};
  const seed=params.seed<0||params.seed==null?crypto.randomInt(0,2147483647):params.seed;

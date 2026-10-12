@@ -44,7 +44,7 @@ test('Z-Image Turbo uses lumina2 Qwen loader, AuraFlow scheduler and limited bat
  assert.ok(nodes.some(n=>n.class_type==='ModelSamplingAuraFlow'&&n.inputs.shift===3));
  assert.equal(nodes.find(n=>n.class_type==='KSampler').inputs.steps,9);
  assert.throws(()=>recipeGraph(pack,{...settings,batch_size:5}),/Choose 1, 2 or 4/);
- assert.throws(()=>recipeGraph(pack,{...settings,operation:'inpaint'}),/generation only/);
+ assert.throws(()=>recipeGraph(pack,{...settings,operation:'inpaint'}),/text-to-image only/);
 });
 test('ComfyUI model paths stay inside a selected existing ComfyUI model root',async()=>{
  const home=root();try{

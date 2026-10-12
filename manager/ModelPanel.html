@@ -352,7 +352,7 @@ let heroHubReady=false,heroHubDetails=null,heroHubInstalling=false,heroHubDownlo
 function heroHubCard(pack){
  const box=document.createElement('article');box.className='card';box.style.minWidth='220px';
  const head=document.createElement('strong');head.textContent=pack.name;
- const summary=document.createElement('p');summary.className='small';summary.textContent=pack.description+' · '+pack.vram;
+ const summary=document.createElement('p');summary.className='small';summary.textContent=pack.description+' · GPU: '+pack.vram+(pack.downloadGiB?' · Download ≈'+pack.downloadGiB+' GiB':'')+' · '+(pack.license||'');
  const status=document.createElement('p');status.textContent=pack.installed?'Ready to use':'Missing: '+(pack.missing||[]).join(', ');
  status.style.color=pack.installed?'#80d9ae':'#eabf7e';
  const link=document.createElement('a');link.href=pack.docs;link.target='_blank';link.rel='noopener';link.textContent='Official model docs / license';
@@ -409,7 +409,8 @@ el('hero-pack-save').onclick=async()=>{
 };
 el('hero-pack-download').onclick=async()=>{
  const id=el('hero-pack-select').value;
- if(!confirm('Download ALL missing '+id+' model components into the configured ComfyUI models folder? This can be more than 10 GB and will consume disk space. Source: official Hugging Face model repositories.'))return;
+ const selectedPack=heroHubDetails?.engine?.packs?.find(p=>p.id===id);const size=selectedPack?.downloadGiB?' (~'+selectedPack.downloadGiB+' GiB for a fresh installation)':'';
+ if(!confirm('Download missing '+id+' model components'+size+' into the selected ComfyUI models directory? Existing valid files will be reused, and free space will be checked. Source: official Hugging Face repositories.'))return;
  heroHubDownloading=true;el('hero-pack-download').disabled=true;
  try{
   if(el('hero-pack-root').value)await request('/comfy/models/configure',{modelRoot:el('hero-pack-root').value});

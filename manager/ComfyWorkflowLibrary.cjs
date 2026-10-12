@@ -41,7 +41,7 @@ function apply(graph,params={}){
   '{{negative}}':String(params.negative_prompt||'').slice(0,12000),
   '{{seed}}':seed,'{{steps}}':Number(params.steps)||20,
   '{{width}}':Number(params.width)||1024,'{{height}}':Number(params.height)||1024,
-  '{{guidance}}':Number(params.cfg_scale)||5
+  '{{guidance}}':Number(params.cfg_scale)||5,'{{source}}':String(params.sourceImage||''),'{{mask}}':String(params.maskImage||'')
  };
  const transform=v=>{
   if(typeof v==='string'){

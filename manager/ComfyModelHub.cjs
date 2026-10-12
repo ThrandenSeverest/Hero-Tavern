@@ -6,9 +6,9 @@ const PACKS=[
  {id:'sdxl',name:'SDXL · art & LoRA',family:'sdxl',description:'Painted and photographic artwork; compatible checkpoint & LoRA selection.',recommended:'Illustration and classic Stable Diffusion workflows',vram:'8–12 GB',files:[],docs:'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0',steps:28,cfg:6,width:1024,height:1024},
  {id:'flux-klein',name:'FLUX.2 Klein 4B · character edits',family:'flux2',description:'Fast multi-component image engine for reference editing and coherent scenes.',recommended:'Character fidelity and references',vram:'~9 GB+ (varies by workflow)',docs:'https://docs.comfy.org/tutorials/flux/flux-2-klein',steps:4,cfg:1,width:1024,height:1024,
   files:[
-   {group:'diffusion_models',name:'flux-2-klein-4b-fp8.safetensors',repo:'Comfy-Org/flux2-klein',source:'split_files/diffusion_models/flux-2-klein-4b-fp8.safetensors'},
+   {group:'diffusion_models',name:'flux-2-klein-4b.safetensors',repo:'Comfy-Org/flux2-klein',source:'split_files/diffusion_models/flux-2-klein-4b-fp8.safetensors'},
    {group:'text_encoders',name:'qwen_3_4b.safetensors',repo:'Comfy-Org/flux2-klein',source:'split_files/text_encoders/qwen_3_4b.safetensors'},
-   {group:'vae',name:'flux2-vae.safetensors',repo:'Comfy-Org/flux2-klein',source:'split_files/vae/flux2-vae.safetensors'}
+   {group:'vae',name:'flux2-vae.safetensors',repo:'Comfy-Org/vae-text-encorder-for-flux-klein-4b',source:'split_files/vae/flux2-vae.safetensors'}
   ]},
  {id:'z-turbo',name:'Z-Image Turbo · fast scenes',family:'zimage',description:'Turbo diffusion with compressed weights and matching Qwen encoder.',recommended:'Fast group scenes, portraits and visual ideas',vram:'12 GB with offload (model dependent)',docs:'https://huggingface.co/Comfy-Org/z_image_turbo',steps:9,cfg:1,width:1024,height:1024,
   files:[

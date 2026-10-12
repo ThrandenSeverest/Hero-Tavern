@@ -38,12 +38,25 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
  async function isReachable(){
   try{const res=await fetchFn('http://127.0.0.1:'+port+'/system_stats',{signal:AbortSignal.timeout(1800)});return res.ok}catch{return false}
  }
+ function shareHeroCheckpoints(runtime){
+  // Write only to the Hero Tavern-owned Portable installation; never modify an external app.
+  const managedRoot=path.resolve(root,'ComfyUI-Portable');
+  const rel=path.relative(managedRoot,runtime.base);
+  if(rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))return {linked:false,reason:'External portable installation left unmodified.'};
+  const file=path.join(runtime.base,'ComfyUI','extra_model_paths.yaml');
+  if(fs.existsSync(file))return {linked:false,reason:'Existing extra_model_paths.yaml preserved. Configure Hero Tavern ImageModels manually.'};
+  const clean=root.replace(/\\/g,'/').replace(/'/g,"''");
+  fs.writeFileSync(file,"# Hero Tavern managed shared image checkpoint directory\nhero_tavern:\n  base_path: '"+clean+"'\n  checkpoints: ImageModels\n");
+  return {linked:true,file};
+ }
+
  async function start(){
   if(process.platform!=='win32')throw Error('Built-in portable ComfyUI launcher currently requires Windows.');
   if(child)return status();
   if(await isReachable())return {alreadyRunning:true,external:true,...status()};
   const runtime=installed();if(!runtime)throw Error('ComfyUI Portable not found. Use Install, or select your existing ComfyUI Portable directory.');
   config.mode='managed';config.folder=runtime.base;save();
+  shareHeroCheckpoints(runtime);
   fs.mkdirSync(path.join(root,'Cache','ComfyUI'),{recursive:true});
   const fd=fs.openSync(path.join(logs,'comfy-engine.log'),'a');
   try{

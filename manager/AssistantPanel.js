@@ -21,15 +21,30 @@
    container.append(element);
   }
   const messages=$('assistant-messages');messages.replaceChildren();
-  for(const message of result.chat?.messages||[])addMessage(message.role,message.text);
+  for(const message of result.chat?.messages||[])addMessage(message.role,message.text,message.sources||[]);
   messages.scrollTop=messages.scrollHeight;
  }
- function addMessage(role,body){
+ function addMessage(role,body,sources=[]){
   const area=$('assistant-messages'),bubble=document.createElement('div');
   bubble.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;padding:15px 18px;border-radius:12px;margin:12px 0;max-width:95%;background:'+(role==='user'?'#334358':'#202d41')+';border:1px solid #44516a;';
   const label=document.createElement('strong');label.textContent=role==='assistant'?'Qwen Assistant':'You';
   const text=document.createElement('div');text.textContent=body;text.style.marginTop='8px';
-  bubble.append(label,text);area.append(bubble);area.scrollTop=area.scrollHeight;
+  bubble.append(label,text);area.append(bubble);
+  if(sources.length){
+   const box=document.createElement('div');box.className='card';
+   const heading=document.createElement('strong');heading.textContent='Web sources (Brave Search excerpts)';
+   box.append(heading);
+   for(let i=0;i<Math.min(5,sources.length);i++){
+    const item=sources[i],link=document.createElement('a');
+    if(!item.url?.startsWith('https://'))continue;
+    link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';
+    link.textContent='['+(i+1)+'] '+item.title;
+    const preview=document.createElement('p');preview.className='small';preview.textContent=item.snippet;
+    box.append(link,preview);
+   }
+   area.append(box);
+  }
+  area.scrollTop=area.scrollHeight;
  }
  function selectedMode(){return $('assistant-depth').value}
  function selectedFile(){return $('assistant-file-list').value}
@@ -70,18 +85,6 @@
   try{
    const reply=await req('/assistant/message',{prompt,mode:selectedMode(),web:usesWeb,apiKey:usesWeb?key:undefined});
    addMessage('assistant',reply.answer);
-   if(reply.sources?.length){
-    const box=document.createElement('div');box.className='card';
-    const heading=document.createElement('strong');heading.textContent='Web search sources (Brave Search snippets)';
-    box.append(heading);
-    for(let i=0;i<reply.sources.length;i++){
-     const a=document.createElement('a');a.href=reply.sources[i].url;a.target='_blank';a.rel='noopener noreferrer';
-     a.textContent='['+(i+1)+'] '+reply.sources[i].title;
-     const p=document.createElement('p');p.className='small';p.textContent=reply.sources[i].snippet;
-     box.append(a,p);
-    }
-    $('assistant-messages').append(box);
-   }
    const saved=await req('/assistant/chats');renderChats(saved);
    setStatus('Answer complete · '+reply.model+(reply.webUsed?' · web sources attached':'')+(reply.planningPasses===2?' · 2-pass Deep Think':''));
   }catch(e){$('assistant-input').value=prompt;throw e}

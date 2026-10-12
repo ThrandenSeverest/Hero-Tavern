@@ -27,6 +27,16 @@ test('FLUX.2 Klein text-to-image uses correct Qwen encoder, Flux2Scheduler and l
  assert.equal(values.find(n=>n.class_type==='UNETLoader').inputs.unet_name,'flux-2-klein-4b.safetensors');
  assert.equal(result.seed,94);
 });
+test('FLUX.2 Klein reference edit uses VAEEncode and ReferenceLatent; masked edit protects original pixels',()=>{
+ const pack=PACKS.find(p=>p.id==='flux-klein');
+ const reference=recipeGraph(pack,{...settings,operation:'img2img'}, {source:'hero.png'});
+ assert.ok(Object.values(reference.graph).some(n=>n.class_type==='ReferenceLatent'));
+ assert.ok(Object.values(reference.graph).some(n=>n.class_type==='VAEEncode'));
+ const mask=recipeGraph(pack,{...settings,operation:'inpaint'}, {source:'hero.png',mask:'mask.png'});
+ assert.ok(Object.values(mask.graph).some(n=>n.class_type==='ImageCompositeMasked'));
+ assert.ok(Object.values(mask.graph).some(n=>n.class_type==='LoadImageMask'));
+ assert.throws(()=>recipeGraph(pack,{...settings,operation:'inpaint'}, {source:'hero.png'}),/requires a saved source/);
+});
 test('Z-Image Turbo uses lumina2 Qwen loader, AuraFlow scheduler and limited batch size',()=>{
  const pack=PACKS.find(p=>p.id==='z-turbo'),result=recipeGraph(pack,settings);
  const nodes=Object.values(result.graph);

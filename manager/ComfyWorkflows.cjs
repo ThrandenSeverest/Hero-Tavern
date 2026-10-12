@@ -13,10 +13,9 @@ function clamp(n,min,max,name){
  return n;
 }
 function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel='',upscaleFactor=2}={}){
- modelName(checkpoint,'Checkpoint');
- if(!/\.safetensors$/i.test(checkpoint))throw Error('Choose an installed .safetensors checkpoint.');
  const validModes=['txt2img','img2img','inpaint','upscale'],operation=mode||(source?(mask?'inpaint':'img2img'):'txt2img');
  if(!validModes.includes(operation))throw Error('Unsupported ComfyUI operation.');
+ if(operation!=='upscale'){modelName(checkpoint,'Checkpoint');if(!/\.safetensors$/i.test(checkpoint))throw Error('Choose an installed .safetensors checkpoint.');}
  if(operation!=='txt2img'&&!source)throw Error('A saved source image is required.');
  if(operation==='inpaint'&&!mask)throw Error('An inpaint mask is required.');
  if(operation!=='inpaint'&&mask)throw Error('Masks are supported only by inpainting.');

@@ -90,7 +90,20 @@ function createDiskCare(root){
   }
   return {freedBytes,removed,errors,report:report()};
  }
- return {report,cleanup};
+ function clearNpmCache({confirm=false}={}){
+  if(confirm!==true)throw Error('Explicit consent required: npm cache can be shared with other applications.');
+  const local=process.env.LOCALAPPDATA;
+  if(!local)throw Error('LOCALAPPDATA is unavailable; npm cache not located.');
+  const cache=path.join(local,'npm-cache');
+  if(!fs.existsSync(cache))return {freedBytes:0,skipped:true};
+  if(fs.lstatSync(cache).isSymbolicLink()||!fs.statSync(cache).isDirectory())throw Error('Refusing unexpected npm cache path.');
+  if(path.dirname(fs.realpathSync(cache))!==fs.realpathSync(local))throw Error('Refusing npm cache outside LOCALAPPDATA.');
+  const amount=bytesAt(cache);
+  // Node/npm package cache only: installed packages under node_modules are untouched.
+  fs.rmSync(cache,{recursive:true,force:true,maxRetries:2});
+  return {freedBytes:amount,skipped:false};
+ }
+ return {report,cleanup,clearNpmCache};
 }
 module.exports={createDiskCare,bytesAt};
 if(require.main===module){

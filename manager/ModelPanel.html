@@ -501,7 +501,9 @@ async function heroHubRefresh(){
   const cfg=hub.hub?.settings||{};
   if(!heroHubReady){
    const studio=await request('/studio/get');
-   el('hero-pack-select').value=studio.settings.modelPack||cfg.selected||'sdxl';
+   const initial=cfg.selected&&cfg.selected!=='sdxl'?cfg.selected:(studio.settings.engine==='koboldcpp'?'koboldcpp':studio.settings.modelPack||'sdxl');
+   el('hero-pack-select').value=initial==='koboldcpp'?'sdxl':initial;
+   el('image-create-model').value=initial;
    el('hero-pack-root').value=cfg.modelRoot||engine.runtime?.detected?.models||'';
    el('hero-runtime-mode').value=engine.runtime?.mode||'external';
    el('hero-runtime-folder').value=engine.runtime?.folder||'';
@@ -523,29 +525,18 @@ async function heroHubRefresh(){
    const bar=el('hero-runtime-progress');
    if(job.expected>0)bar.value=Math.min(100,job.bytes/job.expected*100);else bar.removeAttribute('value');
   }else el('hero-runtime-progress').value=0;
+  updateStudioModelStatus();
   return engine;
  }catch(e){status.textContent='Model Hub: '+e.message;return null}
 }
 el('hero-pack-check').onclick=heroHubRefresh;
 el('hero-pack-select').onchange=async()=>{
- const pack=heroHubDetails?.engine?.packs?.find(p=>p.id===el('hero-pack-select').value);
- if(pack){
-  el('image-width').value=pack.width;el('image-height').value=pack.height;
-  el('image-steps').value=pack.steps;el('image-cfg').value=pack.cfg;
-  if(pack.id!=='sdxl'){
-   el('hero-engine').value='comfyui';el('studio-preset').value='raw';
-   el('hero-comfy-mode').value='txt2img';el('hero-comfy-mode').dispatchEvent(new Event('change'));
-   el('hero-comfy-batch').value='1';
-  }
- }
- await heroHubRefresh();
+ try{await selectStudioModel(el('hero-pack-select').value);await heroHubRefresh()}
+ catch(e){el('hero-pack-state').textContent=e.message}
 };
 el('hero-pack-save').onclick=async()=>{
- try{
-  await request('/studio/configure',{modelPack:el('hero-pack-select').value,engine:el('hero-engine').value,preset:el('studio-preset').value,comfyCheckpoint:el('hero-comfy-checkpoint').value});
-  await request('/comfy/models/select',{id:el('hero-pack-select').value});
-  el('hero-pack-state').textContent='Selected '+el('hero-pack-select').selectedOptions[0].text+'. Hero Tavern chooses the workflow automatically.';
- }catch(e){el('hero-pack-state').textContent=e.message}
+ try{await selectStudioModel(el('hero-pack-select').value);el('hero-pack-state').textContent='Selected '+el('hero-pack-select').selectedOptions[0].text+'. Generate from Image Studio · Create.'}
+ catch(e){el('hero-pack-state').textContent=e.message}
 };
 el('hero-pack-download').onclick=async()=>{
  const id=el('hero-pack-select').value;
@@ -557,6 +548,7 @@ el('hero-pack-download').onclick=async()=>{
   const outcome=await request('/comfy/models/download',{id,confirm:true});
   el('hero-pack-state').textContent='Completed model installation for '+outcome.packId+'.';
   await heroHubRefresh();
+  await selectStudioModel(id);
  }catch(e){el('hero-pack-state').textContent=e.message}finally{heroHubDownloading=false;el('hero-pack-download').disabled=false}
 };
 el('hero-pack-cancel').onclick=async()=>{try{await request('/comfy/models/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
@@ -633,7 +625,8 @@ async function heroComfyProbe(){
   list.replaceChildren(new Option('Select installed checkpoint',''),...x.checkpoints.map(name=>new Option(name,name)));
   list.value=x.checkpoints.includes(value)?value:'';
   heroFillComfyAdvanced(x);
-  return x;
+  updateStudioModelStatus();
+   return x;
  }catch(e){state.textContent=e.message;return null}
 }
 function heroFillComfyAdvanced(x){

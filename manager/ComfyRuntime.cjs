@@ -44,12 +44,12 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
   if(await isReachable())return {alreadyRunning:true,external:true,...status()};
   const runtime=installed();if(!runtime)throw Error('ComfyUI Portable not found. Use Install, or select your existing ComfyUI Portable directory.');
   config.mode='managed';config.folder=runtime.base;save();
+  fs.mkdirSync(path.join(root,'Cache','ComfyUI'),{recursive:true});
   const fd=fs.openSync(path.join(logs,'comfy-engine.log'),'a');
   try{
    child=spawnFn(runtime.python,['-s',runtime.app,'--listen','127.0.0.1','--port',String(port),'--disable-auto-launch','--windows-standalone-build',...(config.lowVram?['--lowvram']:[])],
     {cwd:runtime.base,windowsHide:true,env:{...process.env,TEMP:path.join(root,'Cache','ComfyUI'),TMP:path.join(root,'Cache','ComfyUI')},stdio:['ignore',fd,fd]});
   }finally{fs.closeSync(fd)}
-  fs.mkdirSync(path.join(root,'Cache','ComfyUI'),{recursive:true});
   const current=child;started=Date.now();ready=false;error='';
   current.on('error',e=>{error=e.message;if(child===current){child=null;ready=false}});
   current.on('exit',code=>{if(child===current){child=null;ready=false;if(code)error='ComfyUI exited with code '+code+'. Check Logs/comfy-engine.log'}});

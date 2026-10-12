@@ -83,7 +83,7 @@
   addMessage('user',prompt);$('assistant-input').value='';
   setStatus(selectedMode()==='deep'?'Deep Think: planning and then answering…':'Generating with local Qwen…');
   try{
-   const reply=await req('/assistant/message',{prompt,mode:selectedMode(),web:usesWeb,apiKey:usesWeb?key:undefined,fileId:$('assistant-include-file').checked?selectedFile():undefined});
+   const reply=await req('/assistant/message',{prompt,mode:selectedMode(),web:usesWeb,searchQuery:usesWeb?$('assistant-web-query').value.trim():undefined,apiKey:usesWeb?key:undefined,fileId:$('assistant-include-file').checked?selectedFile():undefined});
    addMessage('assistant',reply.answer);
    const saved=await req('/assistant/chats');renderChats(saved);
    setStatus('Answer complete · '+reply.model+(reply.webUsed?' · web sources attached':'')+(reply.planningPasses===2?' · 2-pass Deep Think':''));

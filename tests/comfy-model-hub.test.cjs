@@ -17,6 +17,23 @@ test('Model catalog includes full multi-component dependencies and reports missi
    vae:flux.files.filter(f=>f.group==='vae').map(f=>f.name)}).find(p=>p.id==='flux-klein');
  assert.equal(ready.installed,true);assert.deepEqual(ready.missing,[]);
 });
+test('Existing FLUX FP8 filename and nested ComfyUI model folders are recognized without an SDXL checkpoint',()=>{
+ const {resolvePackFiles}=require('../manager/ComfyModelHub.cjs');
+ const pack=PACKS.find(p=>p.id==='flux-klein');
+ const listing={
+  checkpoints:[],
+  diffusion_models:['flux/flux-2-klein-4b-fp8.safetensors'],
+  text_encoders:['encoders/qwen_3_4b.safetensors'],
+  vae:['flux2-vae.safetensors']
+ };
+ const flux=composeStatus(listing).find(p=>p.id==='flux-klein');
+ assert.equal(flux.installed,true);
+ assert.deepEqual(flux.missing,[]);
+ const names=resolvePackFiles(pack,listing);
+ assert.equal(names.diffusion_models,'flux/flux-2-klein-4b-fp8.safetensors');
+ const result=recipeGraph(pack,settings,{resolvedFiles:names});
+ assert.equal(Object.values(result.graph).find(node=>node.class_type==='UNETLoader').inputs.unet_name,'flux/flux-2-klein-4b-fp8.safetensors');
+});
 test('FLUX.2 Klein text-to-image uses correct Qwen encoder, Flux2Scheduler and latent, not SDXL nodes',()=>{
  const p=PACKS.find(p=>p.id==='flux-klein'),result=recipeGraph(p,settings);
  const values=Object.values(result.graph);

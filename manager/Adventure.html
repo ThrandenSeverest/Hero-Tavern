@@ -169,7 +169,7 @@ async function aiJson(prompt,label='AI'){
  }
  throw Error(label+': два ответа модели не прошли проверку JSON ('+error.message+'). Ход не применён — можно повторить.');
 }
-async function aiJson(prompt,label='AI'){const raw=await aiText(prompt);try{return parseJson(raw)}catch(e){console.error(label,e);throw new Error(label+': модель вернула некорректный JSON. Повторите ход или увеличьте бюджет ответа в Generation.') }}
+
 function extractImageUrl(raw,depth=0){if(raw==null||depth>7)return'';if(typeof raw==='string'){const s=raw.trim();if(/^(https?:|data:image\/|blob:)/i.test(s))return s;const m=s.match(/https?:\/\/[^\s"'<>]+/);return m?m[0]:''}if(Array.isArray(raw))for(const v of raw){const u=extractImageUrl(v,depth+1);if(u)return u}if(typeof raw==='object')for(const k of ['dataUrl','imageUrl','url','image','src','data','output','result','value','uri'])if(raw[k]!=null){const u=extractImageUrl(raw[k],depth+1);if(u)return u}return''}
 
 const CLASS_CASTING={Wizard:'INT',Cleric:'WIS',Druid:'WIS',Bard:'CHA',Sorcerer:'CHA',Warlock:'CHA',Ranger:'WIS',Paladin:'CHA',Artificer:'INT'};

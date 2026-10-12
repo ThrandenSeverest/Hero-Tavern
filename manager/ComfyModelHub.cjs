@@ -68,8 +68,13 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   const lists={};for(const group of GROUPS){
    let names=[];const folder=settings.modelRoot?path.join(settings.modelRoot,group):'';
    try{
-    if(folder&&fs.existsSync(folder)&&!fs.lstatSync(folder).isSymbolicLink())
-     names=fs.readdirSync(folder,{withFileTypes:true}).filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>x.name);
+    if(folder&&fs.existsSync(folder)&&!fs.lstatSync(folder).isSymbolicLink()){
+     const items=fs.readdirSync(folder,{withFileTypes:true});
+     names=items.filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>x.name);
+     for(const sub of items.filter(x=>x.isDirectory()&&!x.isSymbolicLink()).slice(0,50)){
+      try{names.push(...fs.readdirSync(path.join(folder,sub.name),{withFileTypes:true}).filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>sub.name+'/'+x.name))}catch{}
+     }
+    }
    }catch{}
    lists[group]=names;
   }

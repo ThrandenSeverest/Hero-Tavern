@@ -18,6 +18,7 @@ const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {systemInfo,performancePreset}=require('./Performance.cjs');
 const {createAutoTune}=require('./AutoTune.cjs');
 const {createStudio}=require('./ImageStudio.cjs');
+const {createAssistantWorkspace}=require('./AssistantWorkspace.cjs');
 const {createDiskCare}=require('./DiskCare.cjs');
 const {createImageGallery}=require('./ImageGallery.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
@@ -273,13 +274,14 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       }
     };
     const studio=createStudio(root,{pipeline,ensureText,generateImage:generateStudioImage,getImageState:()=>images.snapshot()});
+    const assistant=createAssistantWorkspace(root,{backendURL,ensureText,getModelProfile:()=>profileFor(root,runningModel||selected()),modelName:()=>runningModel||selected(),contextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,readGeneration:()=>readSettings(root)});
     const tuner=createAutoTune(root,{systemInfo,readGeneration:()=>readSettings(root),saveGeneration:value=>saveSettings(root,value),abort:()=>pipeline.abort(),stop:async()=>{lastAttempt=selected();stopBackend();if(images.snapshot().running)await images.action('/images/stop',{});await waitUntil(()=>!backend&&!images.snapshot().running,null,30000);},load:async(signal,limit)=>{await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Engine failed to load.');return backendReady;},signal,limit);},benchmark:async signal=>{const started=Date.now();const r=await pipeline.generate({prompt:'<|im_start|>user\n'+('A traveller enters an inn and remembers a blue cloak. '.repeat(120))+'\nWrite a brief vivid continuation with a new action.<|im_end|>\n<|im_start|>assistant\n',stream:false,seed:1234},signal,{mode:'utility'});return {...r,elapsedMs:Date.now()-started};}});
     const diagnosticEnvironment=async()=>({system:await systemInfo(),text:{running:!!backend,ready:backendReady,pausedForImage:imageJob||textPausedForImages,queuedReplies:queuedInference,model:runningModel,pid:backend?.pid,phase:generationState,configured:backendArguments(root,'').config,loaded:launchConfig,args:launchArgs,url:backendURL,error:backendError},image:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(),planner:thinking.snapshot(),pipeline:pipeline.runSnapshot(),context:contextDiagnostics,enginePerformance:backendReady?await engineFetch(backendURL+'/api/extra/perf',{timeoutMs:3000}).then(r=>r.json()).catch(e=>({error:e.message})):null,logs:{text:logTail(path.join(logs,'koboldcpp.log')),textError:logTail(path.join(logs,'koboldcpp-error.log')),image:logTail(path.join(logs,'image-engine.log'))}});
     const snapshot = () => {
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
-            tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
+            tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,assistant:assistant.snapshot(),pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
             engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(), thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
@@ -329,10 +331,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
-        const assets={'/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
+        const assets={'/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
+        if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
          if(req.method==='GET'&&req.url==='/comfy/models'){json(200,{hub:comfy.models.snapshot(),packs:(await comfy.catalog()).packs||[]});return;}
@@ -456,7 +459,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { comfyRuntime.stop().catch(()=>{});comfy.models.cancel();comfyRuntime.cancelInstall();comfy.cancel().catch(()=>{});studio.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { comfyRuntime.stop().catch(()=>{});comfy.models.cancel();comfyRuntime.cancelInstall();comfy.cancel().catch(()=>{});studio.cancel();assistant.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
     // Calibration must be user-initiated: an automatic first-launch calibration can repeatedly kill the chat worker.
     server.listen(port, '127.0.0.1');
     return server;

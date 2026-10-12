@@ -25,6 +25,7 @@ test('Library opens without a selected model and rejects unauthorized control re
         assert.equal(state.catalog.length, 8);
         assert.match(state.catalog[0].Label, /Qwen3 8B/);
         assert.equal((await fetch(origin + '/status')).status, 403);
+        const diagnostic=await(await fetch(origin+'/diagnostics/text',{method:'POST',headers,body:JSON.stringify({prompt:'Hello'})})).json();assert.equal(diagnostic.ok,false);assert.match(diagnostic.error,/Load a text model/);assert.ok(fs.existsSync(path.join(root,'Diagnostics/latest-text.json')));
         assert.equal((await fetch(origin + '/start', { method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: '{}' })).status, 403);
         const start = await fetch(origin + '/start', { method: 'POST', headers, body: '{}' });
         assert.equal(start.status, 400);

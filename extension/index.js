@@ -27,7 +27,7 @@ const initHeroTavern = async () => {
     `;
     document.head.append(style);
     const rail = document.createElement('nav');rail.id='hero-shell';rail.setAttribute('aria-label','Hero Tavern navigation');
-    rail.innerHTML='<div class="hero-brand">Hero Tavern</div><div class="hero-tagline">Your stories. Your AI.</div><div class="hero-rail-foot">Powered by SillyTavern<br>Local AI · KoboldCpp<br>Hero Tavern 0.6</div>';
+    rail.innerHTML='<div class="hero-brand">Hero Tavern</div><div class="hero-tagline">Your stories. Your AI.</div><div class="hero-rail-foot">Powered by SillyTavern<br>Local AI · KoboldCpp<br>Hero Tavern 0.7</div>';
     const header=document.createElement('header');header.id='hero-header';
     header.innerHTML='<strong id="hero-page-title">Your tavern</strong><button id="hero-engine-chip" class="hero-chip">Checking local AI…</button>';
     const workspace=document.createElement('main');workspace.id='hero-workspace';

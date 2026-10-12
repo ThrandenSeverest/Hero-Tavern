@@ -11,6 +11,7 @@ const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {createComfyAdapter}=require('./ComfyAdapter.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
+const {runtimeEnvironment}=require('./EngineRuntime.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {systemInfo,performancePreset}=require('./Performance.cjs');
@@ -117,7 +118,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         const out = fs.openSync(path.join(logs, 'koboldcpp.log'), 'w');
         const err = fs.openSync(path.join(logs, 'koboldcpp-error.log'), 'w');
         try {
-            backend = spawn(executable, [...backendPrefix, ...args], { cwd: root, windowsHide: true, stdio: ['ignore', out, err] });
+            backend = spawn(executable, [...backendPrefix, ...args], { cwd: root, windowsHide: true, env:runtimeEnvironment(root,'text'), stdio: ['ignore', out, err] });
         } finally { fs.closeSync(out); fs.closeSync(err); }
         state = 'Loading AI model… The chat interface remains available.';
         backendReady = false;

@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const CATALOG=[
  {name:'DreamShaper 8 · recommended · 2.13 GB',file:'DreamShaper_8_pruned.safetensors',repo:'Lykon/DreamShaper',hash:'879db523c30d3b9017143d56705015e15a2cb5628762c11d086fed9538abd7fd',size:2130000000,steps:24,cfg:7,width:512,height:768,sampler:'DPM++ 2M Karras'},
- {name:'DreamShaper XL Turbo · higher detail · 6.94 GB',file:'DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors',repo:'Lykon/DreamShaper',hash:'676f0d60c8e860146d5e8a0d802599cadd04e7cadf85c283f189f41f01c9e359',size:6940000000,steps:8,cfg:2,width:768,height:1024,sampler:'DPM++ SDE Karras'}
+ {name:'DreamShaper XL Turbo · higher detail · 6.94 GB',file:'DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors',repo:'Lykon/DreamShaper',hash:'676f0d60c8e860146d5e8a0d802599cadd04e7cadf85c283f189f41f01c9e359',size:6940000000,steps:8,cfg:2,width:768,height:1024,sampler:'DPM++ 2M Karras'}
 ];
 function safeFile(dir,name){if(typeof name!=='string'||path.basename(name)!==name||!name.endsWith('.safetensors'))throw Error('Choose a complete SD 1.5 / SDXL .safetensors checkpoint.');const file=path.join(dir,name);if(fs.existsSync(file)&&path.dirname(fs.realpathSync(file))!==fs.realpathSync(dir))throw Error('Model path escapes image library.');return file}
 async function verifyImage(file,hash='',expectedSize=0){
@@ -15,7 +15,7 @@ function imageParameters(input={},defaults={}){
  if(typeof value.prompt!=='string'||!value.prompt.trim()||value.prompt.length>8000||typeof value.negative_prompt!=='string'||value.negative_prompt.length>8000)throw Error('Enter an image prompt (max 8000 characters).');
  for(const key of ['width','height'])if(!Number.isInteger(value[key])||value[key]<256||value[key]>1536||value[key]%64)throw Error('Image dimensions must be multiples of 64, between 256 and 1536.');
  if(!Number.isInteger(value.steps)||value.steps<1||value.steps>60||!Number.isFinite(value.cfg_scale)||value.cfg_scale<1||value.cfg_scale>20||!Number.isInteger(value.seed)||value.seed< -1||value.seed>2147483647)throw Error('Invalid steps, guidance or seed.');
- if(!['Euler a','Euler','DPM++ 2M Karras','DPM++ SDE Karras','LCM'].includes(value.sampler_name))throw Error('Choose a supported image sampler.');return value;
+ if(!['Euler a','Euler','DPM++ 2M Karras','LCM'].includes(value.sampler_name))throw Error('Choose a supported image sampler.');if(value.sampler_name==='DPM++ 2M Karras'){value.sampler_name='dpm++2m';value.scheduler='karras'}return value;
 }
 function createImages(root,{command,prefix=[],port=5002,fetchBackend=fetch,pollInterval=2000,readinessTimeout=600000}={}){
  const dir=path.join(root,'ImageModels'),outputs=path.join(root,'Images'),logs=path.join(root,'Logs');for(const d of [dir,outputs,logs])fs.mkdirSync(d,{recursive:true});

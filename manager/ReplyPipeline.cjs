@@ -68,7 +68,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
         try {
             let plan='';
             const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify((({hero_context,...value})=>value)(request)),signal:controller.signal}));
-            const contextSize=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/, '')).contextSize:4096;
+            const contextSize=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/, '')).contextSize||4096:4096;
             const countTokens=async prompt=>{
                 const response=await fetchBackend(backendURL+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt}),signal:controller.signal});
                 if(response.ok){const value=await response.json();if(Number.isFinite(value.value)&&value.value>=0)return value.value;if(Array.isArray(value.ids))return value.ids.length;}
@@ -81,11 +81,11 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
             const overhead=budgeted?await countTokens(taskInstruction+'\n<|im_start|>system\n<|im_end|>\n')+96:0;
             const budget=contextSize-replyTokens-overhead-(mode==='chat'&&settings.thinkingMode==='separate'?settings.planningTokens+96:0);
             if(budget<128)throw Error('Reply and planning budgets leave no room for history. Lower Generation reply length or increase Hardware context.');
-            if(body.hero_context){
-                const memory=createMemory({root,countTokens,setDiagnostics,complete:async(prompt,max_tokens)=>filterReply(await send({prompt:replyPrompt('<|im_start|>user\n'+prompt+'<|im_end|>\n<|im_start|>assistant\n', 'Return compact continuity facts only. /no_think'),max_tokens,temperature:0.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})});
-                setState('remembering');body={...body,prompt:await memory.prepare(body,budget,settings)};
-            }
             const sendChecked=async request=>{if(budgeted&&await countTokens(request.prompt)+request.max_tokens>contextSize)throw Error('Prompt exceeds the loaded context. Increase Hardware context or shorten the character card/instructions. Chat history was not silently discarded.');return send(request)};
+            if(body.hero_context){
+                const memory=createMemory({root,countTokens,setDiagnostics,complete:async(prompt,max_tokens)=>filterReply(await sendChecked({prompt:replyPrompt('<|im_start|>user\n'+prompt+'<|im_end|>\n<|im_start|>assistant\n', 'Return compact continuity facts only. /no_think'),max_tokens,temperature:0.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})});
+                setState('remembering');body={...body,prompt:await memory.prepare(body,budget,{...settings,summaryInputBudget:contextSize-settings.memoryTokens-128})};
+            }
             if(mode==='chat'&&settings.thinkingMode==='separate'){
                 setState('planning');
                 const prompt=replyPrompt(body.prompt,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');

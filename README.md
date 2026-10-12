@@ -10,7 +10,7 @@ This is the first development version: the setup executable is built by GitHub A
 2. Double-click **Install.cmd**. It installs portable Node.js, SillyTavern and KoboldCpp without administrator rights, Git or Python.
 3. Setup opens **Hero Tavern / SillyTavern immediately**, even with no model installed.
 4. Click **Hero Tavern · Models** in the bottom-right corner. In the embedded panel, click **Download Qwen default** once.
-5. The approximately **5.03 GB** file downloads with progress, resume and SHA-256 verification. The first selected model starts in the background after verification. Hero Tavern automatically switches the chat to Text Completion / KoboldCpp at port 5001 and connects it, including for existing profiles that previously used KoboldAI Classic.
+5. The approximately **5.03 GB** file downloads with progress, resume and SHA-256 verification. The first selected model starts in the background after verification. Hero Tavern automatically switches the chat to Text Completion / KoboldCpp at port 5001 and connects it through Hero Tavern’s local reply pipeline, including for existing profiles that previously used KoboldAI Classic.
 
 On subsequent runs, use the **Hero Tavern** desktop shortcut. The chat UI opens first; a previously selected model loads in the background.
 
@@ -30,6 +30,21 @@ The launcher starts SillyTavern and the local model service, then opens your bro
 - Repeat setup preserves chats, characters, settings and downloaded models. It repairs dependencies and launchers; it does not upgrade an existing SillyTavern or KoboldCpp installation.
 - All services bind locally (SillyTavern 8000, model library 8001, KoboldCpp 5001). The launcher rejects busy ports and duplicate launches rather than terminating unrelated processes.
 - Startup logs in `Logs`; installation log in `install.log`.
+
+## Generation and reply filters
+
+Open **Generation** in the left navigation. Presets and editable controls cover creativity/temperature, Top P, Min P, repetition penalty, reply length, planning budget, writing instructions and dialogue-only versus narration style.
+
+- **Thinking disabled** is the default and requests a non-thinking Qwen reply.
+- **Separate private planning** makes an additional generation call to the same loaded engine, then generates the final reply using its private continuity outline. It does not load a second copy of the model.
+- Recognized thinking/analysis blocks are always stripped. Streaming engine output is buffered and cleaned before any text is sent to the chat, preventing partial thinking tags from flashing on screen.
+- Optional filters remove model control tokens, stop accidental user/system turns, remove exact duplicated paragraphs and apply user-defined literal stop markers.
+- Out-of-character writer announcements can trigger one corrective retry. This can be disabled; ordinary narration and character refusals are not treated as writer announcements.
+- A preview lets you test cleanup on sample text without generating a reply. Existing recognized reasoning blocks are hidden in the display without deleting stored conversations.
+
+The managed endpoint is `http://127.0.0.1:8001/inference`; Hero Tavern configures it automatically. KoboldCpp itself remains at port 5001. Direct connections to 5001 bypass this reply pipeline. Generation settings are saved in `generation.json` and apply to subsequent turns.
+
+The filters recognize structural reasoning markers and common writer announcements; they cannot reliably identify every untagged sentence as model reasoning versus fictional narration. Reply-style instructions and the one-time repair pass address those cases without blindly deleting story actions.
 
 ## Hardware
 
@@ -66,7 +81,7 @@ Our launcher and integration code are MIT licensed. Upstream components retain t
 Local profile test:
 
 ```sh
-node --test tests/*.test.cjs
+node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs
 ```
 
 Windows model validation test:

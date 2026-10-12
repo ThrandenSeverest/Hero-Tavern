@@ -4,6 +4,8 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { createPipeline, readSettings, saveSettings } = require('./ReplyPipeline.cjs');
+const { filterReply } = require('./ReplyFilters.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
     const stat = fs.statSync(file);
@@ -53,6 +55,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let download = null, backend = null, state = 'No model selected', lastAttempt = '', backendReady = false, checking = false;
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
+    let generationState = 'idle';
+    const pipeline = createPipeline({root,backendURL,setState: value => { generationState = value; }});
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
         if (!fs.existsSync(selection)) return '';
@@ -159,13 +163,14 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
             catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
-            engineState, runningModel, backendError, apiURL: backendURL,
+            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
     const server = http.createServer(async (req, res) => {
         const host = req.headers.host;
         if (host !== '127.0.0.1:' + server.address().port) { res.writeHead(403); res.end('Invalid host'); return; }
+        if (await pipeline.handle(req,res)) return;
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors http://127.0.0.1:8000 http://localhost:8000");
         const json = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -178,7 +183,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
-            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 4096) throw new Error('Request too large.'); }
+            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 16000) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if (req.url === '/download') await beginDownload(data.index);
             else if (req.url === '/custom') {
@@ -205,6 +210,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 lastAttempt = selected(); await runBackend();
             }
             else if (req.url === '/stop') { lastAttempt = selected(); stopBackend(); }
+            else if (req.url === '/generation') { saveSettings(root,data); }
+            else if (req.url === '/filter-preview') { json(200,{text:filterReply(data.text||'',readSettings(root))}); return; }
             else if (req.url === '/hardware') {
                 if (backend || starting) throw new Error('Stop AI before changing hardware settings.');
                 const current = fs.existsSync(path.join(root, 'backend.json')) ? fs.readFileSync(path.join(root, 'backend.json')) : null;
@@ -234,7 +241,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { clearInterval(timer); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { clearInterval(timer); pipeline.abort(); download?.process?.kill(); stopBackend(); manager?.kill(); });
     server.listen(port, '127.0.0.1');
     return server;
 }

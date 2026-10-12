@@ -112,7 +112,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -178,6 +178,7 @@ if errorlevel 1 pause
     New-Item -ItemType Directory -Force $extensionPath | Out-Null
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.js') -Destination (Join-Path $extensionPath 'index.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.json') -Destination (Join-Path $extensionPath 'manifest.json') -Force
+    Copy-Item -LiteralPath (Join-Path $supportDirectory 'ReplyFilters.cjs') -Destination (Join-Path $extensionPath 'reply-filters.js') -Force
     # Seed only a new default profile, never rewrite an existing profile.
     & $nodeExe (Join-Path $Root 'ConfigureTavern.cjs') $ST
     if ($LASTEXITCODE -ne 0) { throw 'Could not configure the local KoboldCpp connection.' }

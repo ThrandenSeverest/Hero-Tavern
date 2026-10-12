@@ -13,6 +13,14 @@
 - [x] Windows compilation workflow and regression tests.
 - [ ] Real Windows install → default download → character import → first generated reply smoke test.
 
+## Reply and layout improvements
+
+- [x] Dock character panels below the toolbar and reserve chat width when they open.
+- [x] Buffered reasoning cleanup before replies reach the chat.
+- [x] Optional separate private planning call using the same loaded model.
+- [x] Generation presets, editable sampling controls, reply styles and filter preview.
+- [x] Corrective retry for writer/meta announcements.
+
 ## Next: make first-run entirely graphical
 
 - [x] CPU/CUDA/Vulkan selector, GPU layers and context controls.

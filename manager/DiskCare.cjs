@@ -28,6 +28,7 @@ function isWithin(root,file){
 }
 function createDiskCare(root){
  const downloads=path.join(root,'Downloads'),transactions=path.join(root,'Story','transactions'),logs=path.join(root,'Logs');
+ let diskBaseline=null;
  const categories=[
   ['Models',path.join(root,'Models')],['Image models',path.join(root,'ImageModels')],
   ['Generated images',path.join(root,'Images')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
@@ -166,7 +167,9 @@ function createDiskCare(root){
  function report(){
   const items=safeItems();
   let freeBytes=null;try{const s=fs.statfsSync(root);freeBytes=s.bavail*s.bsize}catch{}
-  return {categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),fileActivity:fileActivity(),externalCaches:externalCacheReport(),runtimeCandidates:runtimeCandidates(),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
+  if(diskBaseline===null&&freeBytes!==null)diskBaseline=freeBytes;
+  const sessionFreeChange=freeBytes===null||diskBaseline===null?null:freeBytes-diskBaseline;
+  return {sessionFreeChange,storageWarning:sessionFreeChange!==null&&sessionFreeChange< -1073741824?'More than 1 GiB of free disk space disappeared during this app session. Inspect recent file activity and engine temp.':null,categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),fileActivity:fileActivity(),externalCaches:externalCacheReport(),runtimeCandidates:runtimeCandidates(),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
    note:'Only completed installer archives and committed transaction backups are eligible. Models, user images, chats, saves, npm cache and in-progress downloads are protected.'};
  }
  function cleanup({confirm=false}={}){

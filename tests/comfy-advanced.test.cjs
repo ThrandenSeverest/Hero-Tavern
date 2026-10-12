@@ -16,6 +16,11 @@ test('ComfyUI advanced workflows use core nodes for LoRA, batches, img2img, mask
  assert.ok(types(a.graph).includes('VAEEncodeForInpaint'));assert.ok(types(a.graph).includes('ImageCompositeMasked'));
  a=buildWorkflow({checkpoint:'art.safetensors',params:{...params,scene:{background:'medieval market',characters:[{description:'red haired elf left'},{description:'dwarf knight right'}],layout:'row'}}});
  assert.equal(types(a.graph).filter(x=>x==='ConditioningSetArea').length,2);
+ a=buildWorkflow({checkpoint:'art.safetensors',params:{...params,outpaint:{left:128,top:0,right:128,bottom:0,feathering:24}},source:'hero.png',mode:'outpaint'});
+ assert.ok(types(a.graph).includes('ImagePadForOutpaint'));
+ assert.ok(types(a.graph).includes('VAEEncodeForInpaint'));
+ assert.ok(types(a.graph).includes('ImageCompositeMasked'));
+ assert.throws(()=>buildWorkflow({checkpoint:'art.safetensors',params:{...params,outpaint:{left:13}},source:'hero.png',mode:'outpaint'}),/divisible by 8/);
  a=buildWorkflow({checkpoint:'art.safetensors',params,source:'hero.png',mode:'upscale',upscaleModel:'4x-HD.pth'});
  assert.ok(types(a.graph).includes('ImageUpscaleWithModel'));
  a=buildWorkflow({checkpoint:'art.safetensors',params,source:'hero.png',mode:'upscale',upscaleFactor:2});

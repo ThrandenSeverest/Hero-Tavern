@@ -21,7 +21,7 @@ const GROUPS=['checkpoints','diffusion_models','text_encoders','vae','loras','up
 const safe=(p,label)=>{if(typeof p!=='string'||!p||p.length>255||/[/\\\x00-\x1f]/.test(p)||p==='.'||p==='..')throw Error('Invalid '+label);return p};
 // Existing installations may use the upstream FP8 filename or nested ComfyUI folders.
 // Pass the actual visible name to UNETLoader; do not rename/download valid weights again.
-const ALIASES={'flux-2-klein-4b.safetensors':['flux-2-klein-4b-fp8.safetensors']};
+const ALIASES={'flux-2-klein-4b.safetensors':['flux-2-klein-4b-fp8.safetensors'],'qwen_3_4b.safetensors':['qwen_3_4b_fp4_flux2.safetensors']};
 function findInstalledName(file,lists){
  const choices=[file.name,...(ALIASES[file.name]||[])];
  return (lists[file.group]||[]).find(name=>typeof name==='string'&&

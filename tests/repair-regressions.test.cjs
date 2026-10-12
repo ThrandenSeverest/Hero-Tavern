@@ -45,7 +45,7 @@ test('Hidden-thinking-only response receives bounded, no-thinking recovery inste
    const body=JSON.parse(request.body);calls.push(body);count++;
    return new Response(JSON.stringify({choices:[{text:count===1?'<think>Thinking and never closing':'A faithful painted fantasy portrait of a bearded innkeeper.'}]}),{headers:{'Content-Type':'application/json'}});
   }});
-  const result=await pipeline.generate({prompt:'<|im_start|>user\nWrite an image prompt<|im_end|>\n<|im_start|>assistant\n',stream:false},{},{mode:'image-prompt'});
+  const result=await pipeline.generate({prompt:'<|im_start|>user\nWrite an image prompt<|im_end|>\n<|im_start|>assistant\n',stream:false},null,{mode:'image-prompt'});
   assert.match(result.choices[0].text,/bearded innkeeper/);
   assert.equal(count,2);assert.match(calls[1].prompt,/\/no_think/);
   assert.equal(pipeline.runSnapshot().emptyReplyRecovery.success,true);

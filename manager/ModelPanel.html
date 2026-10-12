@@ -23,6 +23,7 @@
  <div class="grid"><div><label>Исходная версия</label><textarea id="assistant-original" rows="12" readonly></textarea></div><div><label>Предложенная версия</label><textarea id="assistant-proposal" rows="12" readonly></textarea></div></div>
  <details><summary>Посмотреть отличия</summary><div id="assistant-diff"></div></details>
  <div class="actions"><button id="assistant-apply" disabled>Применить к рабочей копии (с резервной версией)</button></div>
+ <div class="controls"><label>Версия для восстановления (начиная с 1)<input id="assistant-revision" type="number" min="1" value="1"></label><div><label>Резервные версии</label><button id="assistant-restore">Восстановить предыдущую версию копии</button></div></div>
  <p class="small">Максимальный импорт: 300 КБ. Автоматическая переработка за один ответ рассчитана на тексты до 12 500 символов; для больших файлов потребуется обработка фрагментами. Скачивание обратно осуществляется через браузер.</p></div>
  </section>
 <section id="models"><div id="progress"></div><div class="grid" id="catalog"></div>

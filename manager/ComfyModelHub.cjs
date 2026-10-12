@@ -19,14 +19,25 @@ const PACKS=[
 ];
 const GROUPS=['checkpoints','diffusion_models','text_encoders','vae','loras','upscale_models'];
 const safe=(p,label)=>{if(typeof p!=='string'||!p||p.length>255||/[/\\\x00-\x1f]/.test(p)||p==='.'||p==='..')throw Error('Invalid '+label);return p};
+// Existing installations may use the upstream FP8 filename or nested ComfyUI folders.
+// Pass the actual visible name to UNETLoader; do not rename/download valid weights again.
+const ALIASES={'flux-2-klein-4b.safetensors':['flux-2-klein-4b-fp8.safetensors']};
+function findInstalledName(file,lists){
+ const choices=[file.name,...(ALIASES[file.name]||[])];
+ return (lists[file.group]||[]).find(name=>typeof name==='string'&&
+  choices.some(wanted=>name===wanted||name.endsWith('/'+wanted)||name.endsWith('\\'+wanted)))||null;
+}
+function resolvePackFiles(pack,lists){
+ return Object.fromEntries((pack.files||[]).map(file=>[file.group,findInstalledName(file,lists)]));
+}
 function installed(pack,lists){
  if(pack.id==='sdxl')return (lists.checkpoints||[]).some(x=>/\.safetensors$/i.test(x));
- return pack.files.every(f=>(lists[f.group]||[]).some(n=>n===f.name||n.endsWith('/'+f.name)||n.endsWith('\\'+f.name)));
+ return pack.files.every(file=>!!findInstalledName(file,lists));
 }
 function composeStatus(lists){
  return PACKS.map(pack=>({...pack,installed:installed(pack,lists),missing:pack.id==='sdxl'
    ? ((lists.checkpoints||[]).length?[]:['A compatible SDXL checkpoint in checkpoints'])
-   :pack.files.filter(f=>!(lists[f.group]||[]).some(n=>n===f.name||n.endsWith('/'+f.name)||n.endsWith('\\'+f.name))).map(f=>f.group+'/'+f.name)}));
+   :pack.files.filter(file=>!findInstalledName(file,lists)).map(file=>file.group+'/'+file.name)}));
 }
 function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
  const configPath=path.join(root,'comfy-model-hub.json'),logDir=path.join(root,'Logs');
@@ -130,6 +141,6 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
  function cancel(){if(download){download.abort=true;download.process?.kill();return {cancelled:true}}return {cancelled:false}}
  function select({id}={}){pack(id);settings.selected=id;save();return snapshot()}
  function knownFiles(id){return pack(id).files.map(x=>({group:x.group,name:x.name}))}
- return {PACKS,pack,snapshot,configure,downloadPack,cancel,select,knownFiles,composeStatus,localStatus};
+ return {PACKS,pack,snapshot,configure,downloadPack,cancel,select,knownFiles,composeStatus,localStatus,resolvePackFiles};
 }
-module.exports={PACKS,createModelHub,installed,composeStatus};
+module.exports={PACKS,createModelHub,installed,composeStatus,resolvePackFiles};

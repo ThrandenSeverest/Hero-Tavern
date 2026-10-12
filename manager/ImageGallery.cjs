@@ -1,6 +1,6 @@
 // Existing generated PNGs remain the source of truth. Sidecars are optional.
 'use strict';
-const fs=require('node:fs'),path=require('node:path');
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const NAME=/^\d{12,17}-[a-f0-9]{8,24}\.png$/;
 function createImageGallery(root){
  const dir=path.join(root,'Images');fs.mkdirSync(dir,{recursive:true});
@@ -11,7 +11,7 @@ function createImageGallery(root){
    const sidecar=file+suffix;
    if(fs.existsSync(sidecar)&&!fs.lstatSync(sidecar).isSymbolicLink()){
     try{const x=JSON.parse(fs.readFileSync(sidecar,'utf8'));if(x&&typeof x==='object'){
-     for(const key of ['model','prompt','negative_prompt','originalPrompt','refinedPrompt','preset','seed','width','height','steps','cfg_scale','sampler_name','refinementWarning','favorite','tags'])if(x[key]!==undefined)base[key]=x[key];
+     for(const key of ['model','prompt','negative_prompt','originalPrompt','refinedPrompt','preset','seed','width','height','steps','cfg_scale','sampler_name','refinementWarning','favorite','tags','engine','mode','operation','sourceName','lora','batch_size','denoise','upscaleModel','promptId','source'])if(x[key]!==undefined)base[key]=x[key];
      if(x.parameters&&typeof x.parameters==='object')for(const key of ['prompt','seed','width','height','steps','cfg_scale','negative_prompt','sampler_name'])if(x.parameters[key]!==undefined)base[key]=x.parameters[key];
     }}catch{}
    }
@@ -39,6 +39,17 @@ function createImageGallery(root){
   for(const suffix of ['.json','.studio.json'])try{const side=file+suffix;if(fs.existsSync(side)&&!fs.lstatSync(side).isSymbolicLink())fs.unlinkSync(side)}catch{}
   return {deleted:true,name};
  }
- return {list,favorite,remove};
+ function importPNG({imageData,source='Local image'}={}){
+  if(typeof imageData!=='string'||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(imageData)||imageData.length>38*1024*1024)throw Error('Import an image as a PNG under 28 MiB.');
+  const bytes=Buffer.from(imageData.slice(22),'base64');
+  const {checkPNG}=require('./ComfyAdapter.cjs');const dimensions=checkPNG(bytes,28*1024*1024);
+  if(dimensions.width>2048||dimensions.height>2048)throw Error('Import images up to 2048 pixels on either side.');
+  const name=Date.now()+'-'+crypto.randomBytes(6).toString('hex')+'.png';
+  const file=path.join(dir,name);
+  fs.writeFileSync(file,bytes,{flag:'wx'});
+  fs.writeFileSync(file+'.json',JSON.stringify({engine:'import',mode:'source',model:'Uploaded image',width:dimensions.width,height:dimensions.height,source:String(source).slice(0,120),importedAt:new Date().toISOString()},null,2));
+  return metadata(name);
+ }
+ return {list,favorite,remove,importPNG};
 }
 module.exports={createImageGallery};

@@ -13,7 +13,7 @@ function clamp(n,min,max,name){
  return n;
 }
 function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel='',upscaleFactor=2}={}){
- const validModes=['txt2img','img2img','inpaint','upscale'],operation=mode||(source?(mask?'inpaint':'img2img'):'txt2img');
+ const validModes=['txt2img','img2img','inpaint','outpaint','upscale'],operation=mode||(source?(mask?'inpaint':'img2img'):'txt2img');
  if(!validModes.includes(operation))throw Error('Unsupported ComfyUI operation.');
  if(operation!=='upscale'){modelName(checkpoint,'Checkpoint');if(!/\.safetensors$/i.test(checkpoint))throw Error('Choose an installed .safetensors checkpoint.');}
  if(operation!=='txt2img'&&!source)throw Error('A saved source image is required.');
@@ -61,20 +61,34 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
    positive=node('ConditioningCombine',{conditioning_1:positive,conditioning_2:area});
   }
  }
- let latent,sourceNode,maskNode;
+ let latent,sourceNode,maskNode,paddedSource;
  if(operation==='txt2img')latent=node('EmptyLatentImage',{width:p.width,height:p.height,batch_size:count});
  else{
   sourceNode=node('LoadImage',{image:source});
   if(operation==='inpaint'){
    maskNode=node('LoadImageMask',{image:mask,channel:'red'});
    latent=node('VAEEncodeForInpaint',{pixels:sourceNode,vae,mask:maskNode,grow_mask_by:6});
+  }else if(operation==='outpaint'){
+   const padding=p.outpaint||{},values={};
+   for(const key of ['left','top','right','bottom']){
+    const n=Number(padding[key]||0);
+    if(!Number.isInteger(n)||n<0||n>512||n%8)throw Error('Outpaint padding must be 0–512px, divisible by 8.');
+    values[key]=n;
+   }
+   if(!Object.values(values).some(n=>n>0))throw Error('Extend at least one side to outpaint.');
+   if(p.width+values.left+values.right>3072||p.height+values.top+values.bottom>3072)throw Error('Outpaint canvas must not exceed 3072 pixels per side.');
+   const feathering=Number(padding.feathering??24);
+   if(!Number.isInteger(feathering)||feathering<0||feathering>128)throw Error('Outpaint feathering must be 0–128.');
+   const padded=node('ImagePadForOutpaint',{image:sourceNode,...values,feathering});
+   paddedSource=[padded[0],0];maskNode=[padded[0],1];
+   latent=node('VAEEncodeForInpaint',{pixels:paddedSource,vae,mask:maskNode,grow_mask_by:6});
   }else latent=node('VAEEncode',{pixels:sourceNode,vae});
  }
  const denoise=operation==='txt2img'?1:clamp(Number(p.denoise??0.65),0.05,1,'denoise strength');
  const sample=node('KSampler',{model,positive,negative,latent_image:latent,seed,steps:p.steps,cfg:p.cfg_scale,sampler_name:sampler,scheduler,denoise});
  const decoded=node('VAEDecode',{samples:sample,vae});
- const output=operation==='inpaint'?node('ImageCompositeMasked',{destination:sourceNode,source:decoded,mask:maskNode,x:0,y:0,resize_source:false}):decoded;
- const saved=node('SaveImage',{images:output,filename_prefix:operation==='inpaint'?'HeroTavern_Edit':'HeroTavern'});
+ const output=(operation==='inpaint'||operation==='outpaint')?node('ImageCompositeMasked',{destination:paddedSource||sourceNode,source:decoded,mask:maskNode,x:0,y:0,resize_source:false}):decoded;
+ const saved=node('SaveImage',{images:output,filename_prefix:operation==='inpaint'?'HeroTavern_Edit':operation==='outpaint'?'HeroTavern_Expand':'HeroTavern'});
  return {graph,saveId:saved[0],mode:operation,seed,batch:count};
 }
 module.exports={buildWorkflow,modelName,SAMPLERS};

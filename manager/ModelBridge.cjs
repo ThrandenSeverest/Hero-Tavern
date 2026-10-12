@@ -217,6 +217,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
           thinking.stop();await waitUntil(()=>!thinking.snapshot().running,signal,30000);
         }
         if(actualEngine==='comfyui'){
+          if(releaseGPU&&images.snapshot().running){await images.action('/images/stop',{});await waitUntil(()=>!images.snapshot().running,signal,30000);}
           onReady?.('comfyui-generating');
           return await comfy.generate(input,{checkpoint:comfyCheckpoint,sourceName:input.sourceName,maskData:input.maskData,signal});
         }

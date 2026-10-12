@@ -30,8 +30,8 @@ function createDiskCare(root){
  const downloads=path.join(root,'Downloads'),transactions=path.join(root,'Story','transactions'),logs=path.join(root,'Logs');
  let diskBaseline=null;
  const categories=[
-  ['Models',path.join(root,'Models')],['Image models',path.join(root,'ImageModels')],
-  ['Generated images',path.join(root,'Images')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
+  ['Models',path.join(root,'Models')],['Image models',path.join(root,'ImageModels')],['ComfyUI API workflows',path.join(root,'ImageWorkflows')],
+  ['Generated images',path.join(root,'Images')],['ComfyUI API workflows',path.join(root,'ImageWorkflows')],['KoboldCpp extraction cache',path.join(root,'Cache','KoboldCpp')],['Chat data',path.join(root,'SillyTavern','data')],
   ['Story and transaction data',path.join(root,'Story')],['Adventure saves',path.join(root,'AdventureSaves')],
   ['Downloads',downloads],['Logs',logs],['Node dependencies',path.join(root,'SillyTavern','node_modules')],
   ['npm cache',path.join(process.env.LOCALAPPDATA||root,'npm-cache')]

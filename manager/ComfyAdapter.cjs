@@ -40,7 +40,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  }
  const checkpoints=()=>modelList('checkpoints').then(names=>names.filter(n=>/\.safetensors$/i.test(n)));
  async function catalog(){
-  if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.composeStatus({}),modelHub:models.snapshot()};
+  if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.localStatus(),modelHub:models.snapshot(),offlineInventory:true};
   const groups=['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'];
   const entries=await Promise.allSettled(groups.map(group=>modelList(group)));
   const lists=Object.fromEntries(groups.map((name,i)=>[name,entries[i].status==='fulfilled'?entries[i].value:[]]));

@@ -10,21 +10,21 @@ function createStudio(root,{pipeline,ensureText,generateImage,getImageState=()=>
  async function generate(input={}){if(busy)throw Error('An image job is already running.');busy=true;controller=new AbortController();const p=presets().find(p=>p.id===(input.preset||config.preset))||BUILTIN[0];let refined,refinementWarning='';
     try{
       // Refinement improves a prompt; it is never a prerequisite for a user-requested image.
-      if(typeof input.prompt!=='string'||!input.prompt.trim())throw Error('Enter an image prompt.');
-      if(input.refine??config.refine){
+      if(input.operation!=='upscale'&&(typeof input.prompt!=='string'||!input.prompt.trim()))throw Error('Enter an image prompt.');
+      if(input.operation!=='upscale'&&(input.refine??config.refine)){
         try{refined=await refine(input,controller.signal);}
         catch(e){
           if(controller.signal.aborted)throw e;
           refinementWarning='Optional prompt refiner failed; original request used instead: '+e.message;
-          refined={original:input.prompt,prompt:input.prompt+(p.style?'\nVisual style: '+p.style:''),preset:p.id};
+          refined={original:input.prompt||'Upscale original image',prompt:(input.prompt||'Upscale original image')+(p.style?'\nVisual style: '+p.style:''),preset:p.id};
         }
-      }else refined={original:input.prompt,prompt:input.prompt+(p.style?'\nVisual style: '+p.style:''),preset:p.id};
+      }else refined={original:input.prompt||'Upscale original image',prompt:(input.prompt||'Upscale original image')+(input.operation==='upscale'?'':p.style?'\nVisual style: '+p.style:''),preset:p.id};
       // Scene editor has deterministic requirements even if a local LLM rewrites the prompt.
       if(input.scene){const composition=scenePrompt(input.scene);refined.prompt=composition+'\nADDITIONAL USER DETAIL: '+refined.prompt;}
       phase='preparing-image-engine';const selected=getImageState().selected||getImageState().running||'';
     const isSD15=/DreamShaper_8_pruned/i.test(selected);
     const defaults=isSD15?{width:512,height:768,steps:24,cfg_scale:7}:{width:p.width,height:p.height,steps:p.steps,cfg_scale:p.cfg_scale};
-    const result=await generateImage({...defaults,sampler_name:p.sampler_name,...input,prompt:refined.prompt,negative_prompt:input.negative_prompt??p.negative},controller.signal,config.releaseGPU,next=>{phase=next||'generating-image'},config.engine||'auto',config.comfyCheckpoint||'');last={...result,originalPrompt:refined.original,refinedPrompt:refined.prompt,preset:p.id,refined:!!(input.refine??config.refine)&&!refinementWarning,refinementWarning,scene:input.scene||null};fs.writeFileSync(path.join(root,'Images',path.basename(result.url)+'.studio.json'),JSON.stringify(last,null,2));return last;}catch(error){last={error:error.message,failedStage:phase};throw error;}finally{phase='idle';busy=false;controller=null;}}
+    const result=await generateImage({...defaults,sampler_name:p.sampler_name,...input,prompt:refined.prompt,negative_prompt:input.negative_prompt??p.negative},controller.signal,config.releaseGPU,next=>{phase=next||'generating-image'},config.engine||'auto',config.comfyCheckpoint||'');last={...result,originalPrompt:refined.original,refinedPrompt:refined.prompt,preset:p.id,refined:input.operation!=='upscale'&&!!(input.refine??config.refine)&&!refinementWarning,refinementWarning,scene:input.scene||null,operation:input.operation||'txt2img',sourceName:input.sourceName||null,lora:input.lora||[],batch_size:input.batch_size||1};for(const image of result.images?.length?result.images:[{url:result.url}]){const item={...last,url:image.url,seed:image.seed??last.seed,images:undefined};fs.writeFileSync(path.join(root,'Images',path.basename(image.url)+'.studio.json'),JSON.stringify(item,null,2));}return last;}catch(error){last={error:error.message,failedStage:phase};throw error;}finally{phase='idle';busy=false;controller=null;}}
  async function action(route,data={}){if(route==='/studio/get')return snapshot();if(route==='/studio/scene-preview')return {prompt:scenePrompt(data.scene||data)};if(route==='/studio/scene-export')return comfyRegionalWorkflow(data);if(route==='/studio/configure')return configure(data);if(route==='/studio/preset-save')return savePreset(data);if(route==='/studio/preset-delete'){config.presets=config.presets.filter(x=>x.id!==data.id);save();return snapshot();}if(route==='/studio/refine'){if(busy)throw Error('An image job is running.');busy=true;controller=new AbortController();try{return await refine(data,controller.signal);}finally{busy=false;phase='idle';controller=null;}}if(route==='/studio/generate')return generate(data);if(route==='/studio/cancel'){controller?.abort();pipeline.abort();return snapshot();}throw Error('Unknown image studio action.');}
  return {snapshot,action,cancel(){controller?.abort();pipeline.abort();}};}
 module.exports={createStudio,BUILTIN};

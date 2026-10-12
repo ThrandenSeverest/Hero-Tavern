@@ -267,7 +267,23 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const server = http.createServer(async (req, res) => {
         const host = req.headers.host;
         if (host !== '127.0.0.1:' + server.address().port) { res.writeHead(403); res.end('Invalid host'); return; }
-        if(tuner.snapshot()?.status==='running'&&req.url==='/inference/v1/completions'){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Hardware tuning is running; wait or cancel it in Hardware.'}}));return;}
+        if(req.url==='/launcher/shutdown'&&req.method==='POST'){
+           const secret=process.env.HERO_LAUNCHER_TOKEN;
+           if(!secret||req.headers['x-hero-launch-token']!==secret){res.writeHead(403);res.end('Forbidden');return;}
+           res.writeHead(202,{'Content-Type':'application/json'});res.end(JSON.stringify({stopping:true}));
+           setImmediate(async()=>{
+             try{
+               studio.cancel();tuner.cancel();pipeline.abort();
+               await comfy.cancel().catch(()=>{});
+               if(images.snapshot().running)await images.action('/images/stop',{});
+               if(thinking.snapshot().running)thinking.stop();
+               stopBackend('stop');
+               await waitUntil(()=>!backend&&!images.snapshot().running&&!thinking.snapshot().running,null,35000).catch(e=>fs.appendFileSync(path.join(logs,'engine-shutdown.log'),e.message+'\n'));
+               server.close();
+             }catch(e){try{fs.appendFileSync(path.join(logs,'engine-shutdown.log'),'Launcher shutdown: '+e.message+'\n')}catch{};server.close();}
+           });return;
+         }
+         if(tuner.snapshot()?.status==='running'&&req.url==='/inference/v1/completions'){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Hardware tuning is running; wait or cancel it in Hardware.'}}));return;}
         if(req.url.startsWith('/inference/') && !req.url.includes('/api/extra/abort') && !req.headers.origin){
             const isReply=req.url==='/inference/v1/completions'&&req.method==='POST';
             if(isReply)queuedInference++;

@@ -54,7 +54,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   return output;
  }
  function snapshot(){
-  return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes,total:download.total,phase:download.phase,part:download.part},lastError};
+  return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes+(download.part&&fs.existsSync(download.part)?fs.statSync(download.part).size:0),total:download.total,phase:download.phase,part:download.part},lastError};
  }
  async function sha256(file,signal){
   const hash=crypto.createHash('sha256');for await(const bytes of fs.createReadStream(file)){if(signal?.aborted)throw Error('Download cancelled.');hash.update(bytes);}
@@ -83,6 +83,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
     const location=target(f),meta=await metadata(f);
     const stat=fs.existsSync(location)?fs.statSync(location):null;
     const partial=location+'.part',start=fs.existsSync(partial)?fs.statSync(partial).size:0;
+    if(start>meta.size)throw Error('Partial download is larger than the expected model: '+f.name+'. Inspect the .part file.');
     entries.push({f,location,meta,stat,start});
    }
    const need=entries.reduce((sum,x)=>sum+(x.stat&&x.stat.size===x.meta.size?0:Math.max(0,x.meta.size-x.start)),0);

@@ -325,7 +325,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
-            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:(req.url==='/studio/generate'?39000000:2000000))) throw new Error('Request too large.'); }
+            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
@@ -334,7 +334,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
              if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
             if(req.url==='/storage/clean-runtime'){if(backend||starting||images.snapshot().running||thinking.snapshot().running||imageJob)throw Error('Stop text, image and planning AI engines before cleaning their extraction caches.');json(200,diskCare.cleanRuntime({confirm:data.confirm,enginesStopped:true}));return;}
              if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
-            if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
+            if(req.url==='/gallery/import'){json(200,imageGallery.importPNG(data));return;}
+             if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
             if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}
             if(req.url==='/performance/system'){json(200,await diagnosticEnvironment());return;}

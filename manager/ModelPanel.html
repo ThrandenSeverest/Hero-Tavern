@@ -335,13 +335,48 @@ function heroSelectedLoras(){
  }
  return out;
 }
-el('image-generate').onclick=async()=>{el('image-generate').disabled=true;try{await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,modelPack:el('hero-pack-select').value,releaseGPU:el('studio-release').checked,refine:el('studio-refine').checked});const value=await request('/studio/generate',{prompt:el('image-prompt').value,negative_prompt:el('image-negative').value,width:Number(el('image-width').value),height:Number(el('image-height').value),steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,preset:el('studio-preset').value,refine:el('studio-refine').checked,
- operation:el('hero-comfy-mode').value,batch_size:Number(el('hero-comfy-batch').value),lora:heroSelectedLoras(),modelPack:el('hero-pack-select').value,workflowId:el('hero-api-workflow').value||undefined,
- ...(el('hero-comfy-mode').value==='img2img'?{sourceName:el('hero-comfy-reference').value,denoise:Number(el('hero-comfy-denoise').value)}:{}),
- ...(el('scene-enabled').checked?{scene:sceneData()}:{})});lastImage=value.url;
- const variants=el('hero-batch-results');variants.replaceChildren();
- for(const v of value.images||[]){const a=document.createElement('a'),img=document.createElement('img');a.href=v.url;a.target='_blank';a.rel='noopener';img.src=v.url;img.loading='lazy';img.alt='Generated variant';img.style.cssText='width:150px;max-height:190px;object-fit:contain;border-radius:8px';a.append(img);variants.append(a);}
- el('image-result').src=lastImage;el('image-result').hidden=false;el('image-download').href=lastImage;el('image-download').hidden=false;el('image-to-chat').disabled=false;await loadGallery()}catch(e){el('error').textContent=e.message}finally{refresh()}};
+el('image-generate').onclick=async()=>{
+ if(imageGenerateBusy)return;
+ const button=el('image-generate'),feedback=el('image-create-feedback');
+ imageGenerateBusy=true;button.disabled=true;feedback.textContent='Preparing your image…';
+ try{
+  const choice=activeStudioModel(),pack=['flux-klein','z-turbo'].includes(choice)?choice:'sdxl';
+  const engine=choice==='koboldcpp'?'koboldcpp':'comfyui';
+  const workflowId=choice==='custom'?el('hero-api-workflow').value:undefined;
+  const checkpoint=el('hero-comfy-checkpoint').value;
+  if(choice==='sdxl'&&!checkpoint)throw Error('SDXL requires a ComfyUI checkpoint. Open Models & Setup. FLUX and Z-Image use their downloaded model packs instead.');
+  if(choice==='custom'&&!workflowId)throw Error('Select a custom API workflow in Models & Setup.');
+  if(choice==='koboldcpp'&&!el('image-installed').value)throw Error('No legacy image checkpoint is selected. Open Models & Setup or use FLUX / Z-Image.');
+  if(!el('image-prompt').value.trim())throw Error('Write an image prompt to generate.');
+  if(choice==='z-turbo'&&el('hero-comfy-mode').value!=='txt2img')throw Error('Z-Image Turbo built-in workflow supports text-to-image only.');
+  await request('/studio/configure',{engine,comfyCheckpoint:checkpoint,modelPack:pack,releaseGPU:el('studio-release').checked,refine:el('studio-refine').checked,preset:el('studio-preset').value});
+  const result=await request('/studio/generate',{
+   prompt:el('image-prompt').value,negative_prompt:el('image-negative').value,width:Number(el('image-width').value),
+   height:Number(el('image-height').value),steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),
+   seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,preset:el('studio-preset').value,
+   refine:el('studio-refine').checked,engine,modelPack:pack,
+   operation:choice==='koboldcpp'?'txt2img':el('hero-comfy-mode').value,
+   batch_size:choice==='koboldcpp'?1:Number(el('hero-comfy-batch').value),
+   lora:choice==='sdxl'?heroSelectedLoras():[],
+   ...(workflowId?{workflowId}:{}),
+   ...(el('hero-comfy-mode').value==='img2img'&&choice!=='koboldcpp'?{sourceName:el('hero-comfy-reference').value,denoise:Number(el('hero-comfy-denoise').value)}:{}),
+   ...(el('scene-enabled').checked?{scene:sceneData()}:{})
+  });
+  lastImage=result.url;
+  const variants=el('hero-batch-results');variants.replaceChildren();
+  for(const v of result.images||[]){
+   const a=document.createElement('a'),img=document.createElement('img');a.href=v.url;a.target='_blank';a.rel='noopener';
+   img.src=v.url;img.loading='lazy';img.alt='Generated variant';img.style.cssText='width:150px;max-height:190px;object-fit:contain;border-radius:8px';
+   a.append(img);variants.append(a);
+  }
+  el('image-result').src=lastImage;el('image-result').hidden=false;
+  el('image-download').href=lastImage;el('image-download').hidden=false;el('image-to-chat').disabled=false;
+  feedback.textContent='Image created with '+(result.model||choice)+'. Saved in gallery.';
+  await loadGallery();
+ }catch(e){
+  feedback.textContent=e.message;el('error').textContent=e.message;
+ }finally{imageGenerateBusy=false;button.disabled=false;refresh()}
+};
 el('image-to-chat').onclick=()=>parent.postMessage({type:'hero-image-chat',url:lastImage},'http://127.0.0.1:8000');
 function cardDraft(){const raw=el('character-json').value.replace(/^```(?:json)?\s*|```$/g,'').trim(),packet=JSON.parse(raw),card=packet.spec?packet.data:packet;for(const key of ['name','description','personality','scenario','first_mes','mes_example'])if(typeof card[key]!=='string'||card[key].length>16000)throw Error('Card needs a short text field: '+key);if(!card.name.trim())throw Error('Enter a character name.');return packet}
 el('draft-character').onclick=async()=>{el('draft-character').disabled=true;try{const result=await request('/task',{mode:'character',prompt:'Create a SillyTavern character with JSON string fields name, description, personality, scenario, first_mes, mes_example. Keep the character distinctive and consistent; first_mes starts the scene, mes_example demonstrates their voice with <START> examples. Idea: '+el('character-brief').value});el('character-json').value=result.text;cardDraft();el('character-result').textContent='Draft ready. Edit it before creating the character.'}catch(e){el('character-result').textContent=e.message}finally{el('draft-character').disabled=false}};

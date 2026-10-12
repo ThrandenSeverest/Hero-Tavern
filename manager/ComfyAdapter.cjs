@@ -123,9 +123,9 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    const free=fs.statfsSync(dir),freeBytes=free.bavail*free.bsize;
    if(freeBytes<1024*1024*1024)throw Error('Less than 1 GiB free where Hero Tavern saves images. Free disk space before generating.');
    const custom=!!params.workflowId;
-   if(!custom){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
-   else if(params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
    const mode=custom?'custom':params.operation||((sourceName&&maskData)?'inpaint':sourceName?'img2img':'txt2img');
+   if(!custom&&mode!=='upscale'){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
+   else if(custom&&params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
    if(mode==='upscale'&&!sourceName)throw Error('Choose a gallery image to upscale.');
    if(params.lora?.length){
     const installed=await modelList('loras');
@@ -149,7 +149,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     logEvent({action:'comfy-upload',source:sourceName,remoteFiles:[source,mask].filter(Boolean),remoteFolder:'ComfyUI input (external; retained)'});
    }
    if(mode==='inpaint'&&!mask)throw Error('The inpaint brush selection cannot be empty.');
-   if(mode==='upscale'&&sourceDimensions&&params.upscaleFactor&&sourceDimensions.width*params.upscaleFactor>4096)throw Error('Upscale result would exceed 4096px.');
+   if(mode==='upscale'&&sourceDimensions){if(params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)>1024)throw Error('For safe AI upscaling on 12 GB VRAM, select a source at most 1024 pixels per side.');if(!params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
    const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
    job.phase='queued';listen(job);

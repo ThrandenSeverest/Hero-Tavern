@@ -11,7 +11,7 @@ function createImageGallery(root){
    const sidecar=file+suffix;
    if(fs.existsSync(sidecar)&&!fs.lstatSync(sidecar).isSymbolicLink()){
     try{const x=JSON.parse(fs.readFileSync(sidecar,'utf8'));if(x&&typeof x==='object'){
-     for(const key of ['model','prompt','negative_prompt','originalPrompt','refinedPrompt','preset','seed','width','height','steps','cfg_scale','sampler_name','refinementWarning','favorite','tags','engine','mode','operation','sourceName','lora','batch_size','denoise','upscaleModel','promptId','source'])if(x[key]!==undefined)base[key]=x[key];
+     for(const key of ['model','prompt','negative_prompt','originalPrompt','refinedPrompt','preset','seed','width','height','steps','cfg_scale','sampler_name','refinementWarning','favorite','tags','engine','mode','operation','sourceName','lora','batch_size','batchIndex','workflowId','workflowName','denoise','upscaleModel','promptId','source'])if(x[key]!==undefined)base[key]=x[key];
      if(x.parameters&&typeof x.parameters==='object')for(const key of ['prompt','seed','width','height','steps','cfg_scale','negative_prompt','sampler_name'])if(x.parameters[key]!==undefined)base[key]=x.parameters[key];
     }}catch{}
    }

@@ -134,7 +134,41 @@ async function rawGenerate(prompt){if(typeof generateText!=='function')throw new
 async function rawGenerateImage(prompt,opts={}){if(typeof generateImage!=='function')throw new Error('generateImage не загружен');return await generateImage(prompt,opts)}
 function queueAI(fn){const run=()=>fn();const t=genTail.then(run,run);genTail=t.catch(()=>{});return t}
 async function aiText(prompt){const r=await queueAI(()=>rawGenerate(prompt));return String(r??'').trim()}
-function parseJson(raw){let s=String(raw??'').trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();const a=s.indexOf('{'),b=s.lastIndexOf('}');if(a>=0&&b>a)s=s.slice(a,b+1);return JSON.parse(s)}
+function parseJson(raw){
+ const source=String(raw??'').replace(/^﻿/,'').replace(/^```(?:json)?/i,'').replace(/```\s*$/,'').trim();
+ if(!source)throw Error('Empty JSON response.');
+ const first=source.indexOf('{');if(first<0)throw Error('JSON object not found.');
+ let depth=0,quoted=false,escaped=false;
+ for(let i=first;i<source.length;i++){
+  const char=source[i];
+  if(quoted){if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;continue;}
+  if(char==='"'){quoted=true;continue;}
+  if(char==='{')depth++;
+  if(char==='}'){depth--;if(depth===0){
+    const text=source.slice(first,i+1);
+    try{return JSON.parse(text)}catch(error){
+      return JSON.parse(text.replace(/,\s*([}\]])/g,'$1'));
+    }
+  }}
+ }
+ throw Error('JSON response was truncated before the closing brace.');
+}
+async function aiJson(prompt,label='AI'){
+ let error;
+ for(let attempt=0;attempt<2;attempt++){
+  const request=attempt===0?prompt:prompt+'\nIMPORTANT RETRY: Prior response was not valid complete JSON. Reply with ONE SHORT correctly closed JSON object only. Keep narration and strings concise. Prefer empty optional arrays to long explanations. Never include markdown, prefaces or trailing text.';
+  const raw=await aiText(request);
+  try{
+   const parsed=parseJson(raw);
+   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Expected a JSON object.');
+   if(label.startsWith('Director')&&(!['check','resolve'].includes(parsed.phase)||(parsed.phase==='check'&&!parsed.check)))throw Error('Director returned no valid phase/check.');
+   if(label==='NPC initiative'&&!Array.isArray(parsed.actions))throw Error('NPC initiative returned no actions array.');
+   if(label==='Quest generator'&&!Array.isArray(parsed.offers))throw Error('Quest generator returned no offers array.');
+   return parsed;
+  }catch(e){error=e;console.warn(label+' JSON attempt '+(attempt+1),e.message,String(raw).slice(-1000));}
+ }
+ throw Error(label+': два ответа модели не прошли проверку JSON ('+error.message+'). Ход не применён — можно повторить.');
+}
 async function aiJson(prompt,label='AI'){const raw=await aiText(prompt);try{return parseJson(raw)}catch(e){console.error(label,e);throw new Error(label+': модель вернула некорректный JSON. Повторите ход или увеличьте бюджет ответа в Generation.') }}
 function extractImageUrl(raw,depth=0){if(raw==null||depth>7)return'';if(typeof raw==='string'){const s=raw.trim();if(/^(https?:|data:image\/|blob:)/i.test(s))return s;const m=s.match(/https?:\/\/[^\s"'<>]+/);return m?m[0]:''}if(Array.isArray(raw))for(const v of raw){const u=extractImageUrl(v,depth+1);if(u)return u}if(typeof raw==='object')for(const k of ['dataUrl','imageUrl','url','image','src','data','output','result','value','uri'])if(raw[k]!=null){const u=extractImageUrl(raw[k],depth+1);if(u)return u}return''}
 
@@ -235,14 +269,14 @@ ${spell?`RECOGNIZED SPELL: ${JSON.stringify(spell)}. JS slot state is authoritat
 ${resourceUse?`PRE-CONSUMED RESOURCE: ${JSON.stringify(resourceUse)}. Do not consume it again.`:''}
 ${rollResult?`FIXED D20 RESULT. NEVER REROLL OR ALTER IT: ${JSON.stringify(rollResult)}`:''}
 Rules:
-- First pass: if the action needs an uncertain D&D check, return phase="check" with ONE appropriate check and no state-changing patch. Do not request checks for ordinary speech, obvious movement, or trivial actions.
+- First pass: if the action needs an uncertain D&D check, return phase="check" with ONE appropriate check and no state-changing patch. Do not request checks for ordinary speech, ordering drinks, obvious movement, or trivial actions.
 - Second pass with FIXED D20 RESULT: resolve it faithfully.
-- NPCs keep their own goals and may resist, negotiate, lie, remember or react.
+- NPCs keep their own goals and may resist, negotiate, lie, remember or react. Continue directly from the last scene and latest player action: do not replay earlier entry, greetings, narration, or previous player messages.
 - Do not make NPC autonomous initiative here unless it is a direct reaction to the player's action; a separate world-pulse runs afterward.
 - Money is gold/silver/bronze, 1 gold=10 silver=100 bronze.
-- Never invent permanent secret canon unless it becomes an explicit observed world fact.
+- Never invent permanent secret canon unless it becomes an explicit observed world fact. Keep the JSON compact; narration 1-3 NEW observable sentences, and NPC speech only in lines (do not duplicate it in narration). Empty patch arrays are fine.
 Return exactly one JSON object:
-{"phase":"check|resolve","check":null|{"kind":"ability|skill|attack|save","ability":"STR|DEX|CON|INT|WIS|CHA","skill":"optional 5e skill","dc":15,"reason":"short","targetAC":12,"targetId":"optional"},"outcome":"brief factual mechanics","narration":"2-6 sentences of observable result","lines":[{"npcId":"existing id","text":"spoken line"}],"patch":{"timeMinutes":0,"hpDelta":0,"coinDelta":{"gold":0,"silver":0,"bronze":0},"addItems":[],"removeItems":[],"conditionsAdd":[],"conditionsRemove":[],"worldFacts":[],"npcOps":[],"locationOps":[],"questOps":[],"partyOps":[],"combatOps":[]}}`}
+{"phase":"check|resolve","check":null|{"kind":"ability|skill|attack|save","ability":"STR|DEX|CON|INT|WIS|CHA","skill":"optional 5e skill","dc":15,"reason":"short","targetAC":12,"targetId":"optional"},"outcome":"brief factual mechanics","narration":"1-3 sentences of NEW observable result","lines":[{"npcId":"existing id","text":"spoken line"}],"patch":{"timeMinutes":0,"hpDelta":0,"coinDelta":{"gold":0,"silver":0,"bronze":0},"addItems":[],"removeItems":[],"conditionsAdd":[],"conditionsRemove":[],"worldFacts":[],"npcOps":[],"locationOps":[],"questOps":[],"partyOps":[],"combatOps":[]}}`}
 function rollCheck(c){const a=ABILS.includes(c.ability)?c.ability:'WIS';let bonus=mod(G.player.abilities[a]);if(c.kind==='skill'&&c.skill&&SKILLS[c.skill])bonus+=prof(G.player.level);if(c.kind==='attack'){const w=G.player.weapons[G.player.primaryWeaponIndex]||{};bonus=mod(G.player.abilities[w.ability||'STR'])+prof(G.player.level)+(Number(w.bonus)||0);const sp=recognizedSpell(G.log.slice(-1)[0]?.text||'');if(sp&&sp.resolution==='attack')bonus=spellAttack()}if(c.kind==='save')bonus=mod(G.player.abilities[a])+prof(G.player.level);const die=d20(),total=die+bonus,dc=Number(c.targetAC||c.dc)||10;return{die,bonus,total,dc,success:die===20||die!==1&&total>=dc,natural20:die===20,natural1:die===1,check:c}}
 function normalizeCoinDelta(c){c=c||{};return Math.round(Number(c.gold)||0)*100+Math.round(Number(c.silver)||0)*10+Math.round(Number(c.bronze)||0)}
 function applyItemAdd(spec){if(typeof spec==='string')spec={name:spec,qty:1};if(!spec?.name)return;const same=G.player.inventory.find(x=>sameName(x.name,spec.name)&&x.type===(spec.type||x.type));if(same)same.qty+=Math.max(1,Number(spec.qty)||1);else G.player.inventory.push(normalizeItem(spec))}
@@ -285,7 +319,26 @@ function passivePerception(){return 10+mod(G.player.abilities.WIS)+prof(G.player
 function processNpcMoney(n,a,amount){const auth=authorizedMoneyTake(n,a,amount);if(!auth.ok){if(a.text)addDialogue(n.id,a.text,true);else addDialogue(n.id,`Плати. Причина: ${a.reason||'требование'}.`,true);addSystem(`${n.name} потребовал ${formatCoins(coinsFromBronze(amount))}, но система не списала деньги автоматически: ${auth.why}.`,'npcinit');return}if(auth.theft){const r=d20()+(Number(n.skills?.sleight)||0),dc=passivePerception();if(r>=dc){const take=Math.min(amount,totalBronze(G.player.coins));addCoins(-take);addSystem(`${n.name} незаметно забрал ${formatCoins(coinsFromBronze(take))}. Проверка кражи ${r} против пассивного Восприятия ${dc}.`,'npcinit');recordNpcEvent(n,`Украл у игрока ${formatCoins(coinsFromBronze(take))}.`,'money')}else{addSystem(`Вы заметили попытку ${n.name} залезть к вашим деньгам. Проверка кражи ${r} против пассивного Восприятия ${dc}.`,'bad');if(a.text)addDialogue(n.id,a.text,true)}return}const take=Math.min(amount,totalBronze(G.player.coins));if(take<=0){addSystem(`${n.name} попытался получить деньги, но кошелёк пуст.`,'npcinit');return}addCoins(-take);addSystem(`${n.name} забрал ${formatCoins(coinsFromBronze(take))}: ${a.reason||a.reasonClass||'расход'}.`,'npcinit');if(a.text)addDialogue(n.id,a.text,true);recordNpcEvent(n,`Получил от игрока ${formatCoins(coinsFromBronze(take))}: ${a.reason||''}`,'money');n.daily.moneyActions=(n.daily.moneyActions||0)+1}
 function processNpcAction(a){const n=G.npcs[a.npcId];if(!n||n.status==='dead')return false;const sameLoc=n.locationId===G.world.currentLocationId||activeCompanionIds().includes(n.id);if(['speak','take_money','demand_money','give_money','leader_order','attitude','offer_quest'].includes(a.type)&&!sameLoc)return false;if(a.type==='speak'){if(!G.settings.npcSpeech||n.daily.interjections>=4)return false;if(a.text)addDialogue(n.id,a.text,true);n.daily.interjections++;return true}if(a.type==='demand_money'){if(a.text)addDialogue(n.id,a.text,true);const amt=totalBronze(a.coins);if(amt)addSystem(`${n.name} требует ${formatCoins(a.coins)}: ${a.reason||''}`,'npcinit');return true}if(a.type==='take_money'){if(!G.settings.npcEconomy||n.daily.moneyActions>=3)return false;processNpcMoney(n,a,totalBronze(a.coins));return true}if(a.type==='give_money'){const amt=totalBronze(a.coins);if(amt){addCoins(amt);addSystem(`${n.name} передал вам ${formatCoins(a.coins)}: ${a.reason||'без пояснений'}.`,'good')}if(a.text)addDialogue(n.id,a.text,true);return true}if(a.type==='move'){if(!G.settings.npcMove||n.daily.autonomousMoves>=4)return false;const to=a.targetLocationId;if(to&&G.world.locations[to]&&isDirectlyConnected(n.locationId,to)){n.locationId=to;n.daily.autonomousMoves++;recordNpcEvent(n,`Самостоятельно перешёл в ${G.world.locations[to].name}.`,'move');if(sameLoc)addSystem(`${n.name} уходит: ${a.reason||G.world.locations[to].name}.`,'npcinit');return true}return false}if(a.type==='leader_order'){if(G.party.leader.kind==='npc'&&G.party.leader.npcId===n.id){G.party.leader.lastOrder=String(a.text||a.reason||'');if(a.text)addDialogue(n.id,a.text,true);return true}return false}if(a.type==='attitude'){n.disposition=clamp(n.disposition+Number(a.dispositionDelta||0),-100,100);if(a.text)addDialogue(n.id,a.text,true);return true}if(a.type==='world_fact'){if(a.fact&&!G.world.facts.includes(a.fact))G.world.facts.push(a.fact);return true}if(a.type==='offer_quest'&&a.quest){const q=normalizeQuest({...a.quest,id:uid('quest'),status:'active'});G.quests[q.id]=q;if(a.text)addDialogue(n.id,a.text,true);addSystem(`Новое задание: «${q.title}».`,'good');return true}return false}
 async function runNpcInitiative(trigger='после действия игрока',forced=false){if(!G.settings.npcInitiative&&!forced)return;const candidates=contextNpcs();if(!candidates.length)return;const intensity=clamp(Number(G.settings.initiativeIntensity)||60,0,100);if(!forced&&Math.random()*100>intensity)return;try{const r=await aiJson(npcPulsePrompt(trigger),'NPC initiative');let count=0;for(const a of r.actions||[]){if(count>=clamp(Number(G.settings.maxAutonomousActions)||2,0,5))break;if(processNpcAction(a))count++}if(count)G.world.history.push({when:nowLabel(),type:'npc_pulse',summary:`${count} autonomous NPC action(s)`})}catch(e){console.warn('npc pulse',e)}}
-async function submitAction(){if(busy||!G)return;const input=$('actionInput'),action=input.value.trim();if(!action)return;const turnSnap=createSnapshot('до действия: '+action.slice(0,60));input.value='';addPlayer(action,{snapshotId:turnSnap?.id||''});setBusy(true);try{const ok=await resolvePlayerAction(action);if(ok&&G.combat.active)await enemyCombatPulse();else if(ok)await runNpcInitiative('игрок только что совершил действие');if(G.settings.autoSave)await saveGame(true);refresh()}catch(e){console.error(e);addSystem('Ошибка хода: '+e.message,'bad');refresh()}finally{setBusy(false)}}
+async function submitAction(){
+ if(busy||!G)return;
+ const input=$('actionInput'),action=input.value.trim();
+ if(!action)return;
+ const before=deep(G),turnSnap=createSnapshot('до действия: '+action.slice(0,60));
+ input.value='';addPlayer(action,{snapshotId:turnSnap?.id||''});setBusy(true);
+ try{
+  const ok=await resolvePlayerAction(action);
+  if(ok&&G.combat.active)await enemyCombatPulse();
+  else if(ok)await runNpcInitiative('игрок только что совершил действие');
+  if(G.settings.autoSave)await saveGame(true);
+  refresh();
+ }catch(e){
+  console.error(e);
+  G=migrateState(before);
+  input.value=action;
+  addSystem('Ход не применён: '+e.message+' Текст действия восстановлен; можно отправить его повторно.','bad');
+  refresh();
+ }finally{setBusy(false)}
+}
 async function travelTo(id){if(busy||!G.world.locations[id]||id===G.world.currentLocationId)return;const from=G.world.currentLocationId;if(!isDirectlyConnected(from,id)){addSystem('Нет прямого известного перехода.','bad');return}createSnapshot(`переход: ${G.world.locations[from].name} → ${G.world.locations[id].name}`);setBusy(true);try{addMinutes(10);G.world.currentLocationId=id;G.dialogue.activeNpcId=null;G.dialogue.locationId=id;for(const cid of activeCompanionIds())if(G.npcs[cid])G.npcs[cid].locationId=id;addNarration(`Вы переходите в ${G.world.locations[id].name}. ${G.world.locations[id].description}`);await runNpcInitiative('игрок только что вошёл в локацию');await saveGame(true);refresh()}finally{setBusy(false)}}
 async function generateQuestOffers(){if(busy)return;setBusy(true);try{const prompt=`Generate THREE grounded multi-stage D&D 5e contract offers for a persistent Ilreon/Lostmark sandbox. Russian, JSON only. PLAYER: ${playerMechanicsContext()}. LOCATION: ${G.world.locations[G.world.currentLocationId].name}. WORLD FACTS: ${G.world.facts.slice(-15).join(' | ')}. Active quests: ${Object.values(G.quests).map(q=>q.title).join(', ')||'none'}. Do not reveal hidden canon. Each quest needs 2-4 sequential stages, at least two possible approaches, plausible complication, reward in gold/silver/bronze and XP suitable for level ${G.player.level}. Return {"offers":[{"title":"...","summary":"...","stages":[{"title":"...","objective":"...","status":"active"},{"title":"...","objective":"...","status":"pending"}],"approaches":["social","investigation"],"optionalObjectives":[],"complication":"...","rewardCoins":{"gold":0,"silver":0,"bronze":0},"rewardXp":0,"rewardItems":[]}]}`;const r=await aiJson(prompt,'Quest generator');G.questBoards.adventurers_guild=(r.offers||[]).slice(0,3).map(o=>normalizeQuest({...o,id:uid('offer'),status:'offer'}));addSystem('Доска контрактов обновлена.','good');renderRight();await saveGame(true)}catch(e){addSystem(e.message,'bad')}finally{setBusy(false)}}
 async function acceptQuestOffer(i){const list=G.questBoards.adventurers_guild||[],o=list[i];if(!o)return;createSnapshot('принятие квеста');const q=normalizeQuest({...deep(o),id:uid('quest'),status:'active'});G.quests[q.id]=q;list.splice(i,1);addSystem(`Принято задание: «${q.title}».`,'good');renderRight();await saveGame(true)}

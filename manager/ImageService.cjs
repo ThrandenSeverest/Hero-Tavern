@@ -30,7 +30,7 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=engineFetch
  async function start(){
   if(starting)throw Error('Image model is already loading.');if(busy)throw Error('Finish image generation before switching models.');starting=true;
   try{
-   if(worker){const old=worker;await new Promise(resolve=>{old.once('exit',resolve);stop()});}
+   if(worker){const old=worker;const exited=new Promise(resolve=>old.once('exit',resolve));stop();await exited;}
    if(!config.selected)throw Error('Download or select an image model first.');const file=safeFile(dir,config.selected);await verifyImage(file);
    try{await fetchBackend(url+'/sdapi/v1/sd-models',{signal:AbortSignal.timeout(1500)});throw Error('Image engine port is occupied. Close the other server using port '+port+'.');}catch(e){if(e.message.includes('port is occupied'))throw e;}
    const executable=command||path.join(root,'KoboldCpp','koboldcpp.exe');if(!fs.existsSync(executable))throw Error('KoboldCpp is missing. Run setup to repair.');

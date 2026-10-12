@@ -4,8 +4,9 @@ const args=process.argv.slice(2),value=name=>args[args.indexOf(name)+1];
 if(!args.includes('--skiplauncher')||!fs.existsSync(value(args.includes('--sdmodel')?'--sdmodel':'--model'))||value('--host')!=='127.0.0.1')process.exit(3);
 console.log('Fixture model loaded: '+value('--model'));
 let completions=0,planning=0,lastPrompt='';
-http.createServer(async(req,res)=>{
+const server=http.createServer(async(req,res)=>{
  const json=data=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data))};
+ if(req.url==='/api/extra/shutdown'&&req.method==='POST'){json({status:'shutting down'});setImmediate(()=>server.close(()=>process.exit(0)));return;}
  if(req.url==='/sdapi/v1/sd-models')return json([{model_name:'fixture-image-model'}]);
  if(req.url==='/sdapi/v1/txt2img')return json({images:['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB1kAAAAASUVORK5CYII='],info:'fixture'});
  if(req.url==='/api/extra/tokencount'){let raw='';for await(const chunk of req)raw+=chunk;return json({value:Math.ceil(JSON.parse(raw||'{}').prompt.length/4)});}

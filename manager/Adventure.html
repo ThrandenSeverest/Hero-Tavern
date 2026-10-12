@@ -255,7 +255,7 @@ function npcCompact(n){return`${n.id}/${n.name}; job=${n.occupation}; dispositio
 function contextNpcs(){const ids=new Set([...locationNpcIds(),...activeCompanionIds()]);if(G.dialogue.activeNpcId)ids.add(G.dialogue.activeNpcId);return[...ids].map(id=>G.npcs[id]).filter(Boolean)}
 function recognizedSpell(action){const t=String(action||'').toLowerCase();for(const s of SPELLS)if(t.includes(s.name.toLowerCase())||t.includes(s.en.toLowerCase()))return s;return null}
 function consumeSpellSlot(spell){if(!spell||spell.level===0||!G.player.spellcasting)return{ok:true};const slots=G.player.spellcasting.slots||{};let l=spell.level;while(l<=9&&(!slots[l]||slots[l].used>=slots[l].max))l++;if(l>9)return{ok:false,reason:`Нет свободного слота ${spell.level} круга или выше.`};slots[l].used++;return{ok:true,level:l}}
-function directorPrompt(action,rollResult=null,resourceUse=null){const loc=G.world.locations[G.world.currentLocationId],spell=recognizedSpell(action);return`You are the hidden rules director for a persistent D&D 5e sandbox in Ilreon. Russian output. JSON only.
+function directorPrompt(action,rollResult=null,resourceUse=null){const loc=G.world.locations[G.world.currentLocationId],spell=recognizedSpell(action),addressed=conversationalNpc(action);return`You are the hidden rules director for a persistent D&D 5e sandbox in Ilreon. Russian output. JSON only.
 CANON: ${ILREON_CANON}
 PLAYER: ${playerMechanicsContext()}
 LOCATION: ${loc.name}; ${loc.description}
@@ -265,6 +265,7 @@ ACTIVE QUESTS: ${Object.values(G.quests).filter(q=>q.status==='active').map(q=>q
 WORLD FACTS: ${G.world.facts.slice(-15).join(' | ')||'none'}
 RECENT SCENE:\n${recentConversation(10)}
 PLAYER ACTION: ${action}
+${addressed?`DIRECT NPC CONVERSATION: The player is addressing ${addressed.name} (id=${addressed.id}). You MUST include a new natural spoken response from this NPC in lines with the exact npcId. The NPC should answer the player's actual words. Narration alone is never sufficient.`:''}
 ${spell?`RECOGNIZED SPELL: ${JSON.stringify(spell)}. JS slot state is authoritative.`:''}
 ${resourceUse?`PRE-CONSUMED RESOURCE: ${JSON.stringify(resourceUse)}. Do not consume it again.`:''}
 ${rollResult?`FIXED D20 RESULT. NEVER REROLL OR ALTER IT: ${JSON.stringify(rollResult)}`:''}
@@ -274,9 +275,9 @@ Rules:
 - NPCs keep their own goals and may resist, negotiate, lie, remember or react. Continue directly from the last scene and latest player action: do not replay earlier entry, greetings, narration, or previous player messages.
 - Do not make NPC autonomous initiative here unless it is a direct reaction to the player's action; a separate world-pulse runs afterward.
 - Money is gold/silver/bronze, 1 gold=10 silver=100 bronze.
-- Never invent permanent secret canon unless it becomes an explicit observed world fact. Keep the JSON compact; narration 1-3 NEW observable sentences, and NPC speech only in lines (do not duplicate it in narration). Empty patch arrays are fine.
+- Never invent permanent secret canon unless it becomes an explicit observed world fact. Give 2-5 NEW scene sentences as warranted, and NPC speech in lines, not duplicated as narration. Dialogue should carry the scene when talking to NPCs. Keep mechanical arrays compact; omit unnecessary operations. Outcome is a real mechanics description, NEVER a length label such as short.
 Return exactly one JSON object:
-{"phase":"check|resolve","check":null|{"kind":"ability|skill|attack|save","ability":"STR|DEX|CON|INT|WIS|CHA","skill":"optional 5e skill","dc":15,"reason":"short","targetAC":12,"targetId":"optional"},"outcome":"brief factual mechanics","narration":"1-3 sentences of NEW observable result","lines":[{"npcId":"existing id","text":"spoken line"}],"patch":{"timeMinutes":0,"hpDelta":0,"coinDelta":{"gold":0,"silver":0,"bronze":0},"addItems":[],"removeItems":[],"conditionsAdd":[],"conditionsRemove":[],"worldFacts":[],"npcOps":[],"locationOps":[],"questOps":[],"partyOps":[],"combatOps":[]}}`}
+{"phase":"check|resolve","check":null|{"kind":"ability|skill|attack|save","ability":"STR|DEX|CON|INT|WIS|CHA","skill":"optional 5e skill","dc":15,"reason":"short","targetAC":12,"targetId":"optional"},"outcome":"brief factual mechanics","narration":"2-5 sentences of new observable result","lines":[{"npcId":"existing id","text":"spoken line"}],"patch":{"timeMinutes":0,"hpDelta":0,"coinDelta":{"gold":0,"silver":0,"bronze":0},"addItems":[],"removeItems":[],"conditionsAdd":[],"conditionsRemove":[],"worldFacts":[],"npcOps":[],"locationOps":[],"questOps":[],"partyOps":[],"combatOps":[]}}`}
 function rollCheck(c){const a=ABILS.includes(c.ability)?c.ability:'WIS';let bonus=mod(G.player.abilities[a]);if(c.kind==='skill'&&c.skill&&SKILLS[c.skill])bonus+=prof(G.player.level);if(c.kind==='attack'){const w=G.player.weapons[G.player.primaryWeaponIndex]||{};bonus=mod(G.player.abilities[w.ability||'STR'])+prof(G.player.level)+(Number(w.bonus)||0);const sp=recognizedSpell(G.log.slice(-1)[0]?.text||'');if(sp&&sp.resolution==='attack')bonus=spellAttack()}if(c.kind==='save')bonus=mod(G.player.abilities[a])+prof(G.player.level);const die=d20(),total=die+bonus,dc=Number(c.targetAC||c.dc)||10;return{die,bonus,total,dc,success:die===20||die!==1&&total>=dc,natural20:die===20,natural1:die===1,check:c}}
 function normalizeCoinDelta(c){c=c||{};return Math.round(Number(c.gold)||0)*100+Math.round(Number(c.silver)||0)*10+Math.round(Number(c.bronze)||0)}
 function applyItemAdd(spec){if(typeof spec==='string')spec={name:spec,qty:1};if(!spec?.name)return;const same=G.player.inventory.find(x=>sameName(x.name,spec.name)&&x.type===(spec.type||x.type));if(same)same.qty+=Math.max(1,Number(spec.qty)||1);else G.player.inventory.push(normalizeItem(spec))}
@@ -288,9 +289,55 @@ function completeQuest(q){if(q.status==='complete')return;q.status='complete';q.
 function applyPartyOp(o){if(!o||!o.op)return;if(o.op==='companion_add'&&G.npcs[o.npcId])G.party.companions[o.npcId]={status:'following',role:o.role||'универсал',loyalty:clamp(Number(o.loyalty??50),0,100),morale:clamp(Number(o.morale??60),0,100),autonomy:clamp(Number(o.autonomy??1),0,2)};if(o.op==='companion_remove')delete G.party.companions[o.npcId];if(o.op==='leader_set'&&G.npcs[o.npcId])G.party.leader={kind:'npc',npcId:o.npcId,title:o.title||'Лидер группы',authority:clamp(Number(o.authority)||4,1,5),lastOrder:o.order||''};if(o.op==='leader_set_player')G.party.leader={kind:'player',npcId:null,title:'Лидер группы',authority:5,lastOrder:''};if(o.op==='leader_order'&&G.party.leader.kind==='npc')G.party.leader.lastOrder=String(o.order||'');if(o.op==='companion_update'&&G.party.companions[o.npcId]){const c=G.party.companions[o.npcId];if(o.role!=null)c.role=o.role;if(o.autonomy!=null)c.autonomy=clamp(Number(o.autonomy),0,2);if(o.loyaltyDelta)c.loyalty=clamp((c.loyalty??50)+Number(o.loyaltyDelta),0,100);if(o.moraleDelta)c.morale=clamp((c.morale??60)+Number(o.moraleDelta),0,100)}}
 function applyPatch(p={}){if(p.timeMinutes)addMinutes(p.timeMinutes);if(p.hpDelta)G.player.hp=clamp(G.player.hp+Number(p.hpDelta),0,G.player.maxHp);const cd=normalizeCoinDelta(p.coinDelta);if(cd)addCoins(cd);for(const x of p.addItems||[])applyItemAdd(x);for(const x of p.removeItems||[])applyItemRemove(x);for(const c of p.conditionsAdd||[])if(!G.player.conditions.includes(c))G.player.conditions.push(c);for(const c of p.conditionsRemove||[])G.player.conditions=G.player.conditions.filter(x=>!sameName(x,c));for(const f of p.worldFacts||[])if(f&&!G.world.facts.includes(String(f)))G.world.facts.push(String(f));for(const o of p.npcOps||[])applyNpcOp(o);for(const o of p.locationOps||[])applyLocationOp(o);for(const o of p.questOps||[])applyQuestOp(o);for(const o of p.partyOps||[])applyPartyOp(o);for(const o of p.combatOps||[])applyCombatOp(o);syncLevelFromXp()}
 function syncLevelFromXp(){let lvl=G.player.level;while(lvl<20&&G.player.xp>=XP_LEVELS[lvl+1])lvl++;if(lvl!==G.player.level){G.player.level=lvl;addSystem(`Новый уровень: ${lvl}.`,'good');refreshSpellcastingForLevel(G.player)}}
-async function resolvePlayerAction(action){const spell=recognizedSpell(action);let resourceUse=null;if(spell){const r=consumeSpellSlot(spell);if(!r.ok){addSystem(r.reason,'bad');return false}resourceUse={spell:spell.name,slotLevel:r.level||0}}
-let first=await aiJson(directorPrompt(action,null,resourceUse),'Director');if(first.phase==='check'&&first.check){const rr=rollCheck(first.check);addSystem(`d20 ${rr.die} ${sign(rr.bonus)} = ${rr.total} против ${rr.dc} → ${rr.success?'успех':'провал'}. ${first.check.reason||''}`,'roll');first=await aiJson(directorPrompt(action,rr,resourceUse),'Director resolve')}
-if(first.narration)addNarration(first.narration);for(const l of first.lines||[])if(G.npcs[l.npcId]&&l.text)addDialogue(l.npcId,l.text,false);applyPatch(first.patch||{});if(first.outcome)addSystem(first.outcome);return true}
+function conversationalNpc(action){
+  const people=contextNpcs().filter(n=>n.status!=='dead');
+  if(!people.length)return null;
+  const t=String(action||'').toLowerCase();
+  const named=people.find(n=>t.includes(String(n.name).toLowerCase()));
+  const spoke=/\b(говорю|спрашиваю|отвечаю|прошу|заказываю|обращаюсь|интересуюсь|сказать|ищу|привет|здравств|пиво|пива|выпить|напиток|комнату|можно|спасибо)\b|^(да|нет|конечно|ага|хочу|будьте добры)/i.test(t);
+  const everyday=/^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)\b|\b(прошу|заказываю|спрашиваю|отвечаю)\b/i.test(t);
+  if(!named&&!spoke&&!everyday&&!/[?]/.test(t))return null;
+  if(named)return named;
+  const active=people.find(n=>n.id===G.dialogue.activeNpcId||n.id===G.dialogue.lastNpcId);
+  return active||people.length===1&&people[0]||people.find(n=>n.id==='tavern_keeper'&&G.world.currentLocationId==='blind_moon')||null;
+}
+function isOrdinaryDialogue(action){
+  const t=String(action||'').trim().toLowerCase();
+  return /^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)\b|\b(прошу|заказываю|спрашиваю|отвечаю)\b/i.test(t)&&!/убежд|обман|угрож|запугив|взлом|скрыт|ворую|краду|атаку|дерусь|бью|бросаю/i.test(t);
+}
+async function missingNpcReply(n,action){
+ const previous=recentConversation(7);
+ const prompt='You are '+n.name+', '+n.occupation+' in a persistent medieval D&D scene. Character: '+n.personality+'. Goal: '+n.goal+'. Recent dialogue: '+previous+'\nThe PLAYER has just said: '+action+'\nRespond DIRECTLY AS THIS NPC to that exact statement in Russian, with 1-3 natural, substantive spoken sentences. Follow established facts. No narrator, no stage directions, no labels, no JSON, and no repeating previous dialogue. Only the NPC spoken words.';
+ const answer=(await aiText(prompt)).replace(/^["«\s]+|["»\s]+$/g,'').trim();
+ return answer.slice(0,1100);
+}
+async function resolvePlayerAction(action){
+ const spell=recognizedSpell(action);let resourceUse=null;
+ if(spell){const r=consumeSpellSlot(spell);if(!r.ok){addSystem(r.reason,'bad');return false}resourceUse={spell:spell.name,slotLevel:r.level||0}}
+ const target=conversationalNpc(action);
+ let first=await aiJson(directorPrompt(action,null,resourceUse),'Director');
+ if(first.phase==='check'&&first.check){
+   if(target&&isOrdinaryDialogue(action)){
+     first=await aiJson(directorPrompt(action,null,resourceUse)+'\nThis is an ordinary conversation, not a skill challenge. Resolve with no dice, phase="resolve", check=null, and give the addressed NPC a spoken reply.','Director dialogue');
+   }else{
+     const rr=rollCheck(first.check);
+     addSystem(`d20 ${rr.die} ${sign(rr.bonus)} = ${rr.total} против ${rr.dc} → ${rr.success?'успех':'провал'}. ${first.check.reason||''}`,'roll');
+     first=await aiJson(directorPrompt(action,rr,resourceUse),'Director resolve');
+   }
+ }
+ if(target&&!((first.lines||[]).some(l=>l.npcId===target.id&&typeof l.text==='string'&&l.text.trim()))){
+   try{
+     const speech=await missingNpcReply(target,action);
+     if(speech)first.lines=[...(Array.isArray(first.lines)?first.lines:[]),{npcId:target.id,text:speech}];
+     else addSystem(target.name+': речевой ответ модели оказался пустым.','bad');
+   }catch(e){console.warn('NPC dialogue fallback',e);addSystem(target.name+': не удалось сформировать прямую реплику: '+e.message,'bad');}
+ }
+ if(first.narration)addNarration(first.narration);
+ for(const line of Array.isArray(first.lines)?first.lines:[])if(G.npcs[line.npcId]&&line.text)addDialogue(line.npcId,line.text,false);
+ applyPatch(first.patch||{});
+ if(first.outcome&&String(first.outcome).trim().length>12)addSystem(first.outcome);
+ return true;
+}
 
 function npcPulsePrompt(trigger){const loc=G.world.locations[G.world.currentLocationId],npcs=contextNpcs().filter(n=>n.status!=='dead');return`You are the autonomous-world pulse for Ilreon. JSON only, Russian speech/text.
 CANON: ${ILREON_CANON}
@@ -347,7 +394,30 @@ function setNpcLeader(id){if(!G.party.companions[id])return;createSnapshot('см
 function askCompanion(id){const n=G.npcs[id],c=G.party.companions[id];if(!n||!c)return;$('actionInput').value=`Я прошу ${n.name} помочь мне, используя его роль «${c.role||'универсал'}»: `;$('actionInput').focus()}
 function openNpcProfile(id){const n=G.npcs[id];if(!n)return;$('npcModal').classList.remove('hidden');$('npcProfile').innerHTML=`<div class="npc-profile-head">${n.portrait?`<img class="npc-profile-img" src="${esc(n.portrait)}">`:`<div class="npc-profile-img" style="display:flex;align-items:center;justify-content:center;font-family:Spectral;font-size:54px">${esc(n.name.slice(0,1))}</div>`}<div style="flex:1"><h2>${esc(n.name)}</h2><div><span class="pill violet">${esc(n.occupation)}</span>${n.faction?`<span class="pill">${esc(n.faction)}</span>`:''}<span class="pill ${n.disposition>=0?'green':'red'}">отношение ${n.disposition>=0?'+':''}${n.disposition}</span></div><div class="tiny" style="margin-top:8px"><b>Внешность:</b> ${esc(n.appearance||'не описана')}</div><div class="tiny" style="margin-top:6px"><b>Характер:</b> ${esc(n.personality||'')}</div><div class="tiny" style="margin-top:6px"><b>Цель:</b> ${esc(n.goal||'')}</div><div class="tiny" style="margin-top:6px"><b>Инициатива:</b> речь ${n.initiative.speech}/100 · действия ${n.initiative.action}/100 · слух ${n.initiative.hearing}/100</div><div class="tiny"><b>Экономические полномочия:</b> ${esc(n.economy.authority||'none')}${n.economy.canFine?' · штрафы':''}${n.economy.canCharge?' · оплата услуг':''}${n.economy.canSteal?' · может красть':''}</div><div class="actions"><button class="secondary" onclick="generateNpcPortrait('${esc(id)}')">Сгенерировать портрет</button>${!G.party.companions[id]?`<button class="secondary" onclick="debugAddCompanion('${esc(id)}')">Добавить в группу</button>`:''}</div></div></div><div class="npc-events"><b>Память</b>${(n.memory||[]).slice(-12).reverse().map(e=>`<div class="npc-event"><div class="when">${esc(e.when)}</div>${esc(e.text)}</div>`).join('')||'<div class="tiny">Пока пусто.</div>'}</div>`}
 function closeNpcProfile(){$('npcModal').classList.add('hidden')}
-async function generateNpcPortrait(id){const n=G.npcs[id];if(!n||busy)return;setBusy(true);try{const p=`vertical 2:3 realistic fantasy character portrait, D&D grounded medieval style, ${n.name}, ${n.occupation}. Appearance: ${n.appearance}. Personality visible subtly: ${n.personality}. neutral dark background, no text, no frame`;const raw=await queueAI(()=>rawGenerateImage(p,{width:512,height:768}));const u=extractImageUrl(raw);if(!u)throw new Error('генератор не вернул URL изображения');n.portrait=u;openNpcProfile(id);refresh();await saveGame(true)}catch(e){alert('Портрет: '+e.message)}finally{setBusy(false)}}
+function npcPortraitSpec(n){
+ const appearance=String(n.appearance||'').slice(0,2500),personality=String(n.personality||'').slice(0,700);
+ const isSavos=n.id==='tavern_keeper';
+ const male=isSavos||/мужчин|юнош|парень|бород|усы|отец|старик|\bmale\b|\bman\b/i.test(appearance);
+ const female=!male&&/женщин|девуш|старух|\bfemale\b|\bwoman\b/i.test(appearance);
+ const identity=isSavos?'ADULT HUMAN MAN, aged about forty, sturdy build, GREEN EYES, chestnut brown hair neatly tied back into a MAN BUN, large full well-trimmed chestnut BEARD and MUSTACHE, masculine adult face. Practical plain linen shirt, simple dark working vest and innkeeper apron. NO decorative gold ornaments. He is a working tavern keeper, NOT a noblewoman.':male?'An adult masculine human male. Keep explicitly described beard, hair, age, body shape and clothing.':female?'An adult human woman; follow explicitly established physical features.':'An adult fantasy character; preserve the identity and all explicitly stated visual attributes.';
+ const positive='One single '+(male?'MALE ':female?'FEMALE ':'')+'medieval fantasy character portrait, head and torso, grounded realistic D&D illustration, anatomically plausible, accurate adult face, natural skin, authentic practical medieval clothes. NPC: '+n.name+'. Occupation: '+n.occupation+'. '+identity+' Background: modest lived-in medieval interior, soft warm natural light. Source appearance details (authoritative): '+appearance+'. Personality cues: '+personality+'. ONE PERSON, face in clear view, no text, no portrait frame.';
+ const negative='wrong gender, '+(male?'woman, female, feminine face, breasts, cleavage,':'')+(female?'man, male, beard, moustache,':'')+' fashion model, glamour makeup, modern clothes, ornate jewelry, royal dress, excessive gold decorations, exposed chest, child, anime, manga, exaggerated proportions, duplicate person, distorted face, bad hands, watermark, text';
+ return {prompt:positive,options:{width:512,height:768,refine:false,preset:'fantasy',negative_prompt:negative,steps:28,cfg_scale:7,sampler_name:'DPM++ 2M Karras'}};
+}
+async function generateNpcPortrait(id){
+ const n=G.npcs[id];if(!n||busy)return;
+ setBusy(true);
+ try{
+  const spec=npcPortraitSpec(n);
+  const raw=await queueAI(()=>rawGenerateImage(spec.prompt,spec.options));
+  const url=extractImageUrl(raw);
+  if(!url)throw Error('генератор не вернул URL изображения');
+  n.portrait=url;
+  n.portraitParameters={prompt:spec.prompt,negative:spec.options.negative_prompt,refine:false};
+  openNpcProfile(id);refresh();await saveGame(true);
+ }catch(e){alert('Портрет: '+e.message)}
+ finally{setBusy(false)}
+}
 function debugAddCompanion(id){if(!G.npcs[id])return;createSnapshot('добавление компаньона');applyPartyOp({op:'companion_add',npcId:id});G.npcs[id].locationId=G.world.currentLocationId;closeNpcProfile();refresh();saveGame(true)}
 
 function applyCombatOp(o){if(!o||!o.op)return;if(o.op==='start'){G.combat.active=true;G.combat.round=1;G.combat.enemies=(o.enemies||[]).map((e,i)=>({id:e.id||uid('enemy'),name:e.name||`Враг ${i+1}`,hp:Math.max(1,Number(e.hp)||10),maxHp:Math.max(1,Number(e.maxHp||e.hp)||10),ac:Math.max(1,Number(e.ac)||12),attackBonus:Number(e.attackBonus)||3,damage:e.damage||'1d6+1',status:'alive'}));addSystem(`Бой начался: ${G.combat.enemies.map(e=>e.name).join(', ')}.`,'bad')}if(o.op==='damage_enemy'){const e=G.combat.enemies.find(x=>x.id===o.enemyId);if(e){e.hp=clamp(e.hp-Number(o.damage||0),0,e.maxHp);if(e.hp<=0)e.status='dead'}}if(o.op==='end'){G.combat.active=false;G.combat.enemies=[];addSystem('Бой завершён.','good')}}

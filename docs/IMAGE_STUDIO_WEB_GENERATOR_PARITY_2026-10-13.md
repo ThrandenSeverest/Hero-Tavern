@@ -19,7 +19,8 @@ Allow a user to generate, refine, compare, batch, save and reuse results **witho
 | LoRA | ComfyUI discovery and two selectable LoRAs in UI, up to three in API; strength controls |
 | Precise scene composition | 2–6 character independent area conditionings via ComfyUI core nodes |
 | Reference / img2img | Import PNG/JPEG/WebP into local PNG gallery; select it as a reference; denoise slider |
-| Inpainting | Draw mask with brush, undo, eraser; exact source compositing outside edited regions; save separately |
+| Inpainting | Draw mask with brush, undo, eraser; source compositing outside edited regions; save separately |
+| Canvas outpainting | Extend left/right/top/bottom with per-edge padding and seam feathering via core ComfyUI nodes; preserve center |
 | Batch variations | 1, 2, 4 images; each is saved with provenance; thumbnails and full gallery |
 | Upscale | Built-in Lanczos resizer or installed ComfyUI AI upscaler model |
 | Saved output | Images as PNG, sidecar metadata including seed/engine/source/LoRA; favorites, search, reuse, compare before/after |
@@ -61,7 +62,7 @@ Allow a user to generate, refine, compare, batch, save and reuse results **witho
 | Text and single-shot generation | Implemented in source | Windows end-to-end inference |
 | Better model quality | External FLUX/Z-Image API workflows supported as imported graphs | Tested install/runtime recipes, curated models with license + checksum, no duplicate downloads |
 | Multi-character accuracy | Core-region conditioning | Reference-based character locking and fine-grained region masks |
-| Pro canvas | Inpaint mask, erase, undo, before/after | Canvas expansion (outpaint), rectangle/lasso, layer transforms, soft feather radius, live previews |
+| Pro canvas | Inpaint mask, erase, undo, before/after, edge outpainting with seam feathering | Rectangle/lasso, layer transforms, live intermediate previews |
 | Local workflow library | Guarded import and parameter substitution | Guided model-specific one-click templates after verified testing |
 | GPU/RAM budgets | Sequential model release, explicit unload, runtime storage monitoring | Measured memory predictor and automatic batch-size adjustment on RTX 5070 |
 | Inference throughput | WebSocket progress / ETA | Queue pause/resume and genuine thumbnail previews, per-model benchmarks |
@@ -70,7 +71,7 @@ Allow a user to generate, refine, compare, batch, save and reuse results **witho
 ## Verification required before claiming release
 
 1. On Windows, start installed ComfyUI at `127.0.0.1:8188`, test `GET /system_stats`, `GET /models/checkpoints`, `GET /models/loras` and `GET /models/upscale_models`.
-2. Test plain SDXL, with LoRA and without; TXT/IMG2IMG/inpaint; 1/2/4 variants; upscale model (if installed); an imported FLUX Klein and Z-Image API graph.
+2. Test plain SDXL, with LoRA and without; TXT/IMG2IMG/inpaint/outpaint; 1/2/4 variants; upscale model (if installed); an imported FLUX Klein and Z-Image API graph.
 3. Verify unpainted source areas are unchanged in pixel comparisons, that img2img changes the full canvas only when selected, and that cancel stops only the Hero Tavern prompt without interrupting unrelated ComfyUI jobs.
 4. Run interrupted/failed ComfyUI tasks to verify exact errors, no false completion and no duplicate outputs. Test when ComfyUI disconnects and when the chosen model is unavailable.
 5. Compare disk free space, `Images`, `ImageWorkflows`, `Logs`, KoboldCpp `_MEI`, and ComfyUI external input/output before/after 10 consecutive jobs and close cycles.

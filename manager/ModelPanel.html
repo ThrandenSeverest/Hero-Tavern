@@ -287,6 +287,7 @@ async function loadGallery(){
    btn('Delete',async()=>{if(confirm('Permanently delete this generated image?')){await request('/gallery/delete',{name:item.name,confirm:true});await loadGallery()}});
    c.append(img,summary,prompt,controls);grid.append(c);
   }
+  await heroRefreshSources();
  }catch(e){el('gallery-count').textContent='Gallery: '+e.message}
 }
 el('gallery-refresh').onclick=loadGallery;

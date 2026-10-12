@@ -200,12 +200,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
       let actualEngine='koboldcpp';
-      if(engine!=='koboldcpp'){
+      const requiresComfy=!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint';
+      if(engine!=='koboldcpp'||requiresComfy){
         const ok=await comfy.available();
         if(ok&&comfyCheckpoint)actualEngine='comfyui';
-        else if(engine==='comfyui'||input.sourceName)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or select KoboldCpp.');
+        else if(engine==='comfyui'||requiresComfy)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or choose a basic KoboldCpp text-to-image job.');
       }
-      if(input.sourceName&&actualEngine!=='comfyui')throw Error('Masked editing requires an active ComfyUI engine.');
+      if(requiresComfy&&actualEngine!=='comfyui')throw Error('LoRA, batches, upscaling and image editing require ComfyUI.');
       imageJob=true;
       const restoreText=!!backend||textPausedForImages,restorePlanner=thinking.snapshot().running;
       try{
@@ -313,12 +314,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
-        if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),available:await comfy.available(),checkpoints:await comfy.checkpoints().catch(()=>[])});return;}
+        if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog()});return;}
          if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true'}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/studio/progress'){const st=studio.snapshot(),img=images.snapshot();let progress=null,step=null,totalSteps=null;
+          const liveComfy=comfy.snapshot().active;
           if(img.busy){try{const response=await engineFetch('http://127.0.0.1:'+imagePort+'/sdapi/v1/progress',{timeoutMs:1200});if(response.ok){const p=await response.json();if(Number.isFinite(p.progress))progress=Math.max(0,Math.min(1,p.progress));step=p.state?.sampling_step??null;totalSteps=p.state?.sampling_steps??null;}}catch{}}
-          json(200,{busy:st.busy,phase:st.phase,imageState:img.state,progress,step,totalSteps});return;}
+          json(200,{busy:st.busy,phase:liveComfy?.phase||st.phase,imageState:liveComfy?'ComfyUI':img.state,progress:liveComfy?liveComfy.progress:progress,step:liveComfy?.step??step,totalSteps:liveComfy?.totalSteps??totalSteps,etaMs:liveComfy?.etaMs??null,queueId:liveComfy?.id??null});return;}
         if (req.method === 'GET' && req.url === '/status') { try { json(200, snapshot()); } catch (e) { json(400, {error:e.message}); } return; }
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }

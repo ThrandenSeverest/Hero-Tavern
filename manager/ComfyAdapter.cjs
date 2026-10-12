@@ -192,7 +192,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     fs.writeFileSync(dest,bytes,{flag:'wx'});
     const details={engine:'comfyui',mode:spec.mode,workflowId:spec.workflowId||null,workflowName:spec.workflowName||null,model:custom?(spec.workflowName||'Custom ComfyUI workflow'):checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
       width:size.width,height:size.height,steps:params.steps,seed:spec.seed,sampler_name:params.sampler_name,denoise:params.denoise,
-      lora:params.lora||[],upscaleModel:params.upscaleModel||'',batch_size:spec.batch,promptId:job.id,remoteOutput:{filename:remote.filename,subfolder:remote.subfolder||'',type:'output'},
+      lora:params.lora||[],upscaleModel:params.upscaleModel||'',batch_size:spec.batch,batchIndex:images.length,promptId:job.id,remoteOutput:{filename:remote.filename,subfolder:remote.subfolder||'',type:'output'},
       createdAt:new Date().toISOString()};
     fs.writeFileSync(dest+'.json',JSON.stringify(details,null,2));
     logEvent({action:'comfy-image-saved',path:dest,bytes:bytes.length,promptId:job.id,remoteOutput:details.remoteOutput});

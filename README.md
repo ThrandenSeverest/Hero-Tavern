@@ -92,6 +92,12 @@ Generate portraits or scenes, adjust prompt, negative prompt, dimensions, steps,
 
 **Character studio** offers simple character fields and advanced JSON, AI drafts, isolated test replies and reviewed episode openings with starting state and persona constraints. Save edits to a selected native card, or export/import compatible V2 JSON. Portrait editing remains in native Characters.
 
+## Qwen Assistant — ordinary GPT-style helper (October 2026)
+
+Hero Tavern now has a separate **Ассистент** screen alongside Tavern and Adventure, using the existing local Qwen3 8B Abliterated GGUF. It has Fast, Think and two-pass Deep Think modes; editable conversations; and **opt-in Brave Search API** with user-supplied per-tab key and linked source snippets.
+
+The assistant can import user-selected plain text files into an isolated workspace, propose an updated file with a side-by-side review and changed region, apply only after confirmation, save prior revisions, restore them and download the updated copy. It has **no unrestricted access** to local files or command execution. More details: [Assistant user guide](docs/ASSISTANT_QWEN_FILE_EDITOR_2026-10-13.md).
+
 ## Managed ComfyUI and simple model switching (October 2026)
 
 **Image Studio → ComfyUI · model hub** now offers named local image models: SDXL / Stable Diffusion, FLUX.2 Klein 4B (including reference editing), and Z-Image Turbo (text-to-image). The app builds the corresponding ComfyUI core-node workflow internally; no node graph or API JSON import is needed for those built-in choices. Chat image generation also has the model picker.

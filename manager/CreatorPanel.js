@@ -13,6 +13,7 @@
  const originalDraft=$('draft-character').onclick;$('draft-character').onclick=async()=>{await originalDraft();try{fill(base())}catch{}};
  const originalImport=$('import-character').onclick;$('import-character').onclick=()=>{try{$('character-json').value=JSON.stringify(v2(),null,2);originalImport()}catch(e){showError(e)}};
  const originalDownload=$('download-character').onclick;$('download-character').onclick=()=>{try{$('character-json').value=JSON.stringify(v2(),null,2);originalDownload()}catch(e){showError(e)}};
+ $('creator-portrait').onclick=()=>window.HeroStoryPanel.send('portrait-editor').catch(showError);
  $('creator-load-selected').onclick=()=>parent.postMessage({type:'hero-character-load'},location.origin.replace(':8001',':8000'));
  window.addEventListener('message',e=>{if(!trustedParent(e))return;if(e.data?.type==='hero-character-data'){loaded=e.data.card;fill(loaded);$('character-result').textContent='Selected character loaded. Edits are a draft until you save.';}});
  $('creator-save-selected').onclick=async()=>{try{const card=v2();await window.HeroStoryPanel.send('character-update',{card,profile:card.data.extensions.hero_tavern});$('character-result').textContent='Character saved; existing stories keep their independent live state.'}catch(e){showError(e)}};

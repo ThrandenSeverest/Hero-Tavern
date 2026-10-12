@@ -16,6 +16,7 @@ export async function initStory({getContext,frame,show}){
   if(busy)throw Error('A story operation is still running.');busy=true;
   try{
    if(op==='open'){const target=await rpc('/story/get',{id:data.id});await open(target.session);return target;}
+   if(op==='portrait-editor'){show('characters');return null;}
    if(op==='list')return rpc('/story/list',data);
    if(op==='import'){const result=await rpc('/story/import',data);await c().getCharacters();return result;}
    if(op==='character-update'){
@@ -28,7 +29,7 @@ export async function initStory({getContext,frame,show}){
     const v=await sync(),book=await c().loadWorldInfo(data.name);if(!book)throw Error('Lorebook not found.');const entries=book.hero_tavern?.entries||Object.values(book.entries||{}).filter(e=>!e.disable).map(e=>({id:'native-'+data.name+'-'+e.uid,label:e.comment||'Lore',text:e.content,keywords:e.constant?[]:e.key||[],visibility:'player'}));return rpc('/story/metadata',{id:v.session.id,lore:[...v.session.lore,...entries.filter(e=>!v.session.lore.some(x=>x.id===e.id))]});
    }
    if(op==='test-character')return rpc('/story/test-character',data);
-   if(op==='helper')return rpc('/story/helper',data);
+   if(op==='helper')return rpc('/story/helper',{...data,context:[c().characters[c().characterId]?.description||'',data.context||''].join('\n')});
    const v=await sync();if(!v)throw Error('Select a character and chat first.');
    if(op==='open'){const target=await rpc('/story/get',{id:data.id});await open(target.session);return target;}
    if(op==='fork'){c().stopGeneration?.();const result=await rpc('/story/fork',{...data,id:v.session.id});await open(result.session);return result;}
@@ -40,8 +41,8 @@ export async function initStory({getContext,frame,show}){
    if(op==='export')return rpc('/story/export',{...data,id:v.session.id});
    if(op==='generate'){
     const kind=data.kind,defaults={normal:'',descriptive:'Continue with richer scene detail, keeping established facts.',concise:'Continue concisely without repetition.',strict:'Stay strictly in character and honor all established facts.',next:'Advance naturally to the next scene without undoing established events.',unexpected:'Introduce a plausible unexpected event while preserving character agency.',emergency:'Introduce a plausible urgent situation without inventing irreversible injuries.'};
-    if(kind==='time'&&!confirm('Advance the story by '+data.instruction+'? This may change time-dependent state.'))return null;
-    actionInstruction=data.instruction||defaults[kind]||'';try{show('chat');if(kind==='continue')await c().generate('continue');else if(['normal','descriptive','concise','strict','custom'].includes(kind))await c().generate('regenerate');else await c().generate('normal',{automatic_trigger:true,quiet_prompt:actionInstruction,quietToLoud:true});return await sync();}finally{actionInstruction='';}
+    let timers=[];if(kind==='time'){if(!Number.isFinite(data.amount)||data.amount<=0||data.amount>365||!['days','hours','turns'].includes(data.unit))throw Error('Choose a positive time skip and its unit.');timers=v.session.definitions.filter(d=>d.type==='timer'&&d.enabled!==false&&(d.unit||'days')===data.unit&&v.context.state[d.owner+':'+d.id]?.clock==='story').map(d=>({key:d.owner+':'+d.id,value:{remaining:Math.max(0,v.context.state[d.owner+':'+d.id].remaining-data.amount),clock:'story'}}));if(!confirm('Advance '+data.amount+' '+data.unit+'? '+timers.length+' matching story timers will decrease. No injury heals automatically.'))return null;data.instruction='Advance the story by '+data.amount+' established '+data.unit+'. Preserve injuries; do not assume healing. '+(data.instruction||'');}
+    actionInstruction=data.instruction||defaults[kind]||'';try{show('chat');if(kind==='continue')await c().generate('continue');else if(['normal','descriptive','concise','strict','custom'].includes(kind))await c().generate('regenerate');else await c().generate('normal',{automatic_trigger:true,quiet_prompt:actionInstruction,quietToLoud:true});const updated=await sync();if(timers.length&&updated.session.id===v.session.id&&updated.messages.length>v.messages.length){view=await rpc('/story/patch',{id:updated.session.id,patch:timers.map(t=>({...t,sourceMessageId:updated.messages.at(-1).extra.heroMessageId,reason:'User approved '+data.amount+' '+data.unit+' story time skip'}))});publish();return view;}return updated;}finally{actionInstruction='';}
    }
    if(op==='profile'){if(c().groupId)throw Error('Select a single character to edit its reusable template.');const value=await rpc('/story/profile',{characterId:v.session.characterId,profile:data.profile});await c().writeExtensionField(c().characterId,'hero_tavern',value);return value;}
    const result=await rpc('/story/'+op,{...data,id:v.session.id});if(result?.session){view=result;publish();}return result;

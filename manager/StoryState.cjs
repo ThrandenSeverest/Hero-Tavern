@@ -52,7 +52,7 @@ function propose(session,messages,patch,{manual=false,approve=false}={}){
   const prior=state[item.key];if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
   const major=d.type==='number'&&Math.abs(item.value-prior)>d.maxDelta||d.type==='list'&&JSON.stringify(prior)!==JSON.stringify(item.value)||d.type==='quest'&&['complete','failed'].includes(item.value.status)||d.type==='timer'&&item.value.clock==='wall';
   const status=manual||approve?'confirmed':d.updateMode==='approval'||major||item.ambiguous?'pending':'confirmed';
-  const sourceSignature=signature(source),eventId=hash({key:item.key,sourceMessageId:item.sourceMessageId,sourceSignature,value:item.value});
+  const sourceSignature=signature(source),eventId=manual?crypto.randomUUID():hash({key:item.key,sourceMessageId:item.sourceMessageId,sourceSignature,value:item.value});
   if(session.events.some(e=>e.eventId===eventId&&e.status!=='invalid')||events.some(e=>e.eventId===eventId))continue;
   const event={eventId,op:'set',key:item.key,previous:clone(prior),value:clone(item.value),sourceMessageId:item.sourceMessageId,sourceSignature,sourcePrefix:hash(messages.slice(0,messages.indexOf(source)+1).map(signature)),sourceSwipeId:source.swipe_id??0,authority:manual||approve?'user':'model',reason:String(item.reason||evidence||'Manual edit').slice(0,1000),evidence,status,at:Date.now()};events.push(event);if(status==='confirmed')state[item.key]=clone(item.value);
  }
@@ -73,7 +73,7 @@ const TEMPLATE_DATA=[
  ['Stress & Mood',[{id:'mood',label:'Mood',type:'enum',initialValue:'calm',allowedValues:['calm','happy','worried','angry','afraid'],updateMode:'automatic'},{id:'stress',label:'Stress',type:'number',initialValue:0,min:0,max:100,updateMode:'approval'}]],
  ['Inventory & Equipment',[{id:'inventory',label:'Inventory',type:'list',initialValue:[],updateMode:'approval'},{id:'equipment',label:'Equipment',type:'list',initialValue:[],updateMode:'approval'}]],
  ['Secrets & Knowledge',[{id:'secret_known',label:'Secret known',type:'boolean',initialValue:false,visibility:'hidden',updateMode:'approval'},{id:'known_names',label:'Known names',type:'list',initialValue:[],updateMode:'approval'}]],
- ['Location & Time',[{id:'location',label:'Location',type:'text',initialValue:'Starting location',updateMode:'automatic'},{id:'recovery',label:'Recovery time',type:'timer',initialValue:{remaining:3,clock:'story'},updateMode:'approval'}]],
+ ['Location & Time',[{id:'location',label:'Location',type:'text',initialValue:'Starting location',updateMode:'automatic'},{id:'recovery',label:'Recovery time (days)',type:'timer',unit:'days',initialValue:{remaining:3,clock:'story'},updateMode:'approval'}]],
  ['Quests & Flags',[{id:'quest',label:'Current quest',type:'quest',initialValue:{stage:'Not started',status:'inactive'},updateMode:'approval'},{id:'door_unlocked',label:'Door unlocked',type:'boolean',initialValue:false,updateMode:'automatic'}]],
  ['Clothing & Appearance',[{id:'clothing',label:'Clothing',type:'text',initialValue:'Usual outfit',updateMode:'automatic'}]]
 ];

@@ -98,7 +98,7 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
   active=new AbortController();phase='preparing';const signal=active.signal;
   try{
    await ensureText(signal);
-   const userTask=safeText(input.prompt,14000,'assistant request').trim();
+   const userTask=safeText(input.prompt??'',14000,'assistant request').trim();
    if(!userTask&&kind!=='file-edit')throw Error('Type a question or instruction.');
    const mode=['fast','think','deep'].includes(input.mode)?input.mode:'fast';
    const deep=mode==='deep',thinking=mode==='think',web=!!input.web,results=web?await searchWeb(userTask,input.apiKey,signal):[];
@@ -129,10 +129,11 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
     if(!match)throw Error('Qwen did not return a complete delimited file. No changes were saved. Retry with a shorter file or clearer instruction.');
     const f=getFile(input.fileId),edited=match[1];
     if(!edited.trim()||edited.length>50000)throw Error('Invalid proposed file length. Nothing was changed.');
+    if(path.extname(f.name).toLowerCase()==='.json'){try{JSON.parse(edited)}catch{throw Error('The proposed JSON has invalid syntax. No changes were saved. Ask Qwen to produce valid JSON.')}}
     drafts.set(f.id,{text:edited,baseHash:sha(f.text),createdAt:now()});
     lastError='';return {kind:'file-edit',fileId:f.id,name:f.name,original:f.text,proposed:edited,changed:f.text!==edited,model:modelName(),mode};
    }
-   c.messages.push({role:'user',text:userTask},{role:'assistant',text:answer});c.messages=c.messages.slice(-40);c.updatedAt=now();
+   c.messages.push({role:'user',text:userTask},{role:'assistant',text:answer,sources:results});c.messages=c.messages.slice(-40);c.updatedAt=now();
    if(c.title==='New conversation')c.title=userTask.slice(0,70);save();lastError='';
    return {kind:'chat',chat:c,answer,sources:results,mode,model:modelName(),webUsed:web,planningPasses:deep?2:1};
   }catch(e){lastError=e.message;throw e}

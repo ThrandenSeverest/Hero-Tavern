@@ -177,7 +177,7 @@ const formatDisk=n=>((Number(n)||0)/1073741824).toFixed(2)+' GiB';
 let lastDiskReport=null,wasGenerating=false;
 async function loadDiskReport(){
  try{const d=await request('/storage/report');lastDiskReport=d;
-  el('disk-summary').textContent='Safe cleanup: '+formatDisk(d.reclaimableBytes)+' · free: '+(d.freeBytes==null?'unavailable':formatDisk(d.freeBytes));
+  el('disk-summary').textContent='Safe cleanup: '+formatDisk(d.reclaimableBytes)+' · free: '+(d.freeBytes==null?'unavailable':formatDisk(d.freeBytes))+' · since app start: '+(d.sessionFreeChange==null?'unknown':(d.sessionFreeChange<0?'-':'+')+formatDisk(Math.abs(d.sessionFreeChange)))+(d.storageWarning?' ⚠ '+d.storageWarning:'');
   el('disk-categories').replaceChildren(...d.categories.map(x=>{const p=document.createElement('article');p.className='card';p.textContent=x.name+' — '+formatDisk(x.bytes);return p}));
   el('disk-candidates').replaceChildren(...d.cleanupItems.map(x=>{const p=document.createElement('p');p.textContent=x.relative+' · '+formatDisk(x.bytes)+' · '+x.reason;return p}));
   el('disk-clean').disabled=!d.cleanupItems.length;
@@ -234,6 +234,7 @@ async function pollStudioProgress(){
  }catch(e){el('studio-progress-details').textContent=e.message}
 }
 setInterval(pollStudioProgress,1500);
+setInterval(()=>{if(!el('storage').hidden)loadDiskReport()},60000);
 
 refresh();setInterval(refresh,1800);
 

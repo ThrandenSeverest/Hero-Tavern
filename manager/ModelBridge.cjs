@@ -14,6 +14,8 @@ const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {systemInfo,performancePreset}=require('./Performance.cjs');
 const {createAutoTune}=require('./AutoTune.cjs');
 const {createStudio}=require('./ImageStudio.cjs');
+const {createDiskCare}=require('./DiskCare.cjs');
+const {createImageGallery}=require('./ImageGallery.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
@@ -72,6 +74,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let generationState = 'idle', contextDiagnostics = null,imageJob=false,textPausedForImages=false,queuedInference=0,launchConfig=null,launchArgs=[];
     const {profileFor}=require('./ModelProfiles.cjs');let loadedContext=0;
     const story=createStoryStore(root,{tavernPath});
+    const diskCare=createDiskCare(root);
+    const imageGallery=createImageGallery(root);
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
     const pipeline = createPipeline({root,backendURL,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
@@ -277,6 +281,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
+        if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
+        if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true'}))}catch(e){json(400,{error:e.message})}return;}
+        if(req.method==='GET'&&req.url==='/studio/progress'){const st=studio.snapshot(),img=images.snapshot();let progress=null,step=null,totalSteps=null;
+          if(img.busy){try{const response=await engineFetch('http://127.0.0.1:'+imagePort+'/sdapi/v1/progress',{timeoutMs:1200});if(response.ok){const p=await response.json();if(Number.isFinite(p.progress))progress=Math.max(0,Math.min(1,p.progress));step=p.state?.sampling_step??null;totalSteps=p.state?.sampling_steps??null;}}catch{}}
+          json(200,{busy:st.busy,phase:st.phase,imageState:img.state,progress,step,totalSteps});return;}
         if (req.method === 'GET' && req.url === '/status') { try { json(200, snapshot()); } catch (e) { json(400, {error:e.message}); } return; }
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
@@ -285,6 +294,10 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
+            if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
+            if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
+            if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
+            if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
             if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}
             if(req.url==='/performance/system'){json(200,await diagnosticEnvironment());return;}
             if(req.url==='/performance/apply'){const preset=performancePreset(data.preset,await systemInfo());if(data.contextSize!==undefined)preset.contextSize=data.contextSize;lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,null,30000);const configFile=path.join(root,'backend.json'),before=fs.existsSync(configFile)?fs.readFileSync(configFile):null;fs.writeFileSync(configFile,JSON.stringify(preset));try{backendArguments(root,'');}catch(e){if(before)fs.writeFileSync(configFile,before);throw e;}const gen=readSettings(root),isQwen=profileFor(root,selected()).Family?.includes('Qwen');saveSettings(root,{...gen,temperature:isQwen?0.7:0.8,top_p:isQwen?0.8:0.95,min_p:isQwen?0:0.05,top_k:20,maxReplyTokens:768,memoryTokens:384,recentMessages:24,thinkingMode:'off'});await runBackend();json(200,{preset,environment:await diagnosticEnvironment()});return;}

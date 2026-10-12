@@ -314,6 +314,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             try{
                 if(tuner.snapshot()?.status==='running')throw Error('Hardware calibration is running. Cancel it in Hardware to use chat.');
                 if(imageJob)await waitUntil(()=>!imageJob,null,1200000);
+                if(assistant.snapshot().busy)throw Error('Local Assistant is responding. Finish or cancel it before requesting an RP reply.');
                 if(textPausedForImages)throw Error('Image model is loaded. Stop the image model before sending a chat message.');
                 if(!backendReady)await ensureText();
                 await pipeline.handle(req,res);
@@ -353,10 +354,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
+            if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
             if(req.url.startsWith('/assistant/')){
                 if((req.url==='/assistant/message'||req.url==='/assistant/file-edit')&&(imageJob||queuedInference||generationState!=='idle'||tuner.snapshot()?.status==='running'))throw Error('Finish the active AI task first.');
-                if((req.url==='/assistant/message'||req.url==='/assistant/file-edit')&&!selected().toLowerCase().includes('qwen3-8b-abliterated'))throw Error('Load Qwen3 8B Abliterated from Assistant first.');
+                if(req.url==='/assistant/message'||req.url==='/assistant/file-edit'){
+                  if(!backendReady||!runningModel.toLowerCase().includes('qwen3-8b-abliterated'))throw Error('Load Qwen3 8B Abliterated first using the button in Assistant.');
+                }
                 json(200,await assistant.action(req.url,data));return;
              }
              if(req.url==='/comfy/runtime/configure'){json(200,comfyRuntime.configure(data));return;}

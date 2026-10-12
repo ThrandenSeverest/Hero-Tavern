@@ -135,10 +135,12 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    const chosenPack=custom?null:models.pack(params.modelPack||models.snapshot().settings.selected||'sdxl');
    const managed=!!chosenPack&&chosenPack.id!=='sdxl';
    const mode=custom?'custom':params.operation||((sourceName&&maskData)?'inpaint':sourceName?'img2img':'txt2img');
+   let resolvedFiles=null;
    if(managed){
     const groups=['diffusion_models','text_encoders','vae'];
     const actual=Object.fromEntries(await Promise.all(groups.map(async name=>[name,await modelList(name)])));
     const missing=models.composeStatus(actual).find(x=>x.id===chosenPack.id)?.missing||[];
+    resolvedFiles=models.resolvePackFiles(chosenPack,actual);
     if(missing.length)throw Error(chosenPack.name+' missing components: '+missing.join(', ')+'. Install its model pack in Image Studio.');
    }else if(!custom&&mode!=='upscale'){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
    else if(custom&&params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
@@ -167,7 +169,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(mode==='inpaint'&&!mask)throw Error('The inpaint brush selection cannot be empty.');
    if(mode==='upscale'&&sourceDimensions){if(params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)>1024)throw Error('For safe AI upscaling on 12 GB VRAM, select a source at most 1024 pixels per side.');if(!params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
-   const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,resolvedFiles:models.resolvePackFiles(chosenPack,await (async()=>{const groups=['diffusion_models','text_encoders','vae'];return Object.fromEntries(await Promise.all(groups.map(async group=>[group,await modelList(group)])))})())}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
+   const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,resolvedFiles:resolvedFiles}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
    job.phase='queued';listen(job);
    const response=await (await request('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:spec.graph,client_id:job.clientId}),signal:job.controller.signal},45000)).json();
    if(!response?.prompt_id)throw Error('ComfyUI rejected the workflow: '+JSON.stringify(response?.node_errors||response).slice(0,1500));

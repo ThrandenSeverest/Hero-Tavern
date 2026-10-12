@@ -89,7 +89,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch}={}){
  async function generate(params,{checkpoint,sourceName,maskData,signal}={}){
   if(active)throw Error('ComfyUI is already processing a Hero Tavern job.');
   const job={id:null,controller:new AbortController(),phase:'preparing',startedAt:Date.now()};active=job;
-  const onAbort=()=>job.controller.abort();signal?.addEventListener('abort',onAbort,{once:true});
+  const onAbort=()=>{job.controller.abort();if(job.id)cancel().catch(()=>{});};signal?.addEventListener('abort',onAbort,{once:true});
   try{
    const names=await checkpoints();
    if(!names.includes(checkpoint))throw Error('Selected checkpoint is not installed in ComfyUI. Choose from the ComfyUI checkpoint list.');

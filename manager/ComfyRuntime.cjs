@@ -26,7 +26,7 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
  try{config={...config,...JSON.parse(fs.readFileSync(configFile,'utf8'))}}catch{}
  let child=null,install=null,error='',started=0,ready=false;
  const installed=()=>resolveRuntime(config.folder||path.join(root,'ComfyUI-Portable'))||resolveRuntime(path.join(root,'ComfyUI-Portable'));
- const status=()=>({mode:config.mode,folder:config.folder,lowVram:config.lowVram,detected:installed(),running:!!child,pid:child?.pid||null,ready,error,install:install&&{phase:install.phase,bytes:install.bytes,expected:install.expected,archive:install.archive},officialArchive:ARCHIVE_URL,extractorInstalled:!!sevenZip()});
+ const status=()=>({mode:config.mode,folder:config.folder,lowVram:config.lowVram,detected:installed(),running:!!child,pid:child?.pid||null,ready,error,install:install&&{phase:install.phase,bytes:(install.phase==='downloading'&&fs.existsSync(install.archive+'.part')?fs.statSync(install.archive+'.part').size:install.bytes),expected:install.expected,archive:install.archive},officialArchive:ARCHIVE_URL,extractorInstalled:!!sevenZip()});
  const save=()=>fs.writeFileSync(configFile,JSON.stringify(config,null,2));
  function configure({mode,folder,lowVram}={}){
   if(child||install)throw Error('Stop ComfyUI and finish installation before changing runtime.');

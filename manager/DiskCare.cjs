@@ -86,3 +86,9 @@ function createDiskCare(root){
  return {report,cleanup};
 }
 module.exports={createDiskCare,bytesAt};
+if(require.main===module){
+  const root=process.argv[2];
+  if(!root)throw Error('Pass the installed Hero Tavern directory.');
+  const result=createDiskCare(root).cleanup({confirm:true});
+  process.stdout.write('Completed Hero Tavern temporary cleanup: '+result.freedBytes+' bytes; '+result.errors.length+' warnings.\n');
+}

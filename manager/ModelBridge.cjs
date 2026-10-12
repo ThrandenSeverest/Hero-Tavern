@@ -205,7 +205,15 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       const requiresComfy=(!!input.modelPack&&input.modelPack!=='sdxl')||!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint'||input.operation==='outpaint';
       if(engine==='koboldcpp'&&requiresComfy)throw Error('This operation needs ComfyUI. Set the image engine to Auto or ComfyUI; KoboldCpp remains text-to-image only.');
       if(engine!=='koboldcpp'||requiresComfy){
-        const ok=await comfy.available();
+        let ok=await comfy.available();
+        // When the user has installed the managed Portable runtime, start it on demand.
+        // Do not start external programs or download missing dependencies automatically.
+        const wantsComfy=engine==='comfyui'||requiresComfy||!!comfyCheckpoint;
+        if(!ok&&wantsComfy&&comfyRuntime.installed()&&process.platform==='win32'){
+          await comfyRuntime.start();
+          const deadline=Date.now()+120000;
+          while(Date.now()<deadline&&!ok){await new Promise(r=>setTimeout(r,2000));ok=await comfy.available();}
+        }
         if(ok&&(comfyCheckpoint||input.workflowId||input.operation==='upscale'||(input.modelPack&&input.modelPack!=='sdxl')))actualEngine='comfyui';
         else if(engine==='comfyui'||requiresComfy)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or choose a basic KoboldCpp text-to-image job.');
       }

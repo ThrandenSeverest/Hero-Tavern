@@ -98,8 +98,14 @@ const initHeroTavern = async () => {
         if(event.data?.type==='hero-memory-context'){const current=context?.();frame.contentWindow.postMessage({type:'hero-memory-chat',id:chatIdentity(),label:current?.chatId?current.name2+' · '+current.chatId:'Select a character and chat first.'},bridgeOrigin);}
         if(event.data?.type==='hero-image-chat'){
             const current=context?.();if(!chatIdentity()||!/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(event.data.url)){window.toastr?.info('Select a character chat before adding an image.');return;}
-            const message={name:current.name2,is_user:false,is_system:false,send_date:new Date().toISOString(),mes:'![Generated image]('+bridgeOrigin+event.data.url+')',extra:{}};
-            current.chat.push(message);current.addOneMessage(message);await current.saveChat();show('chat');
+            try{
+                const chosenChat=chatIdentity(),imageResponse=await fetch(bridgeOrigin+event.data.url);if(!imageResponse.ok)throw Error('Generated image is unavailable.');
+                const blob=await imageResponse.blob(),dataURL=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read generated image.'));reader.readAsDataURL(blob)});
+                const response=await fetch('/api/images/upload',{method:'POST',headers:current.getRequestHeaders(),body:JSON.stringify({image:String(dataURL).split(',')[1],format:'png',filename:'hero-'+Date.now(),ch_name:'Hero-Tavern'})});
+                const uploaded=await response.json();if(!response.ok||!uploaded.path)throw Error('Could not save image in the chat library.');if(chatIdentity()!==chosenChat)throw Error('Chat changed. Select the original chat and add the image again.');
+                const message={name:current.name2,is_user:false,is_system:false,send_date:new Date().toISOString(),mes:'![Generated image]('+uploaded.path+')',extra:{}};
+                current.chat.push(message);current.addOneMessage(message);await current.saveChat();show('chat');
+            }catch(e){window.toastr?.error(e.message)}
         }
         if(event.data?.type==='hero-character-import'){
             try{

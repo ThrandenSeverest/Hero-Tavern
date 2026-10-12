@@ -8,7 +8,7 @@ const repo=path.resolve(__dirname,'..'),st=path.join(repo,'.ci/SillyTavern'),roo
 async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}throw Error('Timed out waiting for UI/engine')}
 (async()=>{
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -18,7 +18,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
  settings.firstRun=false;settings.main_api='kobold';settings.api_server='http://127.0.0.1:5000/api';fs.writeFileSync(settingsPath,JSON.stringify(settings));
  const log=fs.openSync(path.join(repo,'.ci/sillytavern-smoke.log'),'w');
  const tavern=spawn(process.execPath,['server.js','--port','8000','--listen','false','--browserLaunchEnabled','false'],{cwd:st,stdio:['ignore',log,log]});fs.closeSync(log);
- const bridge=createBridge(root,{backendCommand:process.execPath,backendPrefix:[path.join(repo,'tests/fixtures/fake-kobold.cjs')],pollInterval:100});
+ const bridge=createBridge(root,{backendCommand:process.execPath,backendPrefix:[path.join(repo,'tests/fixtures/fake-kobold.cjs')],pollInterval:100,imageCommand:process.execPath,imagePrefix:[path.join(repo,'tests/fixtures/fake-kobold.cjs')]});
  let browser;
  try{
   await waitFor(async()=>(await fetch('http://127.0.0.1:8000/')).ok);
@@ -57,6 +57,20 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   await waitFor(async()=>await page.locator('#hero-welcome').isHidden());
   const clip=await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text')].some(el=>el.scrollWidth>el.clientWidth+2));if(clip)throw Error('Character drawer clips dialogue');
   await page.screenshot({path:path.join(repo,'.ci/hero-characters-qa.png')});
+  // Generate through the actual chat event path, not only a manual API request.
+  await page.locator('.hero-nav[data-hero="chat"]').click();
+  await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();for(const message of [{name:c.name1,is_user:true,is_system:false,mes:'HISTORY_MARKER: we promised a blue cloak.',send_date:new Date().toISOString()},{name:c.name2,is_user:false,is_system:false,mes:'I will keep that promise.',send_date:new Date().toISOString()},{name:c.name1,is_user:true,is_system:false,mes:'What did we promise?',send_date:new Date().toISOString()}]){c.chat.push(message);c.addOneMessage(message)}await c.generate('normal',{automatic_trigger:true});});
+  const historyStats=await(await fetch('http://127.0.0.1:5001/api/extra/teststats')).json();if(!historyStats.lastPrompt.includes('HISTORY_MARKER')||!historyStats.lastPrompt.includes('What did we promise?'))throw Error('Actual chat generation lost previous turns');
+  await page.locator('.hero-nav[data-hero="memory"]').click();await waitFor(async()=>(await panel.locator('#memory-chat').textContent()).includes('·'));await panel.locator('#memory-notes').fill('The promised cloak is blue.');await panel.locator('#save-memory').click();await panel.locator('#refresh-memory').click();await waitFor(async()=>(await panel.locator('#memory-notes').inputValue())==='The promised cloak is blue.');await page.screenshot({path:path.join(repo,'.ci/hero-memory-qa.png')});
+  await page.locator('.hero-nav[data-hero="creator"]').click();await panel.locator('#character-json').fill(JSON.stringify({name:'Hero QA Character',description:'A thoughtful guide.',personality:'Patient and curious.',scenario:'At a quiet tavern.',first_mes:'Welcome, traveller.',mes_example:'<START>\nHero QA Character: Tell me your story.'}));await panel.locator('#import-character').click();await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');return getContext().characters.some(c=>c.name==='Hero QA Character')}));
+  const imageDir=path.join(root,'ImageModels');fs.mkdirSync(imageDir,{recursive:true});const checkpoint=Buffer.alloc(1024*1024),head=Buffer.from(JSON.stringify({tensor:{dtype:'F32',shape:[1],data_offsets:[0,4]}}));checkpoint.writeBigUInt64LE(BigInt(head.length));head.copy(checkpoint,8);fs.writeFileSync(path.join(imageDir,'QA portrait.safetensors'),checkpoint);
+  await page.locator('.hero-nav[data-hero="images"]').click();await waitFor(async()=>await panel.locator('#image-installed option').count()===1);await panel.locator('#image-select').click();await panel.locator('#image-start').click();await waitFor(async()=>(await panel.locator('#image-state').textContent())==='Image engine ready');await panel.locator('#image-prompt').fill('A quiet fantasy tavern.');await panel.locator('#image-generate').click();await panel.locator('#image-result').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-images-qa.png')});
+  await panel.locator('#image-to-chat').click();await waitFor(async()=>await page.locator('#hero-workspace').isHidden());
+  await page.locator('.hero-nav[data-hero="adventure"]').click();const adventure=page.frameLocator('#hero-adventure-frame');await waitFor(async()=>(await adventure.locator('#pluginWarn').textContent()).includes('Hero Tavern'));
+  const advFrame=page.frames().find(f=>f.url().endsWith('/adventure'));
+  await advFrame.evaluate(async()=>{await newGameFromSetup();});
+  await adventure.locator('#app').waitFor({state:'visible'});const adventureState=await advFrame.evaluate(async()=>{G.settings.npcInitiative=false;const before=G.world.turn;await resolvePlayerAction('Приветствую трактирщика.');await generateNpcPortrait('tavern_keeper');await saveGame(true);const loaded=await loadGame();return {player:loaded.player.name,spells:ILR140_CATALOG_STATUS.count,portrait:G.npcs.tavern_keeper.portrait,log:G.log.length}});if(!adventureState.player||adventureState.spells!==514||!adventureState.portrait.startsWith('/images/output/')||!adventureState.log)throw Error('Adventure rules/local portrait/save integration failed: '+JSON.stringify(adventureState));await page.screenshot({path:path.join(repo,'.ci/hero-adventure-qa.png')});
+  await page.locator('.hero-nav[data-hero="images"]').click();await panel.locator('#image-stop').click();await waitFor(async()=>(await panel.locator('#image-state').textContent())==='Image engine stopped');
   await page.locator('.hero-nav[data-hero="models"]').click();
   await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
   if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');

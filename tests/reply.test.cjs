@@ -66,3 +66,13 @@ test('Writer-role announcements are repaired without treating normal narration o
   const result=await pipeline.generate({prompt:'Continue the scene.'});assert.equal(calls,2);assert.equal(result.choices[0].text,'"Welcome back," Sara says.');
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Copy loops are corrected with thinking disabled while fresh replies and short natural repeats survive',async()=>{
+ const {repetitionIssue}=require('../manager/ReplyFilters.cjs');
+ const old='Sara leaned against the counter and smiled at the traveller. "The northern gate is closed tonight. We should wait until the first light before we leave the tavern."';
+ assert.ok(repetitionIssue(old,[{role:'assistant',text:old}]));assert.equal(repetitionIssue('"Yes."',[{role:'assistant',text:'"Yes."'}]),'');assert.equal(repetitionIssue('"Then I will book us a room," she says, looking for the innkeeper.',[{role:'assistant',text:old}]),'');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-loop-'));let calls=0;const requests=[];
+ try{saveSettings(root,{thinkingMode:'off'});const pipeline=createPipeline({root,backendURL:'http://fixture',fetchBackend:async(url,{body})=>{const j=JSON.parse(body);if(url.endsWith('tokencount'))return Response.json({value:Math.ceil(j.prompt.length/4)});requests.push(j);calls++;return Response.json({choices:[{text:calls===1?old:'"Then I will book us a room," she says, looking for the innkeeper.'}]})}});
+ const result=await pipeline.generate({prompt:'<|im_start|>system\nSara is an innkeeper.<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'copy-chat',messages:[{role:'assistant',text:old},{role:'user',text:'What should we do while we wait?'}]}});assert.equal(calls,2);assert.match(requests[1].prompt,/CORRECT THE DRAFT/);assert.ok(requests[1].rep_pen>=1.15);assert.match(result.choices[0].text,/book us a room/);assert.ok(!requests.some(x=>x.prompt.includes('[Private continuity outline]')));
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

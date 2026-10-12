@@ -35,7 +35,23 @@
         return /^(?:(?:[\p{L}\p{N}_-]+\s+){0,4})(?:will|should|need to|must)\s+(?:write|respond|answer|roleplay|act)\s+(?:as|in|with|to)\b/iu.test(plain)
             || /^(?:Okay[,!.]?\s*)?(?:let me (?:think|analy[sz]e)|I (?:need to|should|must) (?:respond|answer|write)|as an AI|the user (?:wants|asked))/i.test(plain);
     }
-    const api = { filterReply, isMetaReply };
+    function repetitionIssue(text, messages = [], threshold = 0.83) {
+        const normalize=value=>String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/<[^>]*>/g,' ').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+        const plain=normalize(text);if(plain.length<60)return '';
+        const words=plain.split(/\s+/),grams=w=>new Set(w.slice(0,-2).map((_,i)=>w.slice(i,i+3).join(' ')));
+        const current=grams(words);
+        for(const message of messages.slice(-8)){
+            if(message.role==='system')continue;const previous=normalize(message.text);
+            if(plain===previous)return message.role==='user'?'The draft copies the user message.':'The draft repeats an earlier assistant reply.';
+            if(words.length<18||previous.length<80||current.size<12)continue;
+            const old=grams(previous.split(/\s+/));let common=0;for(const g of current)if(old.has(g))common++;
+            if(common/current.size>=threshold&&common>=12)return message.role==='user'?'The draft mostly echoes the user message.':'The draft mostly reuses an earlier assistant reply.';
+        }
+        const parts=String(text).split(/\n\s*\n|(?<=[.!?。！？])\s+/),seen=new Set();let duplicate=0,total=0;
+        for(const part of parts){const key=normalize(part);if(key.length<60)continue;total+=key.length;if(seen.has(key))duplicate+=key.length;seen.add(key);}
+        return duplicate>120&&duplicate/Math.max(1,total)>0.25?'The draft repeats long sentences or paragraphs within itself.':'';
+    }
+    const api = { filterReply, isMetaReply, repetitionIssue };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.HeroReplyFilters = api;
 })(globalThis);

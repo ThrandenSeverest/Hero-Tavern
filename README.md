@@ -72,16 +72,36 @@ Published file SHA-256:
 
 Models live on your computer and are not committed to GitHub. Custom downloads check their available upstream metadata; when no hash is published, only GGUF/header and available size checks apply. Split multi-file GGUFs and gated/private repositories are not supported in this first version.
 
+## Chat continuity and repeated replies
+
+Hero Tavern sends the actual chronological chat to the local reply pipeline, including older turns that SillyTavern's own prompt builder may have omitted. It retains the system/character/world instructions and recent messages. When the loaded context fills, older turns become per-chat continuity notes under `Memories`, with token space reserved for instructions, planning and the reply. Editing, swiping or rolling back messages invalidates affected automatic summaries. No chat messages are deleted.
+
+**Chat memory** shows automatic notes and the last request's context budget. Add editable pinned facts or rebuild the summary. **Generation** controls automatic memory, summary size, preferred recent-turn count and reply length. The recent-turn preference is best effort within the real context limit. If even the card plus newest turns cannot fit, an explicit error asks you to increase Hardware context or shorten the card. Tokenizer failures use conservative UTF-8 byte counting rather than an optimistic character estimate.
+
+Repetition detection works with **thinking disabled**: a draft that closely copies a recent assistant reply or echoes the user gets one corrective retry. It also catches long repeated sentences within a draft. A repeated retry is hidden with an actionable error. Tune the threshold or disable this heuristic in Generation; short natural phrases are allowed. Sampling penalties remain configurable and the repetition range covers 1024 tokens. This is a text-similarity heuristic, not a guarantee against semantic repetition.
+
+## Adventure, images and character studio
+
+**Adventure** embeds the supplied Ilreon 1.5.4 simulator, using the same local text model and local image library. It retains game mechanics, character/save imports, quests, NPCs, combat and slots, with all 514 pinned spells bundled for offline use. Saves persist under `AdventureSaves`. See [Adventure instructions](adventure/README.md) and [source provenance](adventure/NOTICE.md).
+
+**Images** downloads, verifies, selects and runs complete SD 1.5 / SDXL `.safetensors` checkpoints. A separate background KoboldCpp worker on loopback port 5002 lets image and text models change independently. Images and generation metadata persist under `Images`; checkpoints under `ImageModels`. Stop the image worker to free memory. CPU, CUDA or Vulkan follow Hardware settings when the image worker starts. Two simultaneously loaded models consume additional RAM / VRAM.
+
+The practical general-purpose recommendation is [DreamShaper 8](https://huggingface.co/Lykon/DreamShaper/blob/main/DreamShaper_8_pruned.safetensors), a 2.13 GB checkpoint. [DreamShaper XL Turbo](https://huggingface.co/Lykon/DreamShaper/blob/main/DreamShaperXL_Turbo_dpmppSdeKarras_half_pruned_6.safetensors) is an optional 6.94 GB alternative with higher default resolution. The image pipeline adds no content classifier; these models still have their own model-card licence terms. “Unrestricted” is not a licence promise or a claim of universal model capability. Recommended checkpoint hashes are pinned; custom downloads verify available metadata and safetensors structure. Multi-file Flux / Qwen Image packages are not supported by this simple checkpoint importer.
+
+Generate portraits or scenes, adjust prompt, negative prompt, dimensions, steps, guidance, sampler and seed, then download the image or add it to the selected chat. Ilreon NPC portraits use the same selected image model.
+
+**Character studio** drafts a card from an idea, lets you review/edit its JSON, and imports it into SillyTavern or exports it as JSON. Existing character editing stays available in Characters.
+
 ## Development
 
 Our launcher and integration code are MIT licensed. Upstream components retain their licenses; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-`Install.cmd` and the compiled bootstrap package the same published scripts. CI parses every PowerShell script with Windows PowerShell, tests PowerShell 5.1 catalog/dropdown behavior, model verification/path restrictions, UI startup without a model and profile preservation and tests a real child-process engine fixture, then runs a Chromium integration test against upstream SillyTavern. The browser test reproduces a stale Classic/5000 profile, verifies automatic connection to KoboldCpp/5001 and routes a generation request through SillyTavern. The fixture test validates integration, not model quality or real GGUF inference. CI then compiles the executable from embedded source resources.
+`Install.cmd` and the compiled bootstrap package the same published scripts. CI parses every PowerShell script with Windows PowerShell, tests PowerShell 5.1 catalog/dropdown behavior, model verification/path restrictions, UI startup without a model and profile preservation and tests a real child-process engine fixture, then runs a Chromium integration test against upstream SillyTavern. The browser test reproduces a stale Classic/5000 profile, verifies automatic connection to the filtered proxy at 8001/inference and routes a generation request through SillyTavern. The fixture test validates integration, not model quality or real GGUF inference. CI then compiles the executable from embedded source resources.
 
 Local profile test:
 
 ```sh
-node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs
+node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs tests/context.test.cjs tests/images.test.cjs tests/adventure.test.cjs
 ```
 
 Windows model validation test:

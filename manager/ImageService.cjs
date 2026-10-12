@@ -2,6 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const {engineFetch}=require('./EngineHTTP.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
+const {runtimeEnvironment}=require('./EngineRuntime.cjs');
 const CATALOG=[
  {name:'Juggernaut XL v9 · SDXL quality · ~7.11 GB · no LoRA needed',file:'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',repo:'RunDiffusion/Juggernaut-XL-v9',revision:'e5bdb43736462585b2f05d1d97a0527c84c5a147',hash:'c9e3e68f89b8e38689e1097d4be4573cf308de4e3fd044c64ca697bdb4aa8bca',size:7110000000,steps:32,cfg:5,width:832,height:1216,sampler:'DPM++ 2M Karras'},
  {name:'DreamShaper 8 · recommended · 2.13 GB',file:'DreamShaper_8_pruned.safetensors',repo:'Lykon/DreamShaper',hash:'879db523c30d3b9017143d56705015e15a2cb5628762c11d086fed9538abd7fd',size:2130000000,steps:24,cfg:7,width:512,height:768,sampler:'DPM++ 2M Karras'},
@@ -39,7 +40,7 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=engineFetch
    const hardware=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/,'')):{mode:'cpu'};
    const args=['--singleinstance','--sdmodel',file,'--host','127.0.0.1','--port',String(port),'--skiplauncher','--sdoffloadcpu'];
    if(hardware.mode!=='cpu')args.push('--sdflashattention');if(hardware.mode==='cpu')args.push('--sdmaingpu','CPU','--sdclipdevice','CPU','--sdvaedevice','CPU');else args.push(hardware.mode==='cuda'?'--usecuda':'--usevulkan');
-   const fd=fs.openSync(path.join(logs,'image-engine.log'),'w');try{worker=spawn(executable,[...prefix,...args],{cwd:root,windowsHide:true,stdio:['ignore',fd,fd]})}finally{fs.closeSync(fd)}
+   const fd=fs.openSync(path.join(logs,'image-engine.log'),'w');try{worker=spawn(executable,[...prefix,...args],{cwd:root,windowsHide:true,env:runtimeEnvironment(root,'image'),stdio:['ignore',fd,fd]})}finally{fs.closeSync(fd)}
    running=config.selected;loading=Date.now();ready=false;stopping=false;error='';state='Loading image model…';
    worker.on('error',e=>{error=e.message;state='Image worker failed';worker=null;ready=false});worker.on('exit',code=>{worker=null;ready=false;if(!stopping&&code){error='Image engine exited with code '+code+'. See Logs/image-engine.log.';state='Image engine failed'}else{state='Image engine stopped';error=''}running=''});
   }finally{starting=false}

@@ -127,7 +127,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'ComfyAdapter.cjs', 'EngineShutdown.cjs', 'EngineRuntime.cjs', 'DiskCare.cjs', 'ImageGallery.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'ComfyAdapter.cjs', 'ComfyWorkflows.cjs', 'EngineShutdown.cjs', 'EngineRuntime.cjs', 'DiskCare.cjs', 'ImageGallery.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force

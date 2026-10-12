@@ -47,6 +47,7 @@ Major systems:
   <div class="modal">
     <h1>ILREON · Living D&D 5e Simulator</h1>
     <p class="setup-note">Полное создание персонажа восстановлено. Можно создать героя вручную, продолжить автосейв, открыть 8 ручных слотов либо импортировать персонажа HeroList или Long Story Short.</p>
+    <p class="setup-note">Для больших игровых запросов выберите контекст 8192–16384 в Hardware и перезагрузите текстовую модель, если хватает RAM / VRAM. Модель изображений загружается отдельно в Images.</p>
     <div id="pluginWarn" class="notice">Проверка Perchance plugins…</div>
     <div class="formgrid" style="margin-top:12px">
       <div><label>Имя персонажа</label><input id="sName" value="Кассель"></div>
@@ -134,7 +135,7 @@ async function rawGenerateImage(prompt,opts={}){if(typeof generateImage!=='funct
 function queueAI(fn){const run=()=>fn();const t=genTail.then(run,run);genTail=t.catch(()=>{});return t}
 async function aiText(prompt){const r=await queueAI(()=>rawGenerate(prompt));return String(r??'').trim()}
 function parseJson(raw){let s=String(raw??'').trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();const a=s.indexOf('{'),b=s.lastIndexOf('}');if(a>=0&&b>a)s=s.slice(a,b+1);return JSON.parse(s)}
-async function aiJson(prompt,label='AI'){try{return parseJson(await aiText(prompt))}catch(e){console.error(label,e);throw new Error(label+': некорректный JSON') }}
+async function aiJson(prompt,label='AI'){const raw=await aiText(prompt);try{return parseJson(raw)}catch(e){console.error(label,e);throw new Error(label+': модель вернула некорректный JSON. Повторите ход или увеличьте бюджет ответа в Generation.') }}
 function extractImageUrl(raw,depth=0){if(raw==null||depth>7)return'';if(typeof raw==='string'){const s=raw.trim();if(/^(https?:|data:image\/|blob:)/i.test(s))return s;const m=s.match(/https?:\/\/[^\s"'<>]+/);return m?m[0]:''}if(Array.isArray(raw))for(const v of raw){const u=extractImageUrl(v,depth+1);if(u)return u}if(typeof raw==='object')for(const k of ['dataUrl','imageUrl','url','image','src','data','output','result','value','uri'])if(raw[k]!=null){const u=extractImageUrl(raw[k],depth+1);if(u)return u}return''}
 
 const CLASS_CASTING={Wizard:'INT',Cleric:'WIS',Druid:'WIS',Bard:'CHA',Sorcerer:'CHA',Warlock:'CHA',Ranger:'WIS',Paladin:'CHA',Artificer:'INT'};

@@ -23,7 +23,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
  try{
   await waitFor(async()=>(await fetch('http://127.0.0.1:8000/')).ok);
   browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
   await page.goto('http://127.0.0.1:8000/');await page.locator('#hero-shell').waitFor({timeout:120000});
   await page.locator('#hero-welcome').waitFor({state:'visible'});
   await waitFor(async()=>await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')}));
@@ -66,6 +66,10 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   const imageDir=path.join(root,'ImageModels');fs.mkdirSync(imageDir,{recursive:true});const checkpoint=Buffer.alloc(1024*1024),head=Buffer.from(JSON.stringify({tensor:{dtype:'F32',shape:[1],data_offsets:[0,4]}}));checkpoint.writeBigUInt64LE(BigInt(head.length));head.copy(checkpoint,8);fs.writeFileSync(path.join(imageDir,'QA portrait.safetensors'),checkpoint);
   await page.locator('.hero-nav[data-hero="images"]').click();await waitFor(async()=>await panel.locator('#image-installed option').count()===1);await panel.locator('#image-select').click();await panel.locator('#image-start').click();await waitFor(async()=>(await panel.locator('#image-state').textContent())==='Image engine ready');await panel.locator('#image-prompt').fill('A quiet fantasy tavern.');await panel.locator('#image-generate').click();await panel.locator('#image-result').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-images-qa.png')});
   await panel.locator('#image-to-chat').click();await waitFor(async()=>await page.locator('#hero-workspace').isHidden());
+  // The supplied director includes substantial game rules; load its documented context budget.
+  await page.locator('.hero-nav[data-hero="models"]').click();await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
+  await page.locator('.hero-nav[data-hero="hardware"]').click();await panel.locator('#contextSize').selectOption('16384');await panel.locator('#save-hardware').click();await waitFor(()=>JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).contextSize===16384);
+  await page.locator('.hero-nav[data-hero="models"]').click();await panel.locator('#start').click();await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');return getContext().onlineStatus==='fixture-kobold-model'}));
   await page.locator('.hero-nav[data-hero="adventure"]').click();const adventure=page.frameLocator('#hero-adventure-frame');await waitFor(async()=>(await adventure.locator('#pluginWarn').textContent()).includes('Hero Tavern'));
   const advFrame=page.frames().find(f=>f.url().endsWith('/adventure'));
   await advFrame.evaluate(async()=>{await newGameFromSetup();});

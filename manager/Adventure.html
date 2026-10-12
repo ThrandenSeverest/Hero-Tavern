@@ -294,8 +294,8 @@ function conversationalNpc(action){
   if(!people.length)return null;
   const t=String(action||'').toLowerCase();
   const named=people.find(n=>t.includes(String(n.name).toLowerCase()));
-  const spoke=/\b(говорю|спрашиваю|отвечаю|прошу|заказываю|обращаюсь|интересуюсь|сказать|ищу|привет|здравств|пиво|пива|выпить|напиток|комнату|можно|спасибо)\b|^(да|нет|конечно|ага|хочу|будьте добры)/i.test(t);
-  const everyday=/^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)\b|\b(прошу|заказываю|спрашиваю|отвечаю)\b/i.test(t);
+  const spoke=/(говорю|спрашиваю|отвечаю|прошу|заказываю|обращаюсь|интересуюсь|сказать|ищу|привет|здравств|пиво|пива|выпить|напиток|комнату|можно|спасибо)|^(да|нет|конечно|ага|хочу|будьте добры)(?=\s|$|[.,!?])/i.test(t);
+  const everyday=/^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)(?=\s|$|[.,!?])|(прошу|заказываю|спрашиваю|отвечаю)/i.test(t);
   if(!named&&!spoke&&!everyday&&!/[?]/.test(t))return null;
   if(named)return named;
   const active=people.find(n=>n.id===G.dialogue.activeNpcId||n.id===G.dialogue.lastNpcId);
@@ -303,7 +303,7 @@ function conversationalNpc(action){
 }
 function isOrdinaryDialogue(action){
   const t=String(action||'').trim().toLowerCase();
-  return /^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)\b|\b(прошу|заказываю|спрашиваю|отвечаю)\b/i.test(t)&&!/убежд|обман|угрож|запугив|взлом|скрыт|ворую|краду|атаку|дерусь|бью|бросаю/i.test(t);
+  return /^(да|нет|ага|спасибо|привет|здравств|пива|пиво|можно|конечно|ищу|хочу)(?=\s|$|[.,!?])|(прошу|заказываю|спрашиваю|отвечаю)/i.test(t)&&!/убежд|обман|угрож|запугив|взлом|скрыт|ворую|краду|атаку|дерусь|бью|бросаю/i.test(t);
 }
 async function missingNpcReply(n,action){
  const previous=recentConversation(7);

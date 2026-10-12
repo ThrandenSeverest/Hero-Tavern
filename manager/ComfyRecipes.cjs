@@ -4,7 +4,10 @@ const crypto=require('node:crypto'),{buildWorkflow}=require('./ComfyWorkflows.cj
 function recipeGraph(pack,params,{checkpoint='',source,mask}={}){
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';
- if(mode!=='txt2img')throw Error(pack.name+' built-in preset supports generation only. For character editing choose SDXL inpainting or a verified FLUX editing workflow.');
+ if(mode!=='txt2img'){
+  if(pack.family==='zimage')throw Error('Z-Image Turbo preset is text-to-image only. Switch to FLUX.2 Klein for reference editing or SDXL for masked inpainting.');
+  if(!['img2img','inpaint'].includes(mode)||!source||(mode==='inpaint'&&!mask))throw Error('FLUX.2 Klein reference editing requires a saved source image (plus a mask for local editing).');
+ }
  if(params.lora?.length)throw Error('This preset needs a model-specific LoRA workflow. Clear standard SDXL LoRAs before generating.');
  const files=Object.fromEntries(pack.files.map(x=>[x.group,x.name]));
  const nodes={};let seq=0;
@@ -19,7 +22,13 @@ function recipeGraph(pack,params,{checkpoint='',source,mask}={}){
  const clip=n('CLIPLoader',{clip_name:files.text_encoders,type:pack.family==='zimage'?'lumina2':'flux2',device:'default'});
  const vae=n('VAELoader',{vae_name:files.vae});
  const positive=n('CLIPTextEncode',{text:params.prompt,clip});
- const negative=n('ConditioningZeroOut',{conditioning:positive});
+ let positiveCondition=positive;
+ if(pack.family==='flux2'&&source){
+  const input=n('LoadImage',{image:source});
+  const encoded=n('VAEEncode',{pixels:input,vae});
+  positiveCondition=n('ReferenceLatent',{conditioning:positive,latent:encoded});
+ }
+ const negative=n('ConditioningZeroOut',{conditioning:positiveCondition});
  let sampled;
  if(pack.family==='zimage'){
   const m=n('ModelSamplingAuraFlow',{model,shift:3});
@@ -28,12 +37,17 @@ function recipeGraph(pack,params,{checkpoint='',source,mask}={}){
  }else if(pack.family==='flux2'){
   const latent=n('EmptyFlux2LatentImage',{width,height,batch_size:count});
   const noise=n('RandomNoise',{noise_seed:seed}),sampler=n('KSamplerSelect',{sampler_name:'euler'});
-  const guider=n('CFGGuider',{model,positive,negative,cfg:1});
+  const guider=n('CFGGuider',{model,positive:positiveCondition,negative,cfg:1});
   const sigmas=n('Flux2Scheduler',{steps:4,width,height});
   sampled=n('SamplerCustomAdvanced',{noise,guider,sampler,sigmas,latent_image:latent});
  }else throw Error('Unsupported image model family.');
  const decoded=n('VAEDecode',{samples:sampled,vae});
- const saved=n('SaveImage',{images:decoded,filename_prefix:'HeroTavern_'+pack.id.replace(/-/g,'_')});
- return {graph:nodes,saveId:saved[0],mode:'txt2img',seed,batch:count,packId:pack.id};
+ let result=decoded;
+ if(pack.family==='flux2'&&mode==='inpaint'){
+  const original=n('LoadImage',{image:source}),area=n('LoadImageMask',{image:mask,channel:'red'});
+  result=n('ImageCompositeMasked',{destination:original,source:decoded,mask:area,x:0,y:0,resize_source:false});
+ }
+ const saved=n('SaveImage',{images:result,filename_prefix:'HeroTavern_'+pack.id.replace(/-/g,'_')});
+ return {graph:nodes,saveId:saved[0],mode,seed,batch:count,packId:pack.id};
 }
 module.exports={recipeGraph};

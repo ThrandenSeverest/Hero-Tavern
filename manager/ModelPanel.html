@@ -292,7 +292,7 @@ function updateStudioModelStatus(){
  }else if(pack){
   const connected=!!heroHubDetails?.engine?.available;
   status.textContent=pack.installed?(connected?'Ready · ComfyUI connected':'Model downloaded · managed ComfyUI can start when generating'):
-   'Missing '+(pack.missing||[]).join(', ')+' · open Models & Setup.';
+   (pack.downloaded?'Downloaded to the configured model folder, but running ComfyUI cannot see the components. Check active ComfyUI installation / restart it.':'Missing '+(pack.missing||[]).join(', ')+' · open Models & Setup.');
   if(!pack.installed)status.classList.add('error');
  }else status.textContent='Checking model files and ComfyUI availability…';
  const isSDXL=choice==='sdxl';
@@ -488,7 +488,7 @@ function heroHubCard(pack){
  const box=document.createElement('article');box.className='card';box.style.minWidth='220px';
  const head=document.createElement('strong');head.textContent=pack.name;
  const summary=document.createElement('p');summary.className='small';summary.textContent=pack.description+' · GPU: '+pack.vram+(pack.downloadGiB?' · Download ≈'+pack.downloadGiB+' GiB':'')+' · '+(pack.license||'');
- const status=document.createElement('p');status.textContent=pack.installed?'Ready to use':'Missing: '+(pack.missing||[]).join(', ');
+ const status=document.createElement('p');status.textContent=pack.installed?'Ready in ComfyUI':pack.downloaded?'Downloaded locally; not visible to running ComfyUI. Confirm model folder or restart ComfyUI.':'Missing: '+(pack.missing||[]).join(', ');
  status.style.color=pack.installed?'#80d9ae':'#eabf7e';
  const link=document.createElement('a');link.href=pack.docs;link.target='_blank';link.rel='noopener';link.textContent='Official model docs / license';
  box.append(head,summary,status,link);return box;
@@ -496,7 +496,8 @@ function heroHubCard(pack){
 async function heroHubRefresh(){
  const status=el('hero-pack-state'),runtimeStatus=el('hero-runtime-state');
  try{
-  const [hub,engine]=await Promise.all([request('/comfy/models'),request('/comfy/status')]);
+  const engine=await request('/comfy/status');
+  const hub={hub:engine.modelHub,packs:engine.packs};
   heroHubDetails={hub,engine};
   const cfg=hub.hub?.settings||{};
   if(!heroHubReady){
@@ -514,10 +515,10 @@ async function heroHubRefresh(){
   el('hero-pack-cards').replaceChildren(...packs.map(heroHubCard));
   const active=packs.find(p=>p.id===el('hero-pack-select').value);
   const running=engine.modelHub?.download||hub.hub?.download||null;
-  el('hero-pack-download').disabled=!active||active.installed||active.id==='sdxl'||!!running;
+  el('hero-pack-download').disabled=!active||active.installed||active.downloaded||active.id==='sdxl'||!!running;
   el('hero-pack-cancel').disabled=!running;
   status.textContent=running?'Downloading '+running.file+' · '+(running.bytes/1073741824).toFixed(2)+' GiB / '+(running.total/1073741824).toFixed(2)+' GiB · '+running.phase:
-   active?(active.installed?'Installed and ready: ':'Missing dependencies for: ')+active.name+(active.missing?.length?' · '+active.missing.join(', '):''):'Select an image model.';
+   active?(active.installed?'Ready in ComfyUI: ':active.downloaded?'Downloaded but not loaded by current ComfyUI: ':'Missing components for: ')+active.name+(active.missing?.length?' · '+active.missing.join(', '):''):'Select an image model.';
   runtimeStatus.textContent=engine.available?'ComfyUI connected on 127.0.0.1:8188':(engine.runtime?.running?'ComfyUI is loading…':'ComfyUI is not connected.');
   if(engine.runtime?.install){
    const job=engine.runtime.install;
@@ -573,7 +574,7 @@ el('hero-runtime-install').onclick=async()=>{
  }catch(e){el('hero-runtime-state').textContent=e.message}finally{heroHubInstalling=false;el('hero-runtime-install').disabled=false}
 };
 el('hero-runtime-cancel').onclick=async()=>{try{await request('/comfy/runtime/install-cancel',{});el('hero-runtime-state').textContent='Installation cancellation requested.'}catch(e){el('hero-runtime-state').textContent=e.message}};
-setInterval(()=>{if(!el('images').hidden&&heroHubReady)heroHubRefresh()},6000);
+setInterval(()=>{if(heroHubReady&&(!el('images').hidden||!el('image-setup').hidden)&&!heroHubDownloading&&!heroHubInstalling)heroHubRefresh()},15000);
 
 const heroMaskCanvas=el('hero-mask-preview'),heroMaskCtx=heroMaskCanvas.getContext('2d',{willReadFrequently:false});
 const heroMaskPixels=document.createElement('canvas'),heroMaskPixelCtx=heroMaskPixels.getContext('2d');
@@ -616,7 +617,7 @@ el('hero-mask-load').onclick=()=>heroLoadMaskImage().catch(e=>el('hero-inpaint-s
 el('hero-mask-undo').onclick=()=>{const state=heroMaskHistory.pop();if(state){heroMaskPixelCtx.putImageData(state,0,0);heroMaskDirty=true;heroMaskRender()}};
 el('hero-mask-eraser').onclick=()=>{heroErase=!heroErase;el('hero-mask-eraser').setAttribute('aria-pressed',String(heroErase));el('hero-mask-eraser').textContent=heroErase?'Eraser ON':'Erase mask'};
 el('hero-mask-clear').onclick=()=>{if(heroSourceBitmap){heroMaskPixelCtx.fillStyle='#000';heroMaskPixelCtx.fillRect(0,0,heroMaskPixels.width,heroMaskPixels.height);heroMaskDirty=false;heroMaskRender()}};
-async function heroComfyProbe(){
+async function heroComfyProbe(existing=null){
  const state=el('hero-comfy-state');state.textContent='Checking loopback ComfyUI…';
  try{
   const x=await request('/comfy/status');
@@ -675,7 +676,7 @@ async function heroAPIRefresh(){
 }
 async function heroInitializeComfy(){
  if(heroComfyInitialized)return;heroComfyInitialized=true;
- try{const result=await request('/studio/get');el('hero-engine').value=result.settings.engine||'auto';await heroComfyProbe();await heroRefreshSources();await heroAPIRefresh();await heroHubRefresh()}catch(e){el('hero-comfy-state').textContent=e.message}
+ try{const result=await request('/studio/get');el('hero-engine').value=result.settings.engine||'auto';await heroHubRefresh();await heroComfyProbe(heroHubDetails?.engine);await heroRefreshSources();await heroAPIRefresh()}catch(e){el('hero-comfy-state').textContent=e.message}
 }
 document.querySelector('[data-tab="images"]')?.addEventListener('click',heroInitializeComfy);
 

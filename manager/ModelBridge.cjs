@@ -304,8 +304,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 if(!backendReady)throw Error('Load a text model in Models first.');
                 if(!['adventure','character','summary'].includes(data.mode)||typeof data.prompt!=='string')throw Error('Invalid task.');
                 const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});
-                const prompt='<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n';
-                const result=await pipeline.generate({prompt,stream:false,stop:['<|im_end|>','<|endoftext|>']},controller.signal,{mode:data.mode});json(200,{text:result.choices[0].text});return;
+                const prompt='<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n';
+                const structured=data.mode==='adventure'&&/\bJSON\b|Return\s*\{/i.test(data.prompt);const result=await pipeline.generate({prompt,stream:false,stop:['<|im_end|>','<|endoftext|>']},controller.signal,{mode:structured?'adventure-json':data.mode});json(200,{text:result.choices[0].text});return;
             }
             if(req.url==='/adventure/storage/get'||req.url==='/adventure/storage/set'){
                 if(typeof data.key!=='string'||data.key.length>200)throw Error('Invalid save slot.');

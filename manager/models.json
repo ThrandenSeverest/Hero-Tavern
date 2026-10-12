@@ -6,7 +6,12 @@
     "Size": 5030000000,
     "License": "Apache-2.0",
     "Hash": "8625e48da4c4be9bcba2414fd8cad4095ff3a538d5b0111c2b26b5f6209538b9",
-    "Default": true
+    "Default": true,
+    "Template": "chatml",
+    "Context": 8192,
+    "Family": "Qwen3",
+    "Quantization": "Q4_K_M",
+    "TestedOnThisPC": false
   },
   {
     "Label": "Qwen3 4B Q4_K_M | ~2.5 GB | Apache-2.0",
@@ -14,7 +19,12 @@
     "File": "Qwen3-4B-Q4_K_M.gguf",
     "Size": 2500000000,
     "License": "Apache-2.0",
-    "Default": false
+    "Default": false,
+    "Template": "chatml",
+    "Context": 8192,
+    "Family": "Qwen3",
+    "Quantization": "Q4_K_M",
+    "TestedOnThisPC": false
   },
   {
     "Label": "Qwen3 4B Q8_0 | ~4.3 GB | Apache-2.0",
@@ -22,6 +32,161 @@
     "File": "Qwen3-4B-Q8_0.gguf",
     "Size": 4280000000,
     "License": "Apache-2.0",
-    "Default": false
+    "Default": false,
+    "Template": "chatml",
+    "Context": 8192,
+    "Family": "Qwen3",
+    "Quantization": "Q8_0",
+    "TestedOnThisPC": false
+  },
+  {
+    "Label": "Rocinante-X 12B v1b · RP quality · Q5_K_M",
+    "Repo": "TheDrummer/Rocinante-X-12B-v1-GGUF",
+    "Revision": "249c9df0204fb7a245669f0ce5a1613eacb7a027",
+    "File": "Rocinante-X-12B-v1b-Q5_K_M.gguf",
+    "Size": 8727634208,
+    "Hash": "f1cf6120fdcc3a226d74bf3b68731a1cb11dfe5124d1fd62e23a0c245b463697",
+    "License": "Apache-2.0 (base); review fine-tune model card",
+    "LicenseURL": "https://huggingface.co/TheDrummer/Rocinante-X-12B-v1-GGUF",
+    "Default": false,
+    "Recommended": true,
+    "Template": "mistral-v3",
+    "Family": "Mistral NeMo",
+    "Context": 8192,
+    "Quantization": "Q5_K_M",
+    "Experimental": false,
+    "MemoryNote": "12 GB VRAM target; context/KV cache require additional memory. Start at 8K. Q4 leaves more headroom.",
+    "TestedOnThisPC": false,
+    "SupportedModes": [
+      "chat",
+      "adventure",
+      "planning"
+    ],
+    "Sampler": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "repetition_penalty": 1.05
+    },
+    "Backend": "KoboldCpp"
+  },
+  {
+    "Label": "Rocinante-X 12B v1b · More memory headroom · Q4_K_M",
+    "Repo": "TheDrummer/Rocinante-X-12B-v1-GGUF",
+    "Revision": "249c9df0204fb7a245669f0ce5a1613eacb7a027",
+    "File": "Rocinante-X-12B-v1b-Q4_K_M.gguf",
+    "Size": 7477207328,
+    "Hash": "ab75c5bc0da7c7d447a8385af86c7499a13aac30882ec7a47e4e01d9d8730ef7",
+    "License": "Apache-2.0 (base); review fine-tune model card",
+    "LicenseURL": "https://huggingface.co/TheDrummer/Rocinante-X-12B-v1-GGUF",
+    "Default": false,
+    "Recommended": false,
+    "Template": "mistral-v3",
+    "Family": "Mistral NeMo",
+    "Context": 8192,
+    "Quantization": "Q4_K_M",
+    "Experimental": false,
+    "MemoryNote": "12 GB VRAM target; context/KV cache require additional memory. Start at 8K. Q4 leaves more headroom.",
+    "TestedOnThisPC": false,
+    "SupportedModes": [
+      "chat",
+      "adventure",
+      "planning"
+    ],
+    "Sampler": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "repetition_penalty": 1.05
+    },
+    "Backend": "KoboldCpp"
+  },
+  {
+    "Label": "Qwen3 14B · Russian / instructions · Q4_K_M",
+    "Repo": "Qwen/Qwen3-14B-GGUF",
+    "Revision": "530227a7d994db8eca5ab5ced2fb692b614357fd",
+    "File": "Qwen3-14B-Q4_K_M.gguf",
+    "Size": 9001752960,
+    "Hash": "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
+    "License": "Apache-2.0",
+    "LicenseURL": "https://huggingface.co/Qwen/Qwen3-14B-GGUF",
+    "Default": false,
+    "Recommended": false,
+    "Template": "chatml",
+    "Family": "Qwen3",
+    "Context": 8192,
+    "Quantization": "Q4_K_M",
+    "Experimental": false,
+    "MemoryNote": "12 GB VRAM target; context/KV cache require additional memory. Start at 8K. Q4 leaves more headroom.",
+    "TestedOnThisPC": false,
+    "SupportedModes": [
+      "chat",
+      "adventure",
+      "planning"
+    ],
+    "Sampler": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "repetition_penalty": 1.05
+    },
+    "Backend": "KoboldCpp"
+  },
+  {
+    "Label": "Cydonia 24B v4.3 (v4zg file) · Experimental / RAM offload",
+    "Repo": "TheDrummer/Cydonia-24B-v4.3-GGUF",
+    "Revision": "5f34e78ac0b8b61671a683b2e094e6f3fe6ae037",
+    "File": "Cydonia-24B-v4zg-Q4_K_M.gguf",
+    "Size": 14333910144,
+    "Hash": "1df364399168f94e32af74a5794617b922b1db7590658a6823c65286c49812d6",
+    "License": "Apache-2.0 (base); review fine-tune model card",
+    "LicenseURL": "https://huggingface.co/TheDrummer/Cydonia-24B-v4.3-GGUF",
+    "Default": false,
+    "Recommended": false,
+    "Template": "mistral-v7",
+    "Family": "Mistral Small",
+    "Context": 8192,
+    "Quantization": "Q4_K_M",
+    "Experimental": true,
+    "MemoryNote": "Weights exceed 12 GB VRAM; partial CPU/RAM offload required.",
+    "TestedOnThisPC": false,
+    "SupportedModes": [
+      "chat",
+      "adventure",
+      "planning"
+    ],
+    "Sampler": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "repetition_penalty": 1.05
+    },
+    "Backend": "KoboldCpp"
+  },
+  {
+    "Label": "Magidonia 24B v4.3 (v4zk file) · Experimental planner / RAM offload",
+    "Repo": "TheDrummer/Magidonia-24B-v4.3-GGUF",
+    "Revision": "2c726f6806c8b3094097e41a498ccb479ef04739",
+    "File": "Cydonia-24B-v4zk-Q4_K_M.gguf",
+    "Size": 14333912192,
+    "Hash": "657d81e69ce57d136c5565a2277590be2125c2840efd7a3814f5b44860796edb",
+    "License": "Apache-2.0 (base); review fine-tune model card",
+    "LicenseURL": "https://huggingface.co/TheDrummer/Magidonia-24B-v4.3-GGUF",
+    "Default": false,
+    "Recommended": false,
+    "Template": "mistral-v7",
+    "Family": "Magistral",
+    "Context": 8192,
+    "Quantization": "Q4_K_M",
+    "Experimental": true,
+    "MemoryNote": "Weights exceed 12 GB VRAM; partial CPU/RAM offload required.",
+    "TestedOnThisPC": false,
+    "SupportedModes": [
+      "chat",
+      "adventure",
+      "planning"
+    ],
+    "Sampler": {
+      "temperature": 0.8,
+      "top_p": 0.95,
+      "repetition_penalty": 1.05
+    },
+    "Backend": "KoboldCpp"
   }
 ]

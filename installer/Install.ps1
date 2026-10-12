@@ -112,7 +112,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'ModelProfiles.cjs', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -172,7 +172,7 @@ if errorlevel 1 pause
 '@
     Write-AsciiFile (Join-Path $Root 'Start-Chat.cmd') $launchChat
     if (-not (Test-Path (Join-Path $Root 'backend.json'))) {
-        '{"mode":"cpu","gpuLayers":0,"contextSize":4096}' | Set-Content (Join-Path $Root 'backend.json')
+        '{"mode":"cpu","gpuLayers":0,"contextSize":8192}' | Set-Content (Join-Path $Root 'backend.json')
     }
     $extensionPath = Join-Path $ST 'public\scripts\extensions\hero-tavern'
     New-Item -ItemType Directory -Force $extensionPath | Out-Null

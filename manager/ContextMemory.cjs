@@ -25,7 +25,7 @@ function createMemory({root,countTokens,complete,setDiagnostics=()=>{}}){
   while(await countTokens(render())>budget){
    if(all.length-start<=2)throw Error('The character card, memory notes and latest turn exceed the loaded context. Increase Hardware context or shorten the card/notes.');
    const room=Math.max(1,all.length-start-Math.min(settings.recentMessages,all.length-start-1));
-   let end=start+Math.min(room,8), chunk=all.slice(start,end);
+   let end=start+room, chunk=all.slice(start,end);
    if(settings.memoryEnabled){
     const summaryBudget=Math.min(budget,settings.summaryInputBudget??budget);
     const header='Summarize established conversation facts for continuity. Preserve names, relationships, locations, promises, goals and unresolved events. Do not invent facts or repeat dialogue. Output compact factual notes only, without reasoning. /no_think\nPrevious memory:\n'+memory.summary+'\nOlder turns:\n';

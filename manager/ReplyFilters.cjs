@@ -3,16 +3,17 @@
     function filterReply(input, options = {}) {
         let text = String(input || '').replace(/^\uFEFF/, '');
         // Only decode known reasoning tags; never turn arbitrary escaped HTML into markup.
-        text = text.replace(/&lt;(\/?(?:think|analysis|reasoning))(?:\s[^&]*?)?&gt;/gi, '<$1>');
-        text = text.replace(/<\s*(think|analysis|reasoning)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|$)/gi, '');
-        text = text.replace(/\[(think|analysis|reasoning)\][\s\S]*?(?:\[\/\1\]|$)/gi, '');
+        text = text.replace(/&lt;(\/?(?:think|thinking|analysis|reasoning))(?:\s[^&]*?)?&gt;/gi, '<$1>');
+        text = text.replace(/<\s*(think|thinking|analysis|reasoning)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|$)/gi, '');
+        text = text.replace(/\[(think|thinking|analysis|reasoning)\][\s\S]*?(?:\[\/\1\]|$)/gi, '');
         // Some models inherit an opening think tag from the prompt, so only emit its closer.
-        const closers = [...text.matchAll(/<\s*\/\s*(?:think|analysis|reasoning)\s*>/gi)];
+        const closers = [...text.matchAll(/<\s*\/\s*(?:think|thinking|analysis|reasoning)\s*>/gi)];
         if (closers.length) { const last = closers[closers.length - 1]; text = text.slice(last.index + last[0].length); }
         text = text.replace(/<\|start\|>assistant<\|channel\|>analysis<\|message\|>[\s\S]*?(?=<\|start\|>assistant<\|channel\|>final<\|message\|>|$)/gi, '');
         text = text.replace(/^\s*(?:Analysis|Reasoning)\s*:\s*[\s\S]*?\n(?:Final(?: answer)?|Response)\s*:\s*/i, '');
+        const bracketClosers=[...text.matchAll(/\[\/(?:think|thinking|analysis|reasoning)\]/gi)];if(bracketClosers.length){const last=bracketClosers.at(-1);text=text.slice(last.index+last[0].length);}
         if (options.stopAtSpeaker !== false) {
-            const nextRole = /<\|im_start\|>\s*(?:user|system)|<\|start_header_id\|>\s*(?:user|system)/i.exec(text);
+            const nextRole = /\[INST\]|<\|im_start\|>\s*(?:user|system)|<\|start_header_id\|>\s*(?:user|system)/i.exec(text);
             if (nextRole) text = text.slice(0, nextRole.index);
         }
         for (const marker of options.stopMarkers || []) {
@@ -20,6 +21,7 @@
             const index = text.indexOf(marker); if (index >= 0) text = text.slice(0, index);
         }
         if (options.removeModelTokens !== false) {
+            text=text.replace(/<\/?s>|\[\/?(?:INST|SYSTEM_PROMPT)\]/g,'');
             text = text.replace(/<\|im_start\|>\s*assistant\s*/gi, '').replace(/<\|start\|>assistant<\|channel\|>final<\|message\|>/gi, '');
             text = text.replace(/<\|(?:im_start|im_end|endoftext|eot_id|start_header_id|end_header_id|begin_of_text|end_of_text|start|end|message|channel|finetune_right_pad)\|>/gi, '');
         }

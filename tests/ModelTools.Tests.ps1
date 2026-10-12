@@ -9,12 +9,12 @@ function Expect-Failure([scriptblock]$Action) {
 }
 try {
     $catalog = @(Read-ModelCatalog (Join-Path $PSScriptRoot '..\manager\models.json'))
-    if ($catalog.Count -ne 3 -or $catalog[0].Label -isnot [string]) { throw 'Catalog must contain individual model entries, not a nested array.' }
+    if ($catalog.Count -ne 8 -or $catalog[0].Label -isnot [string]) { throw 'Catalog must contain individual model entries, not a nested array.' }
     if ([long]$catalog[0].Size -ne 5030000000L) { throw 'Default model size conversion failed.' }
     Add-Type -AssemblyName System.Windows.Forms
     $combo = New-Object Windows.Forms.ComboBox
     foreach ($entry in $catalog) { [void]$combo.Items.Add($entry.Label) }
-    if ($combo.Items.Count -ne 3 -or [string]$combo.Items[0] -notlike '*Qwen3 8B*') { throw 'Dropdown labels are incorrect.' }
+    if ($combo.Items.Count -ne 8 -or [string]$combo.Items[0] -notlike '*Qwen3 8B*') { throw 'Dropdown labels are incorrect.' }
     $combo.Dispose()
     $file = Join-Path $temp 'valid.gguf'
     $bytes = New-Object byte[] (1MB)

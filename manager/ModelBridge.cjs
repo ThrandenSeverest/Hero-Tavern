@@ -61,10 +61,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
     let generationState = 'idle', contextDiagnostics = null;
+    const {profileFor}=require('./ModelProfiles.cjs');let loadedContext=0;
     const story=createStoryStore(root,{tavernPath});
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
-    const pipeline = createPipeline({root,backendURL,enforceContext:true,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
+    const pipeline = createPipeline({root,backendURL,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
     const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady});
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
@@ -95,8 +96,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         } catch (e) { if (e.message.startsWith('Port 5001')) throw e; }
         const executable = backendCommand || path.join(root, 'KoboldCpp', 'koboldcpp.exe');
         if (!fs.existsSync(executable)) throw new Error('KoboldCpp engine is missing. Run Hero Tavern setup to repair it.');
-        const { args } = backendArguments(root, resolveModel(models, name), backendPort);
-        backendError = ''; stopIntent = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
+        const { args,config } = backendArguments(root, resolveModel(models, name), backendPort);
+        loadedContext=config.contextSize;backendError = ''; stopIntent = ''; runningModel = name; engineState = 'loading'; loadingSince = Date.now();
         const out = fs.openSync(path.join(logs, 'koboldcpp.log'), 'w');
         const err = fs.openSync(path.join(logs, 'koboldcpp-error.log'), 'w');
         try {
@@ -130,11 +131,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         const model = catalog[index];
         const file = resolveModel(models, model.LocalFile || model.File);
         if (fs.existsSync(file)) { await verifyModel(file, 0, model.Hash); await choose(model.LocalFile || model.File); return; }
-        const pending = { name: model.File, file, part: file + '.part', size: 0, process: null, hash: model.Hash || '', cancelled: false, verifying: false, bytes: 0 };
+        const pending = { name: model.File, file, part: file + '.part', size: model.Size||0, process: null, hash: model.Hash || '', cancelled: false, verifying: false, bytes: 0 };
         download = pending; // Reserve before awaiting metadata: double clicks cannot start two downloads.
         try {
             try {
-                const meta = await fetch('https://huggingface.co/api/models/' + model.Repo + '/tree/main?recursive=true', { signal: AbortSignal.timeout(15000) });
+                const meta = await fetch('https://huggingface.co/api/models/' + model.Repo + '/tree/'+(model.Revision||'main')+'?recursive=true', { signal: AbortSignal.timeout(15000) });
                 if (meta.ok) {
                     const files = await meta.json();
                     const entry = files.find(x => x.path === model.File);
@@ -145,7 +146,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const already = fs.existsSync(pending.part) ? fs.statSync(pending.part).size : 0;
             if (space.bavail * space.bsize < (pending.size || model.Size) - already + 150 * 1024 * 1024) throw new Error('Not enough free disk space.');
             if (pending.cancelled) { download = null; return; }
-            const url = 'https://huggingface.co/' + model.Repo + '/resolve/main/' + model.File;
+            const url = 'https://huggingface.co/' + model.Repo + '/resolve/'+(model.Revision||'main')+'/' + model.File;
             const curl = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32', 'curl.exe') : 'curl';
             const errorFile = fs.openSync(path.join(logs, 'download-error.log'), 'w');
             try {
@@ -171,7 +172,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
-            catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
+            profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
             engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(), thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
@@ -198,6 +199,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:2000000)) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if(req.url.startsWith('/story/')){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});json(200,await storyAPI.action(req.url,data,controller.signal));return;}
+            if(req.url==='/diagnostics/check'){const probe=async(url)=>{try{const r=await fetch(url,{signal:AbortSignal.timeout(3000)});return {ok:r.ok,status:r.status,detail:await r.json()};}catch(e){return {ok:false,error:e.message}}};json(200,{at:new Date().toISOString(),text:await probe(backendURL+'/api/v1/model'),image:await probe('http://127.0.0.1:'+imagePort+'/sdapi/v1/sd-models'),model:runningModel,profile:profileFor(root,runningModel),contextSize:loadedContext,thinking:thinking.snapshot(),generation:readSettings(root),context:contextDiagnostics});return;}
+            if(req.url==='/diagnostics/text'||req.url==='/diagnostics/image'){
+                const started=Date.now();let report;try{if(req.url.endsWith('/text')){if(!backendReady)throw Error('Load a text model in Models first.');if(typeof data.prompt!=='string'||!data.prompt.trim()||data.prompt.length>60000)throw Error('Enter a test prompt (up to 60000 characters).');const turns=Math.max(0,Math.min(100,Math.floor(Number(data.historyTurns)||0))),messages=Array.from({length:turns},(_,i)=>({role:i%2?'assistant':'user',text:'Diagnostic history turn '+i+': '+('A traveller promised a blue cloak beside the old inn. '.repeat(25))}));messages.push({role:'user',text:data.prompt});const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});const result=await pipeline.generate({prompt:'<|im_start|>system\nThis is an isolated local diagnostic, not an event in any saved story.<|im_end|>\n<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'diagnostics-'+crypto.randomUUID(),messages,generationType:'normal'},stream:false},controller.signal);report={ok:true,type:'text',model:runningModel,template:profileFor(root,runningModel).Template,usage:result.usage,context:contextDiagnostics,text:result.choices[0].text};}else{const image=await images.action('/images/generate',{prompt:data.prompt||'A quiet fantasy tavern, detailed illustration.',negative_prompt:'blurry, low quality',width:data.width||512,height:data.height||512,steps:data.steps||20,seed:12345});report={ok:true,type:'image',model:images.snapshot().running,...image};}}catch(e){report={ok:false,type:req.url.endsWith('/text')?'text':'image',error:e.message};}report.elapsedMs=Date.now()-started;if(report.usage)report.endToEndTokensPerSecond=Number((report.usage.completion_tokens/(report.elapsedMs/1000||1)).toFixed(2));report.at=new Date().toISOString();const folder=path.join(root,'Diagnostics');fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'latest-'+report.type+'.json'),JSON.stringify(report,null,2));json(200,report);return;
+            }
+            if(req.url==='/generation/abort'){pipeline.abort();await Promise.allSettled([backendURL,thinking.snapshot().url].map(url=>fetch(url+'/api/extra/abort',{method:'POST',signal:AbortSignal.timeout(2000)})));json(200,{stopped:true});return;}
             if(req.url==='/thinking/configure'){json(200,await thinking.configure(data));return;}
             if(req.url==='/thinking/start'){json(200,await thinking.start());return;}
             if(req.url==='/thinking/stop'){thinking.stop();json(200,thinking.snapshot());return;}
@@ -242,6 +248,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 lastAttempt = selected(); await runBackend();
             }
             else if (req.url === '/stop') { lastAttempt = selected(); stopBackend(); }
+            else if(req.url==='/model-profile'){if(!['chatml','mistral-v3','mistral-v7'].includes(data.Template))throw Error('Unsupported prompt format.');const name=selected();if(!name)throw Error('Select a model.');const file=path.join(root,'model-profiles.json'),saved=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};saved[name]={Template:data.Template};fs.writeFileSync(file,JSON.stringify(saved));}
             else if (req.url === '/generation') { saveSettings(root,data); }
             else if (req.url === '/filter-preview') { json(200,{text:filterReply(data.text||'',data.settings?validateSettings(data.settings):readSettings(root))}); return; }
             else if (req.url === '/hardware') {

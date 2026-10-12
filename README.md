@@ -121,3 +121,9 @@ See [ROADMAP.md](ROADMAP.md) for the next development steps.
 **Lorebooks** supports entry text, keyword triggers, state comparisons (including relationship/quest fields), activation preview and an AI draft helper. Save/load reusable native World Info books. Hero-managed entries are disabled for native injection and activated through the story pipeline, so conditional secrets cannot also be injected unconditionally. Editing story lore changes that session; save the character template to reuse it in future openings. Ilreon continues to use its independent mechanics and saves.
 
 Native JSONL and existing settings remain in SillyTavern. Versioned derived story data and recovery journals live under `Story`; generation filters, private model selection and memory have separate settings. New installations pin the tested SillyTavern commit; setup preserves existing installations. This version supports the local default-user profile. Multi-user server profiles and P2 multiplayer/immersion/branch merging are outside this scope.
+
+## Prioritized model catalog and diagnostics
+
+Rocinante-X 12B Q5/Q4 and Qwen3 14B Q4 now have verified one-click downloads. Cydonia/Magidonia 24B are optional RAM-offload experiments. Qwen 8B remains the baseline. Prompt formats are selected per model; custom files have an editable format. New installations use 8K context; existing installs can apply 8K and reload in Hardware.
+
+**Diagnostics** tests isolated text generation, long-history compaction and image generation, checks engine connections, and exports reports. Welcome/settings panels can be closed with their buttons or Escape. Cancel reply also stops memory work. See [implementation and remaining work](docs/LOCAL_AI_IMPLEMENTATION.md) and [full supplied model specification](docs/LOCAL_AI_MODELS_SPEC.md).

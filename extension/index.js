@@ -31,11 +31,14 @@ const initHeroTavern = async () => {
     const header=document.createElement('header');header.id='hero-header';
     header.innerHTML='<strong id="hero-page-title">Your tavern</strong><button id="hero-engine-chip" class="hero-chip">Checking local AI…</button>';
     const workspace=document.createElement('main');workspace.id='hero-workspace';
+    const closePanel=document.createElement('button');closePanel.id='hero-panel-close';closePanel.textContent='Back to chat ×';closePanel.style.cssText='position:absolute;right:18px;top:8px;z-index:2;padding:8px;border:1px solid #64748b;background:#27354a;color:white;border-radius:8px;cursor:pointer';closePanel.onclick=()=>show('chat');workspace.append(closePanel);
     const frame=document.createElement('iframe');frame.id='hero-model-frame';frame.title='Hero Tavern models and hardware';frame.src=bridgeOrigin+'/';workspace.append(frame);
     const welcome=document.createElement('section');welcome.id='hero-welcome';
-    welcome.innerHTML='<div class="hero-eyebrow">Welcome to your tavern</div><h1 class="hero-welcome-title">Every character has a story.<br>Start yours here.</h1><p class="hero-lead">Create a character, bring your world to life, and chat with an AI running on your own computer.</p><div class="hero-cards"><article class="hero-card"><h3>1 · Choose your AI</h3><p>Download Qwen or load an installed model. Hero Tavern runs and connects the engine for you.</p><button class="hero-action" data-hero="models">Open models</button></article><article class="hero-card"><h3>2 · Meet a character</h3><p>Create someone new or import a SillyTavern character card to begin your conversation.</p><button class="hero-action" data-hero="characters">Characters</button></article><article class="hero-card"><h3>3 · Build your world</h3><p>Add places, lore and memories with SillyTavern’s World Info tools.</p><button class="hero-action" data-hero="world">World info</button></article></div>';
+    welcome.innerHTML='<button id="hero-welcome-close" aria-label="Close welcome" style="float:right;padding:10px;border:1px solid #64748b;border-radius:8px;background:#27354a;color:white;cursor:pointer">Close ×</button><div class="hero-eyebrow">Welcome to your tavern</div><h1 class="hero-welcome-title">Every character has a story.<br>Start yours here.</h1><p class="hero-lead">Create a character, bring your world to life, and chat with an AI running on your own computer.</p><div class="hero-cards"><article class="hero-card"><h3>1 · Choose your AI</h3><p>Try Rocinante or Qwen, or load an installed model. Hero Tavern runs and connects the engine for you.</p><button class="hero-action" data-hero="models">Open models</button></article><article class="hero-card"><h3>2 · Meet a character</h3><p>Create someone new or import a SillyTavern character card to begin your conversation.</p><button class="hero-action" data-hero="characters">Characters</button></article><article class="hero-card"><h3>3 · Build your world</h3><p>Add places, lore and memories with SillyTavern’s World Info tools.</p><button class="hero-action" data-hero="world">World info</button></article></div>';
     const adventure=document.createElement('iframe');adventure.id='hero-adventure-frame';adventure.title='Ilreon Adventure mode';adventure.src=bridgeOrigin+'/adventure';adventure.hidden=true;adventure.style.cssText='width:100%;height:100%;border:0';workspace.append(adventure);
+    let welcomeDismissed=false;const dismissWelcome=()=>{welcomeDismissed=true;welcome.hidden=true;};
     const show = name => {
+        dismissWelcome();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
         const isPanel=['models','hardware','generation','memory','images','creator','adventure','diagnostics','history','trackers','lore','inspector'].includes(name);
         workspace.classList.toggle('open',isPanel);
@@ -45,10 +48,12 @@ const initHeroTavern = async () => {
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};
         if(selectors[name])document.querySelector(selectors[name])?.click();
     };
-    for(const [name,label] of [['chat','Tavern'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['creator','Character studio'],['memory','Chat memory'],['images','Images'],['models','Models'],['hardware','Hardware'],['generation','Generation'],['settings','Preferences']]){
+    for(const [name,label] of [['chat','Tavern'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['creator','Character studio'],['memory','Chat memory'],['images','Images'],['models','Models'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);
+    document.getElementById('hero-welcome-close').onclick=dismissWelcome;
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){dismissWelcome();workspace.classList.remove('open');document.querySelectorAll('.hero-story-dialog').forEach(x=>x.remove());}});
     welcome.querySelectorAll('[data-hero]').forEach(b=>b.onclick=()=>show(b.dataset.hero));
     document.getElementById('hero-engine-chip').onclick=()=>show(engine?.backendError?'diagnostics':'models');
     async function connectLocalAI(data){
@@ -72,7 +77,7 @@ const initHeroTavern = async () => {
         if(event.origin!==bridgeOrigin||event.source!==frame.contentWindow||event.data?.type!=='hero-state')return;
         engine=event.data.state;
         const chip=document.getElementById('hero-engine-chip');
-        chip.textContent=engine.generationState==='analyzing'?'Updating trackers…':engine.generationState==='remembering'?'Updating memory…':engine.generationState==='planning'?'Preparing reply…':engine.generationState==='responding'?'Writing reply…':engine.backendReady?'Local AI ready · '+engine.runningModel.replace(/\.gguf$/,''):engine.backendError?'AI needs attention':engine.backendRunning?'Loading local AI…':engine.selected?'AI stopped · Load model':'No model · Get Qwen';
+        chip.textContent=engine.generationState==='analyzing'?'Updating trackers…':engine.generationState==='remembering'?'Updating memory…':engine.generationState==='planning'?'Preparing reply…':engine.generationState==='responding'?'Writing reply…':engine.backendReady?'Local AI ready · '+engine.runningModel.replace(/\.gguf$/,''):engine.backendError?'AI needs attention':engine.backendRunning?'Loading local AI…':engine.selected?'AI stopped · Load model':'No model · Choose AI';
         chip.className='hero-chip'+(engine.backendReady?' ready':engine.backendError?' error':'');
         if(engine.backendReady)connectLocalAI(engine);
         else lastEngine='';
@@ -138,6 +143,6 @@ const initHeroTavern = async () => {
     };
     const chat=document.getElementById('chat');
     if(chat){new MutationObserver(()=>cleanMessages(chat.querySelectorAll('.mes_text'))).observe(chat,{subtree:true,childList:true,characterData:true});cleanMessages(chat.querySelectorAll('.mes_text'));}
-    setInterval(()=>{try{const c=context?.();if(c)welcome.hidden=!!c.groupId||!!c.characters?.[c.characterId];}catch{}},1000);
+    setInterval(()=>{try{const c=context?.();if(c)welcome.hidden=welcomeDismissed||workspace.classList.contains('open')||!!c.groupId||!!c.characters?.[c.characterId];}catch{}},1000);
 };
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initHeroTavern);else initHeroTavern();

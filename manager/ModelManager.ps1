@@ -102,10 +102,10 @@ function Select-Model([string]$path) {
 function Show-Error([string]$message) {
     [void][Windows.Forms.MessageBox]::Show($message,'Hero Tavern',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Warning)
 }
-function Get-InfoForModel([string]$repo,[string]$filename) {
+function Get-InfoForModel([string]$repo,[string]$filename,[string]$revision='main') {
     $result = [pscustomobject]@{Size=0L;Hash=$null}
     try {
-        $api = 'https://huggingface.co/api/models/' + $repo + '/tree/main?recursive=true'
+        $api = 'https://huggingface.co/api/models/' + $repo + ('/tree/' + $revision + '?recursive=true')
         $response = Invoke-RestMethod -Uri $api -TimeoutSec 18 -Headers @{'User-Agent'='HeroTavern-ModelManager/1.2'}
         $file = $response | Where-Object { $_.path -eq $filename } | Select-Object -First 1
         if($file) {
@@ -132,7 +132,7 @@ function Parse-Selection {
         return [pscustomobject]@{Repo=$repo;File=$remoteFile;LocalName=$localName;Url=$inputUrl;Size=0L;License='User-supplied; check model card';Hash=$null}
     }
     $m = $catalog[$choices.SelectedIndex]
-    return [pscustomobject]@{Repo=$m.Repo;File=$m.File;LocalName=$m.File;Url=('https://huggingface.co/'+$m.Repo+'/resolve/main/'+$m.File);Size=[long]$m.Size;License=$m.License;Hash=$m.Hash}
+    return [pscustomobject]@{Repo=$m.Repo;File=$m.File;LocalName=$m.File;Url=('https://huggingface.co/'+$m.Repo+'/resolve/'+$(if ($m.Revision) { $m.Revision } else { 'main' })+'/'+$m.File);Size=[long]$m.Size;License=$m.License;Hash=$m.Hash}
 }
 function Set-Busy([bool]$busy) {
     $script:isDownloading=$busy

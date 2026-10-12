@@ -22,7 +22,7 @@ test('Library opens without a selected model and rejects unauthorized control re
         const state = await (await fetch(origin + '/status', { headers })).json();
         assert.equal(state.selected, '');
         assert.equal(state.backendRunning, false);
-        assert.equal(state.catalog.length, 3);
+        assert.equal(state.catalog.length, 8);
         assert.match(state.catalog[0].Label, /Qwen3 8B/);
         assert.equal((await fetch(origin + '/status')).status, 403);
         assert.equal((await fetch(origin + '/start', { method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: '{}' })).status, 403);

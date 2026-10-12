@@ -38,7 +38,7 @@ internal static class Bootstrap
             }
             ExtractResource("ModelManagerScript", Path.Combine(tempDirectory, "ModelManager.ps1"));
             ExtractResource("LocalAILaunchScript", Path.Combine(tempDirectory, "LaunchLocalAI.ps1"));
-            foreach (var filename in new[] { "StartHeroTavern.ps1", "ModelTools.ps1", "models.json", "ConfigureTavern.cjs", "ModelBridge.cjs", "ModelPanel.html", "ReplyPipeline.cjs", "ReplyFilters.cjs", "ContextMemory.cjs", "ImageService.cjs", "Adventure.html", "AdventureAdapter.js", "spells.json", "StoryState.cjs", "StoryStore.cjs", "StoryAPI.cjs", "ThinkingWorker.cjs", "StoryPanel.js", "CreatorPanel.js", "HeroStory.js", "HeroExtension.js", "HeroExtension.json" })
+            foreach (var filename in new[] { "StartHeroTavern.ps1", "ModelTools.ps1", "models.json", "ConfigureTavern.cjs", "ModelBridge.cjs", "ModelPanel.html", "ReplyPipeline.cjs", "ReplyFilters.cjs", "ContextMemory.cjs", "ImageService.cjs", "Adventure.html", "AdventureAdapter.js", "spells.json", "ModelProfiles.cjs", "StoryState.cjs", "StoryStore.cjs", "StoryAPI.cjs", "ThinkingWorker.cjs", "StoryPanel.js", "CreatorPanel.js", "HeroStory.js", "HeroExtension.js", "HeroExtension.json" })
                 ExtractResource(filename, Path.Combine(tempDirectory, filename));
             Console.WriteLine("Hero Tavern - SillyTavern + KoboldCpp + Qwen");
             Console.WriteLine("Starting published installer script...");

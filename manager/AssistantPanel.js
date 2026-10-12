@@ -172,6 +172,15 @@
   fileOptions(result.files);$('assistant-file-list').value=result.file.id;await loadFile();
   setStatus('Updated workspace file to revision '+result.file.revision+'. The original external file is untouched.');
  });
+ $('assistant-restore').onclick=withBusy(async()=>{
+  const id=selectedFile(),revision=Number($('assistant-revision').value);
+  if(!id)throw Error('Select a workspace file first.');
+  if(!Number.isInteger(revision)||revision<1)throw Error('Enter a valid previous revision.');
+  if(!confirm('Restore revision '+revision+'? The current workspace copy will first be backed up; the original disk file stays unchanged.'))return;
+  const {file}=await req('/assistant/file-restore',{id,revision,confirm:true});
+  await refreshFiles();$('assistant-file-list').value=file.id;await loadFile();
+  setStatus('Restored revision '+revision+' into new revision '+file.revision+'.');
+ });
  $('assistant-remove-file').onclick=withBusy(async()=>{
   const id=selectedFile();if(!id)return;
   if(!confirm('Remove this imported workspace copy? Your external file stays unchanged.'))return;

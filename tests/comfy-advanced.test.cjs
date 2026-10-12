@@ -38,6 +38,9 @@ test('Live ComfyUI mock preserves batch PNGs and exact seed in local image galle
   switch(u.pathname){
    case '/system_stats':value={devices:[{type:'cuda',name:'Test GPU',vram_total:12884901888,vram_free:8589934592}]};break;
    case '/models/checkpoints':value=['art.safetensors'];break;
+   case '/models/diffusion_models':value=['flux-2-klein-4b.safetensors'];break;
+   case '/models/text_encoders':value=['qwen_3_4b.safetensors'];break;
+   case '/models/vae':value=['flux2-vae.safetensors'];break;
    case '/models/loras':value=['styles/folk.safetensors'];break;
    case '/models/upscale_models':value=['4x-HD.pth'];break;
    case '/prompt':graph=JSON.parse(body).prompt;value={prompt_id:'a-job'};break;
@@ -61,6 +64,15 @@ test('Live ComfyUI mock preserves batch PNGs and exact seed in local image galle
   assert.equal(gal.total,2);
   for(const item of gal.items){assert.equal(item.seed,123);assert.equal(item.engine,'comfyui');assert.ok(fs.statSync(path.join(root,'Images',item.name)).size>0)}
   assert.ok(fs.readFileSync(path.join(root,'Logs','image-files.jsonl'),'utf8').includes('comfy-image-saved'));
+  const fluxPack=catalog.packs.find(p=>p.id==='flux-klein');
+  assert.equal(fluxPack.installed,true,'FLUX is ready independently of checkpoint list');
+  const flux=await adapter.generate({...params,modelPack:'flux-klein',operation:'txt2img',batch_size:1,lora:[]},{checkpoint:''});
+  assert.equal(flux.engine,'comfyui');
+  assert.equal(flux.modelPack,'flux-klein');
+  assert.ok(Object.values(graph).some(node=>node.class_type==='Flux2Scheduler'));
+  assert.ok(Object.values(graph).some(node=>node.class_type==='EmptyFlux2LatentImage'));
+  assert.ok(!Object.values(graph).some(node=>node.class_type==='CheckpointLoaderSimple'),'FLUX must not depend on SDXL checkpoint node');
+
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));fs.rmSync(root,{recursive:true,force:true})}
 });
 test('Local image import does not escape gallery and is protected from accidental deletion',()=>{

@@ -40,15 +40,15 @@ const initHeroTavern = async () => {
     const show = name => {
         dismissWelcome();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
-        const isPanel=['models','hardware','generation','memory','images','storage','creator','adventure','diagnostics','history','trackers','lore','inspector'].includes(name);
+        const isPanel=['assistant','models','hardware','generation','memory','images','storage','creator','adventure','diagnostics','history','trackers','lore','inspector'].includes(name);
         workspace.classList.toggle('open',isPanel);
-        document.getElementById('hero-page-title').textContent={diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',adventure:'Ilreon · Adventure mode',images:'Image Studio',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=name==='adventure';adventure.hidden=name!=='adventure';
+        document.getElementById('hero-page-title').textContent={assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',adventure:'Ilreon · Adventure mode',images:'Image Studio',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=name==='adventure';adventure.hidden=name!=='adventure';
         rail.querySelectorAll('.hero-nav').forEach(b=>b.classList.toggle('active',b.dataset.hero===name));
         if(isPanel&&name!=='adventure') frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};
         if(selectors[name])document.querySelector(selectors[name])?.click();
     };
-    for(const [name,label] of [['chat','Tavern'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['storage','Storage'],['models','Models'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
+    for(const [name,label] of [['chat','Tavern'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['storage','Storage'],['models','Models'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);

@@ -19,7 +19,7 @@ window.generateText=async prompt=>{
  }
  return (await heroRequest('/task',{prompt:String(prompt)+(notes?'\nESTABLISHED EARLIER EVENTS (continuity, current game mechanics override outdated numbers):\n'+notes:''),mode:'adventure'})).text;
 };
-window.generateImage=async(prompt,options={})=>(await heroRequest('/images/generate',{prompt:String(prompt),...options})).url;
+window.generateImage=async(prompt,options={})=>new URL((await heroRequest('/images/generate',{prompt:String(prompt),...options})).url,location.origin).href;
 // Bundle the pinned 514-spell catalogue so offline boot does not depend on GitHub.
 const nativeFetch=window.fetch.bind(window);
 window.fetch=async(input,options)=>{

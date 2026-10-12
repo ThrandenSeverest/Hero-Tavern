@@ -1,6 +1,7 @@
 // Independent managed image worker: model changes do not restart the text model.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const {engineFetch}=require('./EngineHTTP.cjs');
+const {shutdown}=require('./EngineShutdown.cjs');
 const CATALOG=[
  {name:'Juggernaut XL v9 · SDXL quality · ~7.11 GB · no LoRA needed',file:'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',repo:'RunDiffusion/Juggernaut-XL-v9',revision:'e5bdb43736462585b2f05d1d97a0527c84c5a147',hash:'c9e3e68f89b8e38689e1097d4be4573cf308de4e3fd044c64ca697bdb4aa8bca',size:7110000000,steps:32,cfg:5,width:832,height:1216,sampler:'DPM++ 2M Karras'},
  {name:'DreamShaper 8 · recommended · 2.13 GB',file:'DreamShaper_8_pruned.safetensors',repo:'Lykon/DreamShaper',hash:'879db523c30d3b9017143d56705015e15a2cb5628762c11d086fed9538abd7fd',size:2130000000,steps:24,cfg:7,width:512,height:768,sampler:'DPM++ 2M Karras'},
@@ -27,7 +28,7 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=engineFetch
  const url='http://127.0.0.1:'+port,save=()=>fs.writeFileSync(configFile,JSON.stringify(config,null,2));
  const catalog=()=>[...CATALOG,...config.custom];
  function snapshot(){return {state,error,ready,running,busy,selected:config.selected,catalog:catalog(),installed:fs.readdirSync(dir).filter(x=>x.endsWith('.safetensors')),download:download&&{file:download.file,bytes:fs.existsSync(download.part)?fs.statSync(download.part).size:0,size:download.size,verifying:download.verifying}}}
- function stop(){controller?.abort();if(worker){stopping=true;if(process.platform==='win32')spawn('taskkill.exe',['/PID',String(worker.pid),'/T','/F'],{windowsHide:true});else worker.kill();}ready=false;}
+ function stop(){controller?.abort();if(worker){stopping=true;shutdown(worker,port,{log:message=>{try{fs.appendFileSync(path.join(logs,'engine-shutdown.log'),new Date().toISOString()+' '+message+'\n')}catch{}}}).catch(()=>{});}ready=false;}
  async function start(){
   if(starting)throw Error('Image model is already loading.');if(busy)throw Error('Finish image generation before switching models.');starting=true;
   try{
@@ -36,7 +37,7 @@ function createImages(root,{command,prefix=[],port=5002,fetchBackend=engineFetch
    try{await fetchBackend(url+'/sdapi/v1/sd-models',{signal:AbortSignal.timeout(1500)});throw Error('Image engine port is occupied. Close the other server using port '+port+'.');}catch(e){if(e.message.includes('port is occupied'))throw e;}
    const executable=command||path.join(root,'KoboldCpp','koboldcpp.exe');if(!fs.existsSync(executable))throw Error('KoboldCpp is missing. Run setup to repair.');
    const hardware=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/,'')):{mode:'cpu'};
-   const args=['--sdmodel',file,'--host','127.0.0.1','--port',String(port),'--skiplauncher','--sdoffloadcpu'];
+   const args=['--singleinstance','--sdmodel',file,'--host','127.0.0.1','--port',String(port),'--skiplauncher','--sdoffloadcpu'];
    if(hardware.mode!=='cpu')args.push('--sdflashattention');if(hardware.mode==='cpu')args.push('--sdmaingpu','CPU','--sdclipdevice','CPU','--sdvaedevice','CPU');else args.push(hardware.mode==='cuda'?'--usecuda':'--usevulkan');
    const fd=fs.openSync(path.join(logs,'image-engine.log'),'w');try{worker=spawn(executable,[...prefix,...args],{cwd:root,windowsHide:true,stdio:['ignore',fd,fd]})}finally{fs.closeSync(fd)}
    running=config.selected;loading=Date.now();ready=false;stopping=false;error='';state='Loading image model…';

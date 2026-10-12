@@ -28,7 +28,7 @@
 <label>Import workflow JSON<input type="file" accept=".json,application/json" id="hero-api-workflow-file"></label></div>
 <div class="actions"><button id="hero-api-workflow-import">Import reviewed API workflow</button><button id="hero-api-workflow-refresh">Refresh workflow library</button><button id="hero-api-workflow-delete">Delete selected workflow</button></div>
 <label class="check"><input type="checkbox" id="hero-api-allow-custom">I understand and approve nonstandard/custom ComfyUI nodes in the selected workflow (only after checking their source)</label>
-<p class="small">Templates use literal placeholders in API node inputs: {{prompt}}, {{negative}}, {{seed}}, {{steps}}, {{width}}, {{height}}, {{guidance}}, {{source}}, {{mask}}. When none are present, the imported workflow runs with its original fixed values. Uploaded graphs are local and are never automatically executed on import.</p>
+<p class="small">Only import workflows from authors you trust. ComfyUI custom nodes execute in the external local ComfyUI process. No model or generated-image files are deleted by this importer.</p><p class="small">Templates use literal placeholders in API node inputs: {{prompt}}, {{negative}}, {{seed}}, {{steps}}, {{width}}, {{height}}, {{guidance}}, {{source}}, {{mask}}. When none are present, the imported workflow runs with its original fixed values. Uploaded graphs are local and are never automatically executed on import.</p>
 <p id="hero-api-workflow-state"></p>
 </div><div class="card" id="hero-comfy-advanced">
 <h3>Creator tools · ComfyUI</h3>
@@ -260,6 +260,24 @@ async function loadGallery(){
    const prompt=document.createElement('p');prompt.className='small';prompt.textContent=String(item.originalPrompt||item.prompt||'').slice(0,170);
    const controls=document.createElement('div');controls.className='actions';
    const btn=(label,fn)=>{const b=document.createElement('button');b.textContent=label;b.onclick=fn;controls.append(b)};
+   if(item.sourceName){
+   btn('Before / After',()=>{
+    const overlay=document.createElement('div');overlay.className='hero-story-dialog';
+    const shell=document.createElement('section');shell.className='card';
+    shell.style.cssText='max-width:min(900px,94vw);width:90%;margin:auto;max-height:90vh;overflow:auto';
+    const title=document.createElement('h3');title.textContent='Compare original and modified image';
+    const frame=document.createElement('div');frame.style.cssText='position:relative;max-width:800px;aspect-ratio:'+((item.width||1)+'/'+(item.height||1))+';overflow:hidden';
+    const before=document.createElement('img'),after=document.createElement('img');
+    before.src='/images/output/'+item.sourceName;
+    after.src=item.url;
+    for(const image of [before,after])image.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain';
+    const slider=document.createElement('input');slider.type='range';slider.min='0';slider.max='100';slider.value='50';slider.style.width='100%';
+    slider.oninput=()=>{after.style.clipPath='inset(0 '+(100-Number(slider.value))+'% 0 0)'};
+    slider.oninput();frame.append(before,after);
+    const close=document.createElement('button');close.textContent='Close';close.onclick=()=>overlay.remove();
+    shell.append(title,frame,slider,close);overlay.append(shell);document.body.append(overlay);
+   });
+   }
    btn('Use as reference',()=>{el('hero-comfy-mode').value='img2img';el('hero-comfy-reference').value=item.name;el('image-prompt').value=item.originalPrompt||item.prompt||'';el('image-prompt').focus();window.scrollTo({top:0,behavior:'smooth'})});
    btn('Edit area',()=>{el('hero-inpaint-image').value=item.name;heroLoadMaskImage().catch(e=>el('hero-inpaint-status').textContent=e.message)});
    btn('Upscale',()=>{el('hero-upscale-source').value=item.name;el('hero-upscale-run').click()});

@@ -53,6 +53,17 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   if(fs.existsSync(output)&&fs.lstatSync(output).isSymbolicLink())throw Error('Model file symlink refused.');
   return output;
  }
+ function localStatus(){
+  const lists={};for(const group of GROUPS){
+   let names=[];const folder=settings.modelRoot?path.join(settings.modelRoot,group):'';
+   try{
+    if(folder&&fs.existsSync(folder)&&!fs.lstatSync(folder).isSymbolicLink())
+     names=fs.readdirSync(folder,{withFileTypes:true}).filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>x.name);
+   }catch{}
+   lists[group]=names;
+  }
+  return composeStatus(lists);
+ }
  function snapshot(){
   return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes+(download.part&&fs.existsSync(download.part)?fs.statSync(download.part).size:0),total:download.total,phase:download.phase,part:download.part},lastError};
  }
@@ -119,6 +130,6 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
  function cancel(){if(download){download.abort=true;download.process?.kill();return {cancelled:true}}return {cancelled:false}}
  function select({id}={}){pack(id);settings.selected=id;save();return snapshot()}
  function knownFiles(id){return pack(id).files.map(x=>({group:x.group,name:x.name}))}
- return {PACKS,pack,snapshot,configure,downloadPack,cancel,select,knownFiles,composeStatus};
+ return {PACKS,pack,snapshot,configure,downloadPack,cancel,select,knownFiles,composeStatus,localStatus};
 }
 module.exports={PACKS,createModelHub,installed,composeStatus};

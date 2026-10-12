@@ -10,6 +10,7 @@ const {createStoryAPI}=require('./StoryAPI.cjs');
 const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {createComfyAdapter}=require('./ComfyAdapter.cjs');
+const {shutdown}=require('./EngineShutdown.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {systemInfo,performancePreset}=require('./Performance.cjs');
@@ -45,7 +46,7 @@ function backendArguments(root, model, port = 5001) {
     if (!['cpu', 'cuda', 'vulkan'].includes(config.mode)) throw new Error('Choose CPU, CUDA or Vulkan in Hardware settings.');
     if (!Number.isInteger(config.contextSize) || config.contextSize < 512 || config.contextSize > 524288) throw new Error('Context size must be 512–524288.');
     if (!Number.isInteger(config.gpuLayers) || config.gpuLayers < -1 || config.gpuLayers > 999) throw new Error('Invalid GPU layer count.');
-    const args = ['--model', model, '--contextsize', String(config.contextSize), '--host', '127.0.0.1', '--port', String(port), '--skiplauncher'];
+    const args = ['--singleinstance', '--model', model, '--contextsize', String(config.contextSize), '--host', '127.0.0.1', '--port', String(port), '--skiplauncher'];
     if (config.mode === 'cpu') args.push('--gpulayers', '0');
     else args.push(config.mode === 'cuda' ? '--usecuda' : '--usevulkan', '--gpulayers', String(config.gpuLayers));
     if(config.flashAttention===false)args.push('--noflashattention');else if(config.flashAttention===true)args.push('--flashattention');
@@ -136,8 +137,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const stopBackend = (intent = 'stop') => {
         if (!backend) return;
         stopIntent = intent; backendReady=false; engineState=intent==='stop'?'stopping':'error'; state=intent==='stop'?'Stopping AI…':backendError; pipeline.abort();
-        if (process.platform === 'win32') spawn('taskkill.exe', ['/PID', String(backend.pid), '/T', '/F'], { windowsHide: true });
-        else backend.kill();
+        shutdown(backend,backendPort,{log:message=>{try{fs.appendFileSync(path.join(logs,'engine-shutdown.log'),new Date().toISOString()+' '+message+'\n')}catch{}}}).catch(()=>{});
     };
     const beginDownload = async index => {
         if (download) throw new Error('A download is already running.');

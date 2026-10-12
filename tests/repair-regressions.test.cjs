@@ -5,7 +5,7 @@ const directorCode=chunk('function conversationalNpc(action){','function npcPuls
 const portraitCode=chunk('function npcPortraitSpec(n){','async function generateNpcPortrait(');
 function npcContext(){
  const person={id:'tavern_keeper',name:'Савос',occupation:'трактирщик',personality:'сдержанный',goal:'поддерживать таверну',status:'alive',appearance:'Мужчина около сорока, зеленые глаза, каштановые волосы и борода'};
- const c=vm.createContext({console,G:{dialogue:{lastNpcId:'tavern_keeper',activeNpcId:'tavern_keeper'},world:{currentLocationId:'blind_moon'}},contextNpcs:()=>[person],recognizedSpell:()=>null,recentConversation:()=>'',directorPrompt:()=>'',aiJson:async()=>({phase:'resolve',narration:'Савос берёт кружку со стойки.',lines:[],patch:{}}),aiText:async()=> 'Сейчас налью вам пива. Светлое или тёмное?',addNarration:()=>{},addDialogue:()=>{},addSystem:()=>{},applyPatch:()=>{}});
+ const c=vm.createContext({console,G:{dialogue:{lastNpcId:'tavern_keeper',activeNpcId:'tavern_keeper'},world:{currentLocationId:'blind_moon'},npcs:{tavern_keeper:person}},contextNpcs:()=>[person],recognizedSpell:()=>null,recentConversation:()=>'',directorPrompt:()=>'',aiJson:async()=>({phase:'resolve',narration:'Савос берёт кружку со стойки.',lines:[],patch:{}}),aiText:async()=> 'Сейчас налью вам пива. Светлое или тёмное?',addNarration:()=>{},addDialogue:()=>{},addSystem:()=>{},applyPatch:()=>{}});
  vm.runInContext(directorCode,c);return {c,person};
 }
 test('Russian short answers address active NPC: JS ASCII word boundaries do not suppress speech',()=>{

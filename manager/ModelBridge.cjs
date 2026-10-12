@@ -9,6 +9,7 @@ const {createStoryStore}=require('./StoryStore.cjs');
 const {createStoryAPI}=require('./StoryAPI.cjs');
 const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
+const {createComfyAdapter}=require('./ComfyAdapter.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {systemInfo,performancePreset}=require('./Performance.cjs');
@@ -78,6 +79,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const imageGallery=createImageGallery(root);
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
+    const comfy=createComfyAdapter(root);
     const pipeline = createPipeline({root,backendURL,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
     const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady});
     const selection = path.join(models, 'selected-model.txt');
@@ -192,11 +194,18 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(!backend)await runBackend();
       await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Text engine exited while loading.');return backendReady;},signal);
     };
-    const generateStudioImage=async(input,signal,releaseGPU,onReady)=>{
+    const generateStudioImage=async(input,signal,releaseGPU,onReady,engine='auto',comfyCheckpoint='')=>{
       if(imageJob)throw Error('Another image job is active.');
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
       imageJob=true;
+      let actualEngine='koboldcpp';
+      if(engine!=='koboldcpp'){
+        const ok=await comfy.available();
+        if(ok&&comfyCheckpoint)actualEngine='comfyui';
+        else if(engine==='comfyui'||input.sourceName)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or select KoboldCpp.');
+      }
+      if(input.sourceName&&actualEngine!=='comfyui')throw Error('Masked editing requires an active ComfyUI engine.');
       const restoreText=!!backend||textPausedForImages,restorePlanner=thinking.snapshot().running;
       try{
         if(releaseGPU&&backend){
@@ -205,6 +214,10 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         }
         if(releaseGPU&&thinking.snapshot().running){
           thinking.stop();await waitUntil(()=>!thinking.snapshot().running,signal,30000);
+        }
+        if(actualEngine==='comfyui'){
+          onReady?.('comfyui-generating');
+          return await comfy.generate(input,{checkpoint:comfyCheckpoint,sourceName:input.sourceName,maskData:input.maskData,signal});
         }
         if(!images.snapshot().ready)await images.action('/images/start',{});
         await waitUntil(()=>{const s=images.snapshot();if(s.error)throw Error(s.error);return s.ready;},signal);
@@ -217,7 +230,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try{
           if(releaseGPU){
             try{
-              await images.action('/images/stop',{});
+              if(actualEngine==='comfyui')await comfy.freeMemory({confirm:true});
+              else await images.action('/images/stop',{});
               await waitUntil(()=>!images.snapshot().running,null,30000);
             }catch(e){backendError='Failed to unload image engine: '+e.message;}
             onReady?.('restoring-text');
@@ -238,13 +252,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     };
     const studio=createStudio(root,{pipeline,ensureText,generateImage:generateStudioImage,getImageState:()=>images.snapshot()});
     const tuner=createAutoTune(root,{systemInfo,readGeneration:()=>readSettings(root),saveGeneration:value=>saveSettings(root,value),abort:()=>pipeline.abort(),stop:async()=>{lastAttempt=selected();stopBackend();if(images.snapshot().running)await images.action('/images/stop',{});await waitUntil(()=>!backend&&!images.snapshot().running,null,30000);},load:async(signal,limit)=>{await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Engine failed to load.');return backendReady;},signal,limit);},benchmark:async signal=>{const started=Date.now();const r=await pipeline.generate({prompt:'<|im_start|>user\n'+('A traveller enters an inn and remembers a blue cloak. '.repeat(120))+'\nWrite a brief vivid continuation with a new action.<|im_end|>\n<|im_start|>assistant\n',stream:false,seed:1234},signal,{mode:'utility'});return {...r,elapsedMs:Date.now()-started};}});
-    const diagnosticEnvironment=async()=>({system:await systemInfo(),text:{running:!!backend,ready:backendReady,pausedForImage:imageJob||textPausedForImages,queuedReplies:queuedInference,model:runningModel,pid:backend?.pid,phase:generationState,configured:backendArguments(root,'').config,loaded:launchConfig,args:launchArgs,url:backendURL,error:backendError},image:images.snapshot(),planner:thinking.snapshot(),pipeline:pipeline.runSnapshot(),context:contextDiagnostics,enginePerformance:backendReady?await engineFetch(backendURL+'/api/extra/perf',{timeoutMs:3000}).then(r=>r.json()).catch(e=>({error:e.message})):null,logs:{text:logTail(path.join(logs,'koboldcpp.log')),textError:logTail(path.join(logs,'koboldcpp-error.log')),image:logTail(path.join(logs,'image-engine.log'))}});
+    const diagnosticEnvironment=async()=>({system:await systemInfo(),text:{running:!!backend,ready:backendReady,pausedForImage:imageJob||textPausedForImages,queuedReplies:queuedInference,model:runningModel,pid:backend?.pid,phase:generationState,configured:backendArguments(root,'').config,loaded:launchConfig,args:launchArgs,url:backendURL,error:backendError},image:images.snapshot(),comfy:comfy.snapshot(),planner:thinking.snapshot(),pipeline:pipeline.runSnapshot(),context:contextDiagnostics,enginePerformance:backendReady?await engineFetch(backendURL+'/api/extra/perf',{timeoutMs:3000}).then(r=>r.json()).catch(e=>({error:e.message})):null,logs:{text:logTail(path.join(logs,'koboldcpp.log')),textError:logTail(path.join(logs,'koboldcpp-error.log')),image:logTail(path.join(logs,'image-engine.log'))}});
     const snapshot = () => {
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
             tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
-            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(), thinking:thinking.snapshot(), generation: readSettings(root),
+            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(), thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
@@ -281,7 +295,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
-        if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
+        if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),available:await comfy.available(),checkpoints:await comfy.checkpoints().catch(()=>[])});return;}
+         if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true'}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/studio/progress'){const st=studio.snapshot(),img=images.snapshot();let progress=null,step=null,totalSteps=null;
           if(img.busy){try{const response=await engineFetch('http://127.0.0.1:'+imagePort+'/sdapi/v1/progress',{timeoutMs:1200});if(response.ok){const p=await response.json();if(Number.isFinite(p.progress))progress=Math.max(0,Math.min(1,p.progress));step=p.state?.sampling_step??null;totalSteps=p.state?.sampling_steps??null;}}catch{}}
@@ -290,11 +305,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
-            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:2000000)) throw new Error('Request too large.'); }
+            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:(req.url==='/studio/generate'?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
-            if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
+            if(req.url==='/comfy/free'){json(200,await comfy.freeMemory(data));return;}
+             if(req.url==='/comfy/cancel'){json(200,await comfy.cancel());return;}
+             if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
             if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
             if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
@@ -384,7 +401,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { studio.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { comfy.cancel().catch(()=>{});studio.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
     // Calibration must be user-initiated: an automatic first-launch calibration can repeatedly kill the chat worker.
     server.listen(port, '127.0.0.1');
     return server;

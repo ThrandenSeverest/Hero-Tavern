@@ -61,10 +61,62 @@ function createDiskCare(root){
   }
   return result;
  }
+
+ function fileActivity({limit=80}={}){
+  const watched=[
+   ['Generated images',path.join(root,'Images')],
+   ['Image models',path.join(root,'ImageModels')],
+   ['Text models',path.join(root,'Models')],
+   ['Downloads',path.join(root,'Downloads')],
+   ['Logs',path.join(root,'Logs')],
+   ['Diagnostics',path.join(root,'Diagnostics')],
+   ['ComfyUI file transfers',path.join(root,'Logs','image-files.jsonl')]
+  ];
+  const out=[];
+  for(const [category,target] of watched){
+   if(!fs.existsSync(target))continue;
+   const names=fs.statSync(target).isDirectory()?fs.readdirSync(target).slice(-1500).map(n=>path.join(target,n)):[target];
+   for(const file of names){
+    try{
+     const stat=fs.lstatSync(file);
+     if(!stat.isFile()||stat.isSymbolicLink()||stat.isDirectory())continue;
+     out.push({category,path:file,size:stat.size,modified:stat.mtime.toISOString()});
+    }catch{}
+   }
+  }
+  return out.sort((a,b)=>b.modified.localeCompare(a.modified)).slice(0,Math.min(200,Math.max(1,Number(limit)||80)));
+ }
+ function externalCacheReport(){
+  const local=process.env.LOCALAPPDATA||'';
+  const temp=process.env.TEMP||process.env.TMP||'';
+  const result={};
+  if(local){
+   for(const [name,p] of [['NVIDIA DXCache',path.join(local,'NVIDIA','DXCache')],['npm download cache',path.join(local,'npm-cache')]]){
+    try{result[name]={path:p,bytes:bytesAt(p)}}catch(e){result[name]={path:p,error:e.message}}
+   }
+  }
+  if(temp){
+   // Inventory: never assume all _MEI folders belong to Hero Tavern.
+   let confirmed=0,count=0,possible=0;
+   try{
+    for(const entry of fs.readdirSync(temp,{withFileTypes:true})){
+     if(!entry.isDirectory()||!/^_MEI\d+$/.test(entry.name))continue;
+     const p=path.join(temp,entry.name);
+     if(fs.lstatSync(p).isSymbolicLink())continue;
+     const files=fs.readdirSync(p);
+     const owned=files.some(n=>/^koboldcpp_(?:cublas|vulkan).*\.dll$/i.test(n));
+     if(owned){count++;confirmed+=bytesAt(p)}else possible++;
+    }
+    result['KoboldCpp temp candidates']={path:temp,bytes:confirmed,count,unknownFolders:possible,cleanupAllowed:false,note:'These are identification candidates, not proven Hero Tavern-owned. No automatic deletion.'};
+   }catch(e){result['KoboldCpp temp candidates']={path:temp,error:e.message}}
+  }
+  return result;
+ }
+
  function report(){
   const items=safeItems();
   let freeBytes=null;try{const s=fs.statfsSync(root);freeBytes=s.bavail*s.bsize}catch{}
-  return {categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
+  return {categories:categories.map(([name,target])=>({name,bytes:bytesAt(target)})),fileActivity:fileActivity(),externalCaches:externalCacheReport(),cleanupItems:items,reclaimableBytes:items.reduce((v,x)=>v+x.bytes,0),freeBytes,
    note:'Only completed installer archives and committed transaction backups are eligible. Models, user images, chats, saves, npm cache and in-progress downloads are protected.'};
  }
  function cleanup({confirm=false}={}){
@@ -103,7 +155,7 @@ function createDiskCare(root){
   fs.rmSync(cache,{recursive:true,force:true,maxRetries:2});
   return {freedBytes:amount,skipped:false};
  }
- return {report,cleanup,clearNpmCache};
+ return {report,cleanup,clearNpmCache,fileActivity,externalCacheReport};
 }
 module.exports={createDiskCare,bytesAt};
 if(require.main===module){

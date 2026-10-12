@@ -200,7 +200,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
       let actualEngine='koboldcpp';
-      const requiresComfy=!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint';
+      const requiresComfy=!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint'||input.operation==='outpaint';
       if(engine==='koboldcpp'&&requiresComfy)throw Error('This operation needs ComfyUI. Set the image engine to Auto or ComfyUI; KoboldCpp remains text-to-image only.');
       if(engine!=='koboldcpp'||requiresComfy){
         const ok=await comfy.available();

@@ -50,7 +50,17 @@
 <input type="file" id="hero-comfy-file" accept="image/png,image/jpeg,image/webp">
 <button id="hero-comfy-import">Add image to local gallery</button>
 <p class="small">Imported references stay in Hero Tavern's Images directory and become available for Image to Image, inpainting and upscaling.</p>
-<p class="small">File policy: Hero Tavern stores generated PNGs in <code>Images</code>, saved API graphs in <code>ImageWorkflows</code>, and logs exact local output paths in <code>Logs/image-files.jsonl</code>. ComfyUI also retains uploaded copies under its own input directory and native generated outputs under its output directory; Hero Tavern never silently deletes them.</p><h3>Upscale a saved image</h3>
+<p class="small">File policy: Hero Tavern stores generated PNGs in <code>Images</code>, saved API graphs in <code>ImageWorkflows</code>, and logs exact local output paths in <code>Logs/image-files.jsonl</code>. ComfyUI also retains uploaded copies under its own input directory and native generated outputs under its output directory; Hero Tavern never silently deletes them.</p><h3>Expand canvas · Outpainting</h3>
+<p>Extend the borders of a saved image without recreating its center. Start with small padding on a 12 GB card.</p>
+<div class="controls">
+<label>Source<select id="hero-outpaint-source"><option value="">Select gallery image</option></select></label>
+<label>Left (px)<input id="hero-outpaint-left" type="number" min="0" max="512" step="8" value="0"></label>
+<label>Right (px)<input id="hero-outpaint-right" type="number" min="0" max="512" step="8" value="128"></label>
+<label>Top (px)<input id="hero-outpaint-top" type="number" min="0" max="512" step="8" value="0"></label>
+<label>Bottom (px)<input id="hero-outpaint-bottom" type="number" min="0" max="512" step="8" value="0"></label>
+<label>Seam feather (px)<input id="hero-outpaint-feather" type="number" min="0" max="128" step="8" value="24"></label></div>
+<button id="hero-outpaint-run" class="primary">Expand selected image</button><p id="hero-outpaint-status"></p>
+<h3>Upscale a saved image</h3>
 <div class="controls"><label>Upscale source<select id="hero-upscale-source"><option value="">Select image</option></select></label>
 <label>Upscale method<select id="hero-upscale-model"><option value="">Lanczos · fast, no additional model</option></select></label>
 <label>Factor<select id="hero-upscale-factor"><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select></label></div>
@@ -281,6 +291,7 @@ async function loadGallery(){
    btn('Use as reference',()=>{el('hero-comfy-mode').value='img2img';el('hero-comfy-reference').value=item.name;el('image-prompt').value=item.originalPrompt||item.prompt||'';el('image-prompt').focus();window.scrollTo({top:0,behavior:'smooth'})});
    btn('Edit area',()=>{el('hero-inpaint-image').value=item.name;heroLoadMaskImage().catch(e=>el('hero-inpaint-status').textContent=e.message)});
    btn('Upscale',()=>{el('hero-upscale-source').value=item.name;el('hero-upscale-run').click()});
+   btn('Expand canvas',()=>{el('hero-outpaint-source').value=item.name;el('hero-outpaint-source').scrollIntoView({behavior:'smooth',block:'center'})});
    btn('Reuse settings',()=>{el('image-prompt').value=item.originalPrompt||item.prompt||'';el('image-negative').value=item.negative_prompt||'';for(const [id,key]of [['image-width','width'],['image-height','height'],['image-steps','steps'],['image-cfg','cfg_scale'],['image-seed','seed'],['image-sampler','sampler_name']])if(item[key]!=null)el(id).value=item[key];imageGeometryTouched=true;syncImageFormat();el('image-prompt').focus()});
    btn(item.favorite?'★':'☆',async()=>{await request('/gallery/favorite',{name:item.name,value:!item.favorite});await loadGallery()});
    btn('Open',()=>window.open(item.url,'_blank','noopener'));
@@ -396,7 +407,7 @@ el('hero-inpaint-run').onclick=async()=>{
 async function heroRefreshSources(){
  try{const data=await request('/gallery/list?limit=200');const select=el('hero-inpaint-image'),old=select.value;select.replaceChildren(new Option('Select gallery image',''),...data.items.map(i=>new Option(i.name,i.name)));select.value=data.items.some(i=>i.name===old)?old:'';
  const names=data.items.map(i=>i.name);
- for(const id of ['hero-comfy-reference','hero-upscale-source']){
+ for(const id of ['hero-comfy-reference','hero-upscale-source','hero-outpaint-source']){
   const field=el(id),last=field.value;
   field.replaceChildren(new Option('Select gallery image',''),...names.map(n=>new Option(n,n)));
   field.value=names.includes(last)?last:'';
@@ -463,6 +474,25 @@ el('hero-comfy-import').onclick=async()=>{
   el('hero-comfy-reference').value=meta.name;
   el('hero-comfy-state').textContent='Saved '+meta.name+' · '+canvas.width+' × '+canvas.height+' to local Images gallery.';
  }catch(e){el('hero-comfy-state').textContent=e.message}finally{button.disabled=false}
+};
+el('hero-outpaint-run').onclick=async()=>{
+ const button=el('hero-outpaint-run'),out=el('hero-outpaint-status');button.disabled=true;
+ try{
+  const sourceName=el('hero-outpaint-source').value;if(!sourceName)throw Error('Select a gallery image to expand.');
+  const outpaint={left:Number(el('hero-outpaint-left').value),right:Number(el('hero-outpaint-right').value),
+   top:Number(el('hero-outpaint-top').value),bottom:Number(el('hero-outpaint-bottom').value),feathering:Number(el('hero-outpaint-feather').value)};
+  if(!Object.values(outpaint).slice(0,4).some(x=>x>0))throw Error('Select padding on at least one edge.');
+  await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,releaseGPU:el('studio-release').checked});
+  const result=await request('/studio/generate',{operation:'outpaint',sourceName,outpaint,
+   prompt:el('image-prompt').value||'Expand this scene naturally with matching architecture, composition and lighting.',
+   negative_prompt:el('image-negative').value,steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),
+   width:512,height:512,seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,refine:false,
+   lora:heroSelectedLoras(),denoise:0.8});
+  out.textContent='Extended image saved as '+result.url+'. Original remains untouched.';
+  lastImage=result.url;el('image-result').src=result.url;el('image-result').hidden=false;
+  el('image-download').href=result.url;el('image-download').hidden=false;el('image-to-chat').disabled=false;
+  await loadGallery();
+ }catch(e){out.textContent=e.message}finally{button.disabled=false}
 };
 el('hero-upscale-run').onclick=async()=>{
  const button=el('hero-upscale-run'),status=el('hero-upscale-status');button.disabled=true;

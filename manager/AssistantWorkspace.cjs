@@ -79,7 +79,7 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
   const clean=t=>String(t).replace(/<\|im_(?:start|end)\|>/g,'[token]').replace(/<\/?think>/gi,'[think-token]');
   return '<|im_start|>system\n'+clean(system)+'<|im_end|>\n'+messages.map(m=>'<|im_start|>'+m.role+'\n'+clean(m.text)+'<|im_end|>\n').join('')+'<|im_start|>assistant\n';
  }
- async function complete(messages,{deep=false,thinking=false,signal,max_tokens=1500,system,temperature=0.6}={}){
+ async function complete(messages,{deep=false,thinking=false,signal,max_tokens=1500,system,temperature=0.6,preserveMarkup=false}={}){
   const profile=getModelProfile?getModelProfile():profileFor(root,modelName());
   const maxContext=Number(contextSize())||8192;
   // Reserve output, use conservative byte limit to avoid overshooting the actual tokenizer.
@@ -91,7 +91,7 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
   const request=modelRequest({prompt,stream:false,max_tokens,temperature,top_p:thinking?0.95:0.85,top_k:20,min_p:0,rep_pen:1.05,stop:['<|im_end|>','<|endoftext|>']},profile);
   const response=await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request),signal,timeoutMs:Math.max(120000,(generation.requestTimeoutSeconds||600)*1000)});
   const raw=await completionText(response);
-  return filterReply(raw,{removeModelTokens:true,stopAtSpeaker:true}).trim();
+  return filterReply(raw,{removeModelTokens:!preserveMarkup,stopAtSpeaker:!preserveMarkup}).trim();
  }
  async function runTask(kind,input={}){
   if(active)throw Error('The assistant is already responding. Cancel or finish the current job.');
@@ -126,7 +126,7 @@ function createAssistantWorkspace(root,{backendURL='http://127.0.0.1:5001',fetch
    const system=base+(kind==='file-edit'?'\nPreserve every unchanged section. Only output the complete revised text wrapped in the exact requested delimiter markers. Keep the original file format valid. /no_think':thinking?'\nUse Qwen3 thinking mode to analyze carefully, then provide a complete final answer. /think':'\nUse direct non-thinking mode for a concise useful answer. /no_think')+
     (deep?'\n[Preliminary planning notes, not authoritative evidence]\n'+notes.slice(0,4800)+'\n[/Planning notes]\nGive a well-checked complete final answer. /no_think':'');
    const tokens=kind==='file-edit'?Math.min(4096,Math.max(1800,Math.ceil((input.fileId?getFile(input.fileId).text.length:1000)/2))):deep?2304:thinking?3000:1536;
-   let answer=await complete(messages,{signal,max_tokens:tokens,thinking,system,temperature:kind==='file-edit'?0.25:0.55});
+   let answer=await complete(messages,{signal,max_tokens:tokens,thinking,system,temperature:kind==='file-edit'?0.25:0.55,preserveMarkup:kind==='file-edit'});
    if(!answer&&thinking){phase='recovering';answer=await complete(messages,{signal,max_tokens:1800,system:base+'\nReturn the user-facing answer directly, do not generate internal reasoning. /no_think'});}
    if(!answer)throw Error('The local model returned no visible answer. Try Fast mode or use a larger context.');
    if(kind==='file-edit'){

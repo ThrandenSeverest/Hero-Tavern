@@ -88,6 +88,9 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   await panel.locator('[data-tab="images"]').click();
   const options=await panel.locator('#image-create-model option').evaluateAll(nodes=>nodes.map(x=>x.value));
   if(!['flux-klein','z-turbo','sdxl','koboldcpp','custom'].every(id=>options.includes(id)))throw Error('Image Studio unified model selector is incomplete');
+  await panel.locator('#image-create-model').selectOption('flux-klein');
+  if(!await panel.locator('#image-generate').isEnabled())throw Error('FLUX Generate must not depend on legacy KoboldCpp ImageModels checkpoint');
+  if(!await panel.locator('#image-installed').isHidden())throw Error('Legacy checkpoint picker belongs only in Models & Setup');
   await panel.locator('#image-create-model').selectOption('koboldcpp');
   await panel.locator('#image-prompt').fill('A quiet fantasy tavern.');
   if(!await panel.locator('#image-generate').isEnabled())throw Error('Generate is disabled despite a working legacy image engine.');

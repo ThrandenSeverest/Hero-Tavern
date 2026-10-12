@@ -329,7 +329,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/comfy/free'){json(200,await comfy.freeMemory(data));return;}
              if(req.url==='/comfy/cancel'){json(200,await comfy.cancel());return;}
              if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
-            if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
+            if(req.url==='/storage/clean-runtime'){if(backend||starting||images.snapshot().running||thinking.snapshot().running||imageJob)throw Error('Stop text, image and planning AI engines before cleaning their extraction caches.');json(200,diskCare.cleanRuntime({confirm:data.confirm,enginesStopped:true}));return;}
+             if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
             if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
             if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}

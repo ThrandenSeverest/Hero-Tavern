@@ -17,7 +17,14 @@ function bytesAt(target){
 }
 function isWithin(root,file){
  const relative=path.relative(root,file);
- return relative!==''&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);
+ if(relative===''||relative.startsWith('..'+path.sep)||relative==='..'||path.isAbsolute(relative))return false;
+ // Check canonical paths too: a symlinked Downloads or transactions parent
+ // must never allow cleanup to escape the installed application root.
+ try{
+  const base=fs.realpathSync(root),target=fs.realpathSync(file);
+  const rel=path.relative(base,target);
+  return !!rel&&rel!=='..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel);
+ }catch{return false;}
 }
 function createDiskCare(root){
  const downloads=path.join(root,'Downloads'),transactions=path.join(root,'Story','transactions'),logs=path.join(root,'Logs');

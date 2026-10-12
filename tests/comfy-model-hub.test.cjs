@@ -46,7 +46,7 @@ test('Z-Image Turbo uses lumina2 Qwen loader, AuraFlow scheduler and limited bat
  assert.throws(()=>recipeGraph(pack,{...settings,batch_size:5}),/Choose 1, 2 or 4/);
  assert.throws(()=>recipeGraph(pack,{...settings,operation:'inpaint'}),/generation only/);
 });
-test('ComfyUI model paths stay inside a selected existing ComfyUI model root',()=>{
+test('ComfyUI model paths stay inside a selected existing ComfyUI model root',async()=>{
  const home=root();try{
   fs.mkdirSync(path.join(home,'models','checkpoints'),{recursive:true});
   const hub=createModelHub(home);
@@ -55,7 +55,7 @@ test('ComfyUI model paths stay inside a selected existing ComfyUI model root',()
   assert.equal(configured.settings.modelRoot,path.join(home,'models'));
   hub.select({id:'z-turbo'});
   assert.equal(createModelHub(home).snapshot().settings.selected,'z-turbo');
-  assert.throws(()=>hub.downloadPack({id:'z-turbo'}),/Confirm/);
+  await assert.rejects(()=>hub.downloadPack({id:'z-turbo'}),/Confirm/);
  }finally{fs.rmSync(home,{recursive:true,force:true})}
 });
 test('Portable folder detection chooses only complete embedded Python and ComfyUI program layouts',()=>{

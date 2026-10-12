@@ -101,7 +101,7 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
    const headers=await fetchFn(ARCHIVE_URL,{method:'HEAD',signal:AbortSignal.timeout(20000)});
    const expected=Number(headers.headers?.get('content-length')||0);
    if(expected>0)job.expected=expected;
-   const disk=fs.statfsSync(root),need=Math.max(15*1024**3,expected*2.6);
+   const disk=fs.statfsSync(root),need=Math.max(28*1024**3,expected*3);
    if(disk.bavail*disk.bsize<need)throw Error('Not enough free space for portable install/extraction. Keep at least '+Math.ceil(need/1024**3)+' GiB free.');
    const curl=path.join(process.env.SystemRoot||'C:\\Windows','System32','curl.exe');
    if(!fs.existsSync(curl))throw Error('Windows curl.exe unavailable.');

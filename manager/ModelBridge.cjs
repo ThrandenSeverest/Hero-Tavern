@@ -336,6 +336,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
         if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
+        if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
          if(req.method==='GET'&&req.url==='/comfy/models'){json(200,{hub:comfy.models.snapshot(),packs:(await comfy.catalog()).packs||[]});return;}
@@ -353,7 +354,12 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const data = JSON.parse(body || '{}');
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
-            if(req.url==='/comfy/runtime/configure'){json(200,comfyRuntime.configure(data));return;}
+            if(req.url.startsWith('/assistant/')){
+                if((req.url==='/assistant/message'||req.url==='/assistant/file-edit')&&(imageJob||queuedInference||generationState!=='idle'||tuner.snapshot()?.status==='running'))throw Error('Finish the active AI task first.');
+                if((req.url==='/assistant/message'||req.url==='/assistant/file-edit')&&!selected().toLowerCase().includes('qwen3-8b-abliterated'))throw Error('Load Qwen3 8B Abliterated from Assistant first.');
+                json(200,await assistant.action(req.url,data));return;
+             }
+             if(req.url==='/comfy/runtime/configure'){json(200,comfyRuntime.configure(data));return;}
              if(req.url==='/comfy/runtime/start'){json(200,await comfyRuntime.start());return;}
              if(req.url==='/comfy/runtime/stop'){if(imageJob)throw Error('Image generation is active.');json(200,await comfyRuntime.stop());return;}
              if(req.url==='/comfy/runtime/install'){json(200,await comfyRuntime.installPortable(data));return;}

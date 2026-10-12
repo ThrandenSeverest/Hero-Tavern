@@ -5,6 +5,24 @@ $bridge = $null
 $tavern = $null
 $mutex = New-Object Threading.Mutex($false, 'Local\HeroTavernLauncher')
 $locked = $false
+$exitCode = 0
+$logs = Join-Path $root 'Logs'
+$startError = $null
+New-Item -ItemType Directory -Path $logs -Force -ErrorAction SilentlyContinue | Out-Null
+function Show-LogTail([string]$Name, [int]$Count = 65) {
+    $file = Join-Path $logs $Name
+    if (Test-Path -LiteralPath $file) {
+        Write-Host ('--- ' + $file + ' ---') -ForegroundColor Yellow
+        try { Get-Content -LiteralPath $file -Tail $Count -ErrorAction Stop | ForEach-Object { Write-Host $_ } }
+        catch { Write-Host ('Unable to read log: ' + $_.Exception.Message) }
+    } else { Write-Host ('No ' + $Name + ' has been created.') -ForegroundColor DarkYellow }
+}
+function Write-LaunchError([string]$Message) {
+    $report = Join-Path $logs 'launcher-error.log'
+    $text = '==== ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') + ' ====' + [Environment]::NewLine + $Message + [Environment]::NewLine
+    try { [IO.File]::AppendAllText($report, $text, [Text.Encoding]::UTF8) } catch {}
+}
+
 function Test-Port([int]$Port) {
     $client = New-Object Net.Sockets.TcpClient
     try { $client.Connect('127.0.0.1', $Port); return $true } catch { return $false } finally { $client.Dispose() }
@@ -12,14 +30,14 @@ function Test-Port([int]$Port) {
 function Wait-Service([string]$Url, $Process, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        if ($Process.HasExited) { throw ('Server exited. Check logs in ' + (Join-Path $root 'Logs')) }
+        if ($Process.HasExited) { throw ('Server process exited with code ' + $Process.ExitCode + ' before ' + $Url + ' became ready. Review its error log below.') }
         try {
             $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
             if ($response.StatusCode -eq 200) { return }
         } catch {}
         Start-Sleep -Milliseconds 800
     }
-    throw ('Server startup timed out: ' + $Url + '. Check Logs or lower context size.')
+    throw ('Server startup timed out: ' + $Url + '. Review server error log below. Context size is not relevant when SillyTavern fails.')
 }
 try {
     $locked = $mutex.WaitOne(0)
@@ -27,7 +45,6 @@ try {
     foreach ($port in @(8000, 8001)) {
         if (Test-Port $port) { throw ('Port ' + $port + ' is occupied. Close the other server first.') }
     }
-    $logs = Join-Path $root 'Logs'
     New-Item -ItemType Directory -Force $logs | Out-Null
     $node = Get-ChildItem (Join-Path $root 'Runtime') -Filter node.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
     if (-not $node) { throw 'Portable Node runtime missing. Run setup again.' }
@@ -40,6 +57,28 @@ try {
     Start-Process 'http://127.0.0.1:8000/'
     Write-Host 'Hero Tavern is open. Use its Models button to download or select AI models.' -ForegroundColor Green
     Read-Host 'Press Enter here to stop Hero Tavern'
+} catch {
+    $exitCode = 1
+    $startError = $_
+    $message = 'Launcher failed: ' + $_.Exception.Message + [Environment]::NewLine + $_.ScriptStackTrace
+    Write-LaunchError $message
+    Write-Host ''
+    Write-Host 'HERO TAVERN FAILED TO START' -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'Recent SillyTavern output:' -ForegroundColor Cyan
+    Show-LogTail 'sillytavern-error.log'
+    Show-LogTail 'sillytavern.log' 25
+    Write-Host ''
+    Write-Host 'Recent ModelBridge output:' -ForegroundColor Cyan
+    Show-LogTail 'models-error.log'
+    Show-LogTail 'models.log' 25
+    Write-Host ''
+    Write-Host ('Persistent report: ' + (Join-Path $logs 'launcher-error.log')) -ForegroundColor Yellow
+    Write-Host ('Installation log: ' + (Join-Path $root 'install.log')) -ForegroundColor Yellow
+    Write-Host 'Do not delete Models, Images, SillyTavern/data or your user files.' -ForegroundColor Yellow
+    try { Read-Host 'Press Enter AFTER copying the error above. The window will remain open until then' | Out-Null }
+    catch { Start-Sleep -Seconds 30 }
 } finally {
     # Give the bridge time to shut down its own KoboldCpp children gracefully.
     if ($bridge -and -not $bridge.HasExited) {
@@ -60,3 +99,4 @@ try {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
 }
+if ($exitCode -ne 0) { exit $exitCode }

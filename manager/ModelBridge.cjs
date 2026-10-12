@@ -295,6 +295,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
             if(req.url==='/storage/cleanup'){if(imageJob)throw Error('Finish image generation before cleaning temporary data.');json(200,diskCare.cleanup(data));return;}
+            if(req.url==='/storage/clean-npm'){if(imageJob)throw Error('Finish image generation before clearing cache.');json(200,diskCare.clearNpmCache(data));return;}
             if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
             if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}

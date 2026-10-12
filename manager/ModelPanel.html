@@ -250,7 +250,7 @@ function renderImages(s){if(!s)return;el('image-state').textContent=s.error||s.s
  if(imageCatalogCount!==s.catalog.length){el('image-catalog').replaceChildren();s.catalog.forEach((m,index)=>{const c=document.createElement('article');c.className='card';const title=document.createElement('strong');title.textContent=m.name;const link=document.createElement('a');link.href='https://huggingface.co/'+m.repo;link.textContent='Model card / licence';link.target='_blank';link.rel='noopener noreferrer';const b=document.createElement('button');b.textContent=index===0?'Download recommended image model':'Download image model';b.onclick=()=>imageAct('/images/download',{index});c.append(title,document.createElement('p'),link,document.createElement('p'),b);el('image-catalog').append(c)});imageCatalogCount=s.catalog.length;}
  const selected=el('image-installed'),old=selected.value;if(JSON.stringify([...selected.options].map(x=>x.value))!==JSON.stringify(s.installed)){selected.replaceChildren(...s.installed.map(name=>{const o=document.createElement('option');o.value=name;o.textContent=name;return o}));selected.value=s.installed.includes(old)?old:(s.selected||s.installed[0]||'');}
  if(s.selected&&s.selected!==imageDefaultsModel){const model=s.catalog.find(x=>(x.local||x.file)===s.selected);imageModelIsSD15=/DreamShaper_8_pruned/i.test(s.selected);if(model){for(const [id,key]of [['image-steps','steps'],['image-cfg','cfg'],['image-sampler','sampler']])if(model[key]!==undefined)el(id).value=model[key];if(!imageGeometryTouched){for(const [id,key]of [['image-width','width'],['image-height','height']])if(model[key]!==undefined)el(id).value=model[key];el('image-size-tier').value=imageModelIsSD15?'fast':'quality';}}imageDefaultsModel=s.selected;syncImageFormat();}
- el('image-generate').disabled=!s.selected||s.busy;el('image-start').disabled=s.busy||!s.selected||(s.running===s.selected);el('image-stop').disabled=!s.running;
+ el('image-generate').disabled=imageGenerateBusy||(el('image-create-model').value==='koboldcpp'&&s.busy);el('image-start').disabled=s.busy||!s.selected||(s.running===s.selected);el('image-stop').disabled=!s.running;
 }
 async function imageAct(route,data={}){try{el('error').textContent='';renderImages(await request(route,data))}catch(e){el('error').textContent=e.message}}
 for(const name of ['start','stop','cancel'])el('image-'+name).onclick=()=>imageAct('/images/'+name);
@@ -276,6 +276,57 @@ el('scene-export').onclick=async()=>{try{
  const data=await request('/studio/scene-export',{scene:sceneData(),checkpoint:el('scene-checkpoint').value,width:Number(el('image-width').value),height:Number(el('image-height').value),steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,negative_prompt:el('image-negative').value});
  const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data.workflow,null,2)],{type:'application/json'}));a.href=url;a.download='hero-tavern-regional-comfyui-api.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);el('error').textContent='';
  }catch(e){el('error').textContent=e.message}};
+let imageGenerateBusy=false;
+function activeStudioModel(){return el('image-create-model').value||'sdxl'}
+function updateStudioModelStatus(){
+ const choice=activeStudioModel(),status=el('image-create-model-status');
+ const packs=heroHubDetails?.engine?.packs||heroHubDetails?.hub?.packs||[];
+ const pack=packs.find(p=>p.id===choice);
+ status.classList.remove('error');
+ if(choice==='koboldcpp'){status.textContent='Legacy KoboldCpp checkpoint. Configure or load one in Models & Setup.'}
+ else if(choice==='custom'){status.textContent=el('hero-api-workflow').value?'Custom ComfyUI workflow selected.':'Choose a custom API workflow in Models & Setup.';if(!el('hero-api-workflow').value)status.classList.add('error')}
+ else if(choice==='sdxl'){
+  const ckpt=el('hero-comfy-checkpoint').value;
+  status.textContent=ckpt?'ComfyUI checkpoint: '+ckpt:'Select an SDXL checkpoint in Models & Setup (FLUX and Z-Image do not need this).';
+  if(!ckpt)status.classList.add('error');
+ }else if(pack){
+  const connected=!!heroHubDetails?.engine?.available;
+  status.textContent=pack.installed?(connected?'Ready · ComfyUI connected':'Model downloaded · managed ComfyUI can start when generating'):
+   'Missing '+(pack.missing||[]).join(', ')+' · open Models & Setup.';
+  if(!pack.installed)status.classList.add('error');
+ }else status.textContent='Checking model files and ComfyUI availability…';
+ const isSDXL=choice==='sdxl';
+ for(let i=1;i<=2;i++)el('hero-comfy-lora-'+i).disabled=!isSDXL;
+ const noEdit=choice==='koboldcpp'||choice==='z-turbo';
+ if(noEdit&&el('hero-comfy-mode').value!=='txt2img'){
+  el('hero-comfy-mode').value='txt2img';el('hero-comfy-mode').dispatchEvent(new Event('change'));
+ }
+ el('hero-comfy-mode').disabled=noEdit;
+}
+async function selectStudioModel(choice,{save=true}={}){
+ if(!['sdxl','flux-klein','z-turbo','koboldcpp','custom'].includes(choice))throw Error('Unknown image model.');
+ el('image-create-model').value=choice;
+ const pack=choice==='koboldcpp'||choice==='custom'?'sdxl':choice;
+ const engine=choice==='koboldcpp'?'koboldcpp':'comfyui';
+ el('hero-pack-select').value=pack;el('hero-engine').value=engine;
+ const item=(heroHubDetails?.engine?.packs||heroHubDetails?.hub?.packs||[]).find(x=>x.id===pack);
+ if(item&&choice!=='koboldcpp'&&choice!=='custom'){
+  el('image-steps').value=item.steps;el('image-cfg').value=item.cfg;
+  if(choice!=='sdxl'){el('studio-preset').value='raw';el('hero-comfy-batch').value='1';}
+ }
+ updateStudioModelStatus();
+ if(save){
+  await request('/studio/configure',{modelPack:pack,engine,comfyCheckpoint:el('hero-comfy-checkpoint').value,preset:el('studio-preset').value});
+  if(choice!=='koboldcpp'&&choice!=='custom')await request('/comfy/models/select',{id:pack});
+ }
+}
+el('image-create-model').onchange=async()=>{
+ try{await selectStudioModel(activeStudioModel());el('image-create-feedback').textContent=''}catch(e){el('image-create-feedback').textContent=e.message}
+};
+el('image-open-setup').onclick=()=>tab('image-setup');
+el('image-back-to-create').onclick=()=>tab('images');
+el('hero-comfy-checkpoint').addEventListener('change',updateStudioModelStatus);
+
 function heroSelectedLoras(){
  const out=[];
  for(let i=1;i<=2;i++){

@@ -84,16 +84,16 @@ try {
     # Re-runs repair dependencies and launchers without replacing chats/settings.
     if (-not (Test-Path (Join-Path $ST 'server.js'))) {
         if (Test-Path $ST) { throw 'Incomplete SillyTavern folder found. Rename it after backing up any data, then retry.' }
-        $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/SillyTavern/SillyTavern/releases/latest' -Headers @{'User-Agent'='HeroTavern'} -TimeoutSec 90
+        $upstreamCommit = '06bde939fb1e9c4c8d8641d810f0a916b5bce127'
         $stArchive = Join-Path $Downloads 'SillyTavern-release.zip'
         $unzipPath = Join-Path $Downloads 'ST-extracted'
         if (Test-Path $unzipPath) { Remove-Item -LiteralPath $unzipPath -Recurse -Force }
-        Download $release.zipball_url $stArchive
+        Download ('https://api.github.com/repos/SillyTavern/SillyTavern/zipball/' + $upstreamCommit) $stArchive
         Expand-Archive -LiteralPath $stArchive -DestinationPath $unzipPath -Force
         $stExtract = Get-ChildItem -LiteralPath $unzipPath -Directory | Select-Object -First 1
         if (-not $stExtract -or -not (Test-Path (Join-Path $stExtract.FullName 'package.json'))) { throw 'Invalid SillyTavern archive.' }
         Move-Item -LiteralPath $stExtract.FullName -Destination $ST
-        $release.tag_name | Set-Content (Join-Path $Root 'sillytavern-version.txt')
+        $upstreamCommit | Set-Content (Join-Path $Root 'sillytavern-version.txt')
     } else { Write-Host 'Reusing SillyTavern; chats and settings stay in place.' }
 
     Step '3/5 - Installing SillyTavern Node dependencies'
@@ -112,7 +112,7 @@ try {
 
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'ModelPanel.html', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'StoryState.cjs', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'StoryPanel.js', 'CreatorPanel.js')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -176,6 +176,7 @@ if errorlevel 1 pause
     }
     $extensionPath = Join-Path $ST 'public\scripts\extensions\hero-tavern'
     New-Item -ItemType Directory -Force $extensionPath | Out-Null
+    Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroStory.js') -Destination (Join-Path $extensionPath 'story.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.js') -Destination (Join-Path $extensionPath 'index.js') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'HeroExtension.json') -Destination (Join-Path $extensionPath 'manifest.json') -Force
     Copy-Item -LiteralPath (Join-Path $supportDirectory 'ReplyFilters.cjs') -Destination (Join-Path $extensionPath 'reply-filters.js') -Force

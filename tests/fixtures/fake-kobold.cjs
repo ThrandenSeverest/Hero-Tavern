@@ -16,7 +16,7 @@ http.createServer(async(req,res)=>{
  if(req.url==='/v1/completions'){
   let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw||'{}');completions++;lastPrompt=body.prompt;
   const isPlan=body.prompt.includes('[Private continuity outline]');if(isPlan)planning++;
-  const isAdventure=body.prompt.includes('Ilreon schema');const text=isAdventure?JSON.stringify({phase:'resolve',narration:'Илреон оживает.',lines:[],patch:{},outcome:'Продолжение приключения.'}):isPlan?'OUTLINE_PRIVATE_FIXTURE':'<think>ANALYSIS_PRIVATE_FIXTURE</think>Fixture generation works.';
+  const structured=body.prompt.includes('state-analysis JSON')?JSON.stringify({changes:[]}):body.prompt.includes('Draft trackers for a character/story')?JSON.stringify({trackers:[{id:'courage',label:'Courage',type:'number',initialValue:40,min:0,max:100,updateMode:'approval',instructions:'Act according to courage.'}]}):body.prompt.includes('Draft lore for a character/story')?JSON.stringify({lore:[{id:'vault',label:'Vault',text:'A vault lies below the tavern.',keywords:['vault'],visibility:'player'}]}):null;const isAdventure=body.prompt.includes('Ilreon schema');const text=structured|| (isAdventure?JSON.stringify({phase:'resolve',narration:'Илреон оживает.',lines:[],patch:{},outcome:'Продолжение приключения.'}):isPlan?'OUTLINE_PRIVATE_FIXTURE':'<think>ANALYSIS_PRIVATE_FIXTURE</think>Fixture generation works.');
   if(body.stream){res.setHeader('Content-Type','text/event-stream');for(const part of [text.slice(0,4),text.slice(4,15),text.slice(15)])res.write('data: '+JSON.stringify({choices:[{text:part}]})+'\n\n');res.end('data: [DONE]\n\n');}
   else json({choices:[{text}],results:[{text}]});return;
  }

@@ -2,10 +2,11 @@
 const fs = require('node:fs'), path = require('node:path');
 const { filterReply, isMetaReply, repetitionIssue } = require('./ReplyFilters.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
-const DEFAULTS = Object.freeze({thinkingMode:'off',temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
+const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
 function validateSettings(input = {}) {
     const value = {};
     for (const key of Object.keys(DEFAULTS)) value[key] = input[key] === undefined ? DEFAULTS[key] : input[key];
+    if(!['same','different'].includes(value.planningSource))throw Error('Choose the reply model or a separate planning model.');
     if (!['off','separate'].includes(value.thinkingMode)) throw new Error('Choose disabled thinking or separate planning.');
     if (!['mixed','dialogue'].includes(value.replyStyle)) throw new Error('Choose dialogue with narration or dialogue only.');
     for (const [key,min,max] of [['repetitionSensitivity',0.7,0.98],['temperature',0,2],['top_p',0.01,1],['min_p',0,1],['repetition_penalty',1,2],['maxReplyTokens',32,4096],['memoryTokens',128,1024],['recentMessages',2,100],['planningTokens',32,1024]]) {
@@ -57,7 +58,7 @@ async function completionText(response) {
     const item=await response.json();if(item.error)throw new Error(item.error.message||'Generation failed.');
     return item.choices?.[0]?.text??item.choices?.[0]?.message?.content??item.results?.[0]?.text??'';
 }
-function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enforceContext=false,setDiagnostics=()=>{}}) {
+function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enforceContext=false,setDiagnostics=()=>{},getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
     let active = null;
     async function generate(body, signal, {mode='chat'}={}) {
         if(active)throw new Error('A reply is already being generated. Stop it before starting another.');
@@ -66,7 +67,8 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
         const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
         if(signal?.aborted)controller.abort();
         try {
-            let plan='';
+            let plan='',storyContext=null;
+            if(body.hero_context?.sessionId){storyContext=getStoryContext(body.hero_context.sessionId,body.hero_context.messages.slice(-6).map(m=>m.text).join('\n'));}
             const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify((({hero_context,...value})=>value)(request)),signal:controller.signal}));
             const contextSize=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/, '')).contextSize||4096:4096;
             const countTokens=async prompt=>{
@@ -75,10 +77,11 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
                 // UTF-8 byte count is a conservative fallback, never a guessed 4-chars-per-token limit.
                 return Buffer.byteLength(prompt,'utf8');
             };
-            const taskInstruction=mode==='adventure'?'Follow the requested Ilreon schema and rules exactly. Return valid JSON when requested, otherwise the requested narration or compact notes. Preserve authoritative game state; never output reasoning. /no_think':mode==='character'?'Create the requested character card as valid JSON. Return only the requested object without reasoning. /no_think':mode==='summary'?'Summarize the supplied established facts, without inventing details. Return factual notes only, no reasoning. /no_think':instructions(settings);
+            const taskInstruction=mode==='adventure'?'Follow the requested Ilreon schema and rules exactly. Return valid JSON when requested, otherwise the requested narration or compact notes. Preserve authoritative game state; never output reasoning. /no_think':mode==='character'?'Create the requested character card as valid JSON. Return only the requested object without reasoning. /no_think':mode==='preview'?'Write the requested natural in-character test reply, without reasoning or JSON. /no_think':mode==='state'?'Return only the requested state-analysis JSON. Evidence must be exact, established and associated with the declared message and character. Do not invent state or include reasoning. /no_think':mode==='summary'?'Summarize the supplied established facts, without inventing details. Return factual notes only, no reasoning. /no_think':instructions(settings);
+            const stateInstruction=storyContext?'\n'+storyContext.text:'';
             const budgeted=enforceContext||!!body.hero_context||mode!=='chat';
             const replyTokens=mode==='adventure'||mode==='character'?Math.max(1024,settings.maxReplyTokens):settings.maxReplyTokens;
-            const overhead=budgeted?await countTokens(taskInstruction+'\n<|im_start|>system\n<|im_end|>\n')+96:0;
+            const overhead=budgeted?await countTokens(taskInstruction+stateInstruction+'\n<|im_start|>system\n<|im_end|>\n')+96:0;
             const budget=contextSize-replyTokens-overhead-(mode==='chat'&&settings.thinkingMode==='separate'?settings.planningTokens+96:0);
             if(budget<128)throw Error('Reply and planning budgets leave no room for history. Lower Generation reply length or increase Hardware context.');
             const sendChecked=async request=>{if(budgeted&&await countTokens(request.prompt)+request.max_tokens>contextSize)throw Error('Prompt exceeds the loaded context. Increase Hardware context or shorten the character card/instructions. Chat history was not silently discarded.');return send(request)};
@@ -89,13 +92,20 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=fetch,enfo
             if(mode==='chat'&&settings.thinkingMode==='separate'){
                 setState('planning');
                 const prompt=replyPrompt(body.prompt,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');
-                plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
+                if(settings.planningSource==='different'){
+                    const worker=getPlanningBackend();if(!worker?.ready)throw Error('Load a separate planning model in Generation, or choose Use reply model.');
+                    let planningPrompt=prompt;const budget=worker.settings.contextSize-settings.planningTokens-64;
+                    const count=async text=>{const r=await fetchBackend(worker.url+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:text}),signal:controller.signal});const j=await r.json();return Number.isFinite(j.value)?j.value:Buffer.byteLength(text,'utf8')};
+                    while(await count(planningPrompt)>budget){const match=/<\|im_start\|>(?:user|assistant)\n[\s\S]*?<\|im_end\|>\n?/.exec(planningPrompt);if(!match||planningPrompt.slice(match.index+match[0].length).indexOf('<|im_start|>user')<0)throw Error('Planning context is too small for the character and latest turn. Increase planning context or use the reply model.');planningPrompt=planningPrompt.slice(0,match.index)+planningPrompt.slice(match.index+match[0].length);}
+                    plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']}),signal:controller.signal})),settings).slice(0,6000);
+                }else plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
             }
-            setState('responding');
-            const extra=taskInstruction+(body.hero_context?.generationType==='continue'?'\nContinue the last assistant reply without repeating its existing text.':'')+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
+            setState(mode==='state'?'analyzing':'responding');
+            const extra=taskInstruction+stateInstruction+(body.hero_context?.oneReply?'\n[One reply only] '+String(body.hero_context.oneReply).slice(0,3000):'')+(body.hero_context?.generationType==='continue'?'\nContinue the last assistant reply without repeating its existing text.':'')+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
             let prompt=replyPrompt(body.prompt,extra);
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
+            if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:inspected,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
             const raw=await sendChecked({...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:settings.temperature,top_p:settings.top_p,min_p:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty});
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);

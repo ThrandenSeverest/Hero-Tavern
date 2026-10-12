@@ -5,6 +5,9 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { createPipeline, readSettings, saveSettings, validateSettings } = require('./ReplyPipeline.cjs');
+const {createStoryStore}=require('./StoryStore.cjs');
+const {createStoryAPI}=require('./StoryAPI.cjs');
+const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
@@ -47,7 +50,7 @@ function logTail(file) {
     try { fs.readSync(fd, bytes, 0, length, size - length); } finally { fs.closeSync(fd); }
     return bytes.toString('utf8').trim();
 }
-function createBridge(root, { port = 8001, autoStart = true, backendCommand, backendPrefix = [], backendPort = 5001, pollInterval = 2000, readinessTimeout = 600000, imageCommand, imagePrefix = [], imagePort = 5002 } = {}) {
+function createBridge(root, { port = 8001, autoStart = true, backendCommand, backendPrefix = [], backendPort = 5001, pollInterval = 2000, readinessTimeout = 600000, imageCommand, imagePrefix = [], imagePort = 5002, tavernPath, thinkingCommand, thinkingPrefix = [], thinkingPort = 5003 } = {}) {
     const models = path.join(root, 'Models');
     const logs = path.join(root, 'Logs');
     fs.mkdirSync(models, { recursive: true });
@@ -58,8 +61,11 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
     let generationState = 'idle', contextDiagnostics = null;
+    const story=createStoryStore(root,{tavernPath});
+    const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
-    const pipeline = createPipeline({root,backendURL,enforceContext:true,setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
+    const pipeline = createPipeline({root,backendURL,enforceContext:true,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
+    const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady});
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
         if (!fs.existsSync(selection)) return '';
@@ -166,7 +172,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
             catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
-            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(), generation: readSettings(root),
+            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(), thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
@@ -181,7 +187,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
-        const assets={'/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json'};
+        const assets={'/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
@@ -189,8 +195,12 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
-            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')?32000000:2000000)) throw new Error('Request too large.'); }
+            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url==='/story/import'?128000000:2000000)) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            if(req.url.startsWith('/story/')){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});json(200,await storyAPI.action(req.url,data,controller.signal));return;}
+            if(req.url==='/thinking/configure'){json(200,await thinking.configure(data));return;}
+            if(req.url==='/thinking/start'){json(200,await thinking.start());return;}
+            if(req.url==='/thinking/stop'){thinking.stop();json(200,thinking.snapshot());return;}
             if(req.url.startsWith('/images/')){json(200,await images.action(req.url,data));return;}
             if(req.url==='/memory/get'){json(200,readMemory(root,data.id));return;}
             if(req.url==='/memory/save'){json(200,editMemory(root,data.id,data));return;}
@@ -264,7 +274,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { clearInterval(timer); pipeline.abort(); images.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { clearInterval(timer); pipeline.abort(); images.close(); thinking.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
     server.listen(port, '127.0.0.1');
     return server;
 }

@@ -36,7 +36,7 @@ The launcher starts SillyTavern and the local model service, then opens your bro
 Open **Generation** in the left navigation. Presets and editable controls cover creativity/temperature, Top P, Min P, repetition penalty, reply length, planning budget, writing instructions and dialogue-only versus narration style.
 
 - **Thinking disabled** is the default and requests a non-thinking Qwen reply.
-- **Separate private planning** makes an additional generation call to the same loaded engine, then generates the final reply using its private continuity outline. It does not load a second copy of the model.
+- **Separate private planning** runs a planning pass, then generates the displayed reply from its private continuity outline. Choose **Use reply model** for sequential passes, or **Use separate loaded model** for an independently selected GGUF on port 5003. Save and load that planning model in Generation; CPU is its default to preserve GPU memory. Both models must fit available RAM / VRAM. Private planning is never stored as dialogue.
 - Recognized thinking/analysis blocks are always stripped. Streaming engine output is buffered and cleaned before any text is sent to the chat, preventing partial thinking tags from flashing on screen.
 - Optional filters remove model control tokens, stop accidental user/system turns, remove exact duplicated paragraphs and apply user-defined literal stop markers.
 - Out-of-character writer announcements can trigger one corrective retry. This can be disabled; ordinary narration and character refusals are not treated as writer announcements.
@@ -90,7 +90,7 @@ The practical general-purpose recommendation is [DreamShaper 8](https://huggingf
 
 Generate portraits or scenes, adjust prompt, negative prompt, dimensions, steps, guidance, sampler and seed, then download the image or add it to the selected chat. Ilreon NPC portraits use the same selected image model.
 
-**Character studio** drafts a card from an idea, lets you review/edit its JSON, and imports it into SillyTavern or exports it as JSON. Existing character editing stays available in Characters.
+**Character studio** offers simple character fields and advanced JSON, AI drafts, isolated test replies and reviewed episode openings with starting state and persona constraints. Save edits to a selected native card, or export/import compatible V2 JSON. Portrait editing remains in native Characters.
 
 ## Development
 
@@ -101,7 +101,7 @@ Our launcher and integration code are MIT licensed. Upstream components retain t
 Local profile test:
 
 ```sh
-node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs tests/context.test.cjs tests/images.test.cjs tests/adventure.test.cjs
+node --test tests/configure.test.cjs tests/bridge.test.cjs tests/reply.test.cjs tests/context.test.cjs tests/images.test.cjs tests/adventure.test.cjs tests/story.test.cjs tests/thinking.test.cjs
 ```
 
 Windows model validation test:
@@ -111,3 +111,13 @@ Windows model validation test:
 ```
 
 See [ROADMAP.md](ROADMAP.md) for the next development steps.
+
+## Sessions, trackers and lore (P0 / P1)
+
+**Save & New Chat** preserves the original and offers Fresh Start, Continue in New Session with reviewed tracker/memory carryover, Duplicate and bookmarked branch starts. **History** searches native messages, opens, renames, archives and exports Markdown or portable family archives. Stable session/message IDs link branches. Message **Story actions** add bookmarks, branch, show state at that point or preview rollback. Restoring a session creates a recovery copy; Undo opens that preserved future. Archive import remaps IDs and copies available character cards/chat images without replacing originals.
+
+**Trackers** has optional preset switches for injuries, appearance, relationships, inventory, secrets, time and quests. Add custom number, boolean, enum, text, list, relationship, timer or quest trackers using forms. Edit live values or review proposed changes; the AI helper drafts definitions for review. Automatic updates require source evidence and correct types/owners; major or ambiguous changes require approval. Invalid model JSON leaves dialogue and confirmed state untouched. Edits, deletion and swipes invalidate downstream changes; branches replay only their own evidence. Story-time timers change only from established/approved narrative time, not browser elapsed time. Confirmed relevant state is inserted after memory; prompt inspection shows token budgets and activation reasons with private planning/hidden content masked.
+
+**Lorebooks** supports entry text, keyword triggers, state comparisons (including relationship/quest fields), activation preview and an AI draft helper. Save/load reusable native World Info books. Hero-managed entries are disabled for native injection and activated through the story pipeline, so conditional secrets cannot also be injected unconditionally. Editing story lore changes that session; save the character template to reuse it in future openings. Ilreon continues to use its independent mechanics and saves.
+
+Native JSONL and existing settings remain in SillyTavern. Versioned derived story data and recovery journals live under `Story`; generation filters, private model selection and memory have separate settings. New installations pin the tested SillyTavern commit; setup preserves existing installations. This version supports the local default-user profile. Multi-user server profiles and P2 multiplayer/immersion/branch merging are outside this scope.

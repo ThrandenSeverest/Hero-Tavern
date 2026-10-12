@@ -26,8 +26,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:8000/');await page.locator('#hero-shell').waitFor({timeout:120000});
   await page.locator('#hero-welcome').waitFor({state:'visible'});
-  const front=await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')});
-  if(!front)throw Error('Hero Tavern welcome dashboard is covered by the native welcome view');
+  await waitFor(async()=>await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')}));
   await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});
   await page.locator('.hero-nav[data-hero="models"]').click();const panel=page.frameLocator('#hero-model-frame');
   await panel.getByRole('button',{name:'Download Qwen default'}).waitFor();

@@ -4,7 +4,7 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { createPipeline, readSettings, saveSettings } = require('./ReplyPipeline.cjs');
+const { createPipeline, readSettings, saveSettings, validateSettings } = require('./ReplyPipeline.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
@@ -211,7 +211,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
             else if (req.url === '/stop') { lastAttempt = selected(); stopBackend(); }
             else if (req.url === '/generation') { saveSettings(root,data); }
-            else if (req.url === '/filter-preview') { json(200,{text:filterReply(data.text||'',readSettings(root))}); return; }
+            else if (req.url === '/filter-preview') { json(200,{text:filterReply(data.text||'',data.settings?validateSettings(data.settings):readSettings(root))}); return; }
             else if (req.url === '/hardware') {
                 if (backend || starting) throw new Error('Stop AI before changing hardware settings.');
                 const current = fs.existsSync(path.join(root, 'backend.json')) ? fs.readFileSync(path.join(root, 'backend.json')) : null;

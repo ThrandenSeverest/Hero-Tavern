@@ -201,21 +201,16 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       if(imageJob)throw Error('Another image job is active.');
       if(queuedInference)throw Error('A chat reply is starting. Generate the image after the reply finishes.');
       if(pipeline.runSnapshot()?.finished===undefined&&generationState!=='idle')throw Error('Finish or cancel text generation before generating an image.');
-      let actualEngine='koboldcpp';
+      let actualEngine='koboldcpp',mustStartComfy=false;
       const requiresComfy=(!!input.modelPack&&input.modelPack!=='sdxl')||!!input.workflowId||!!input.sourceName||!!input.lora?.length||(input.batch_size||1)>1||input.operation==='upscale'||input.operation==='img2img'||input.operation==='inpaint'||input.operation==='outpaint';
       if(engine==='koboldcpp'&&requiresComfy)throw Error('This operation needs ComfyUI. Set the image engine to Auto or ComfyUI; KoboldCpp remains text-to-image only.');
       if(engine!=='koboldcpp'||requiresComfy){
-        let ok=await comfy.available();
-        // When the user has installed the managed Portable runtime, start it on demand.
-        // Do not start external programs or download missing dependencies automatically.
+        const running=await comfy.available();
         const wantsComfy=engine==='comfyui'||requiresComfy||!!comfyCheckpoint;
-        if(!ok&&wantsComfy&&comfyRuntime.installed()&&process.platform==='win32'){
-          await comfyRuntime.start();
-          const deadline=Date.now()+120000;
-          while(Date.now()<deadline&&!ok){await new Promise(r=>setTimeout(r,2000));ok=await comfy.available();}
-        }
-        if(ok&&(comfyCheckpoint||input.workflowId||input.operation==='upscale'||(input.modelPack&&input.modelPack!=='sdxl')))actualEngine='comfyui';
-        else if(engine==='comfyui'||requiresComfy)throw Error(ok?'Choose an installed ComfyUI checkpoint in Image Studio.':'ComfyUI is not reachable at http://127.0.0.1:8188. Start it or choose a basic KoboldCpp text-to-image job.');
+        mustStartComfy=!running&&wantsComfy&&!!comfyRuntime.installed()&&process.platform==='win32';
+        const canUse=running||mustStartComfy;
+        if(canUse&&(comfyCheckpoint||input.workflowId||input.operation==='upscale'||(input.modelPack&&input.modelPack!=='sdxl')))actualEngine='comfyui';
+        else if(engine==='comfyui'||requiresComfy)throw Error(canUse?'Choose a configured checkpoint or model pack in Image Studio.':'ComfyUI is unavailable. Install ComfyUI Portable in Image Studio or start your external service at 127.0.0.1:8188.');
       }
       if(requiresComfy&&actualEngine!=='comfyui')throw Error('LoRA, batches, upscaling and image editing require ComfyUI.');
       imageJob=true;
@@ -230,6 +225,19 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         }
         if(actualEngine==='comfyui'){
           if(releaseGPU&&images.snapshot().running){await images.action('/images/stop',{});await waitUntil(()=>!images.snapshot().running,signal,30000);}
+          // Start the CUDA runtime only after text/planning/image workers release GPU.
+          if(mustStartComfy){
+            onReady?.('comfyui-starting');
+            await comfyRuntime.start();
+            const deadline=Date.now()+120000;
+            let connected=false;
+            while(Date.now()<deadline){
+              if(signal?.aborted)throw Error('Image generation cancelled while starting ComfyUI.');
+              if(await comfy.available()){connected=true;break;}
+              await new Promise(resolve=>setTimeout(resolve,1800));
+            }
+            if(!connected)throw Error('Managed ComfyUI failed to become ready. Inspect Logs/comfy-engine.log and CUDA driver compatibility.');
+          }
           onReady?.('comfyui-generating');
           return await comfy.generate(input,{checkpoint:comfyCheckpoint,sourceName:input.sourceName,maskData:input.maskData,signal});
         }

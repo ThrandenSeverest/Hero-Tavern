@@ -47,6 +47,30 @@ test('Deep Think is two inference passes, chat history persists between reloads'
   assert.equal(createAssistantWorkspace(root).sessions().chat.messages.length,2);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+test('Selected text document is included only in local Qwen prompt, not outbound search query',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-assistant-document-'));
+ let requestedURL='';
+ try{
+  const {agent,requests}=build(root,{replies:['The document mentions a blue banner.'],webFetch:async url=>{
+   requestedURL=url;return Response.json({web:{results:[]}});
+  }});
+  const file=agent.importFile({name:'notes.md',text:'A blue banner flies above the gate.'}).file;
+  const r=await agent.action('/assistant/message',{prompt:'What colour is the banner?',fileId:file.id,web:true,apiKey:'search-key-12345678'});
+  assert.match(requests[0].prompt,/blue banner flies/);
+  assert.equal(r.answer,'The document mentions a blue banner.');
+  assert.ok(!requestedURL.includes('blue+banner'));
+  assert.ok(!JSON.stringify(r.chat.messages).includes('flies above the gate'));
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+test('JSON edits are validated before a draft can be applied',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-assistant-json-'));
+ try{
+  const {agent}=build(root,{replies:['<<<REVISED FILE>>>\n{broken json}\n<<<END REVISED>>>']});
+  const file=agent.importFile({name:'config.json',text:'{"enabled":true}'}).file;
+  await assert.rejects(()=>agent.action('/assistant/file-edit',{fileId:file.id,prompt:'Fix naming',mode:'fast'}),/invalid syntax/i);
+  assert.equal(agent.getFile(file.id).text,'{"enabled":true}');
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
 test('Search requires explicit key and never sends workspace file content; sources link to HTTPS only',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-assistant-search-'));let seen;
  try{

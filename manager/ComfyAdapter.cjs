@@ -172,9 +172,10 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
      try{const q=await queueStatus();if(q.ownQueued)job.phase='queued';else if(!Number.isFinite(job.progress))job.phase='generating';}catch{}
     }
     await new Promise((resolve,reject)=>{
-     const t=setTimeout(resolve,700),aborted=()=>{clearTimeout(t);reject(Error('ComfyUI job cancelled.'))};
+     let t;
+     const aborted=()=>{clearTimeout(t);job.controller.signal.removeEventListener('abort',aborted);reject(Error('ComfyUI job cancelled.'))};
+     t=setTimeout(()=>{job.controller.signal.removeEventListener('abort',aborted);resolve()},700);
      job.controller.signal.addEventListener('abort',aborted,{once:true});
-     t.unref?.();
     });
    }
    if(!Array.isArray(outputs)||!outputs.length)throw Error('ComfyUI job timed out.');

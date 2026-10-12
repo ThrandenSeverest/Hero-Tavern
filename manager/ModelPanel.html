@@ -21,7 +21,28 @@
 <details class="card"><summary>Try your filters without generating a reply</summary><label for="filter-sample">Sample model output</label><textarea id="filter-sample" maxlength="6000" placeholder="Paste sample output, including any think tags."></textarea><button id="preview-filters">Preview cleaned reply</button><pre id="filter-result"></pre></details></div></section>
 
 <section id="memory" hidden><h2>Chat continuity</h2><p>Recent turns stay verbatim. Older turns become compact factual memory when context fills up. Editing, swiping or rolling back past messages invalidates the affected summary. Memory belongs to the selected chat.</p><div class="form"><p id="memory-chat">Select a character and chat first.</p><label for="memory-notes">Your pinned facts (editable)</label><textarea id="memory-notes" maxlength="6000" placeholder="Relationships, names, goals and facts that must stay consistent."></textarea><div class="actions"><button id="save-memory" class="primary">Save pinned facts</button><button id="reset-memory">Rebuild automatic memory</button><button id="refresh-memory">Refresh memory</button></div><label>Automatic memory</label><pre id="memory-summary"></pre><label>Last request context</label><pre id="context-info">Generate a reply to inspect its context.</pre><p>Hardware context is the total space for the character, history, instructions and reply. Longer replies leave less space for history. Increasing context can use more RAM / VRAM.</p></div></section>
-<section id="images" hidden><h2>Image Studio</h2><p>Generate artwork independently of chat. Your results remain in a persistent gallery.</p><div class="card"><h2>Workflow</h2><p>Use SDXL for the natural-art presets. Prompt refinement uses the text model first; memory saving unloads text/planning workers before image generation and restores them afterwards.</p><label>Style preset</label><select id="studio-preset"></select><label class="check"><input id="studio-refine" type="checkbox">Refine the prompt with AI before generation</label><label class="check"><input id="studio-release" type="checkbox" checked>Release GPU text models during image generation</label><button id="studio-save">Save image workflow</button><button id="studio-preview">Preview refined prompt</button><pre id="studio-refined"></pre><details><summary>Create a reusable image preset</summary><input id="studio-preset-name" placeholder="Preset name"><textarea id="studio-style" placeholder="Visual style, composition and lighting instructions"></textarea><button id="studio-preset-save">Save current image settings as preset</button><button id="studio-preset-delete">Delete selected custom preset</button></details><p id="studio-state"></p></div><div class="card" id="hero-comfy-panel"><h3>Image engine · ComfyUI / KoboldCpp</h3><p>Auto uses ComfyUI when available and a checkpoint is selected, otherwise KoboldCpp. ComfyUI runs locally on 127.0.0.1:8188 and is never stopped or deleted by Hero Tavern.</p><div class="controls"><label>Engine<select id="hero-engine"><option value="auto">Auto: ComfyUI → KoboldCpp</option><option value="comfyui">ComfyUI only</option><option value="koboldcpp">KoboldCpp only</option></select></label><label>ComfyUI checkpoint<select id="hero-comfy-checkpoint"><option value="">Select installed checkpoint</option></select></label></div><div class="actions"><button id="hero-comfy-probe">Check ComfyUI connection</button><button id="hero-comfy-save">Save engine selection</button><button id="hero-comfy-free">Unload ComfyUI models from RAM/VRAM</button><button id="hero-comfy-cancel">Cancel ComfyUI job</button></div><p id="hero-comfy-state">Engine status not checked.</p><details><summary>Edit an existing image: local inpainting</summary><p>Choose a generated PNG from the gallery, paint the area to change in red, and describe ONLY the replacement. Black parts of the mask are preserved exactly in the saved image; edits never overwrite the original.</p><label>Gallery image<select id="hero-inpaint-image"></select></label><div class="actions"><button id="hero-mask-load">Load image</button><button id="hero-mask-clear">Clear selection</button><button id="hero-mask-undo">Undo stroke</button><button id="hero-mask-eraser" aria-pressed="false">Erase mask</button><label>Brush size<input id="hero-mask-size" type="range" min="8" max="180" value="48"></label></div><div style="position:relative;max-width:700px;width:100%;touch-action:none;line-height:0" id="hero-mask-editor"><canvas id="hero-mask-preview" style="display:block;width:100%;border:1px solid #738298;border-radius:10px;touch-action:none"></canvas></div><label>Describe what should change in the selected region<textarea id="hero-inpaint-prompt" placeholder="Replace the sword with a silver rapier; keep character, pose and lighting unchanged."></textarea></label><label>Denoise strength<input id="hero-inpaint-denoise" type="range" min="0.1" max="1" step="0.05" value="0.75"></label><button id="hero-inpaint-run" class="primary">Edit only selected area</button><p id="hero-inpaint-status"></p></details></div><div class="card" id="hero-comfy-workflow-library">
+<section id="images" hidden><h2>Image Studio</h2><p>Generate artwork independently of chat. Your results remain in a persistent gallery.</p><div class="card"><h2>Workflow</h2><p>Use SDXL for the natural-art presets. Prompt refinement uses the text model first; memory saving unloads text/planning workers before image generation and restores them afterwards.</p><label>Style preset</label><select id="studio-preset"></select><label class="check"><input id="studio-refine" type="checkbox">Refine the prompt with AI before generation</label><label class="check"><input id="studio-release" type="checkbox" checked>Release GPU text models during image generation</label><button id="studio-save">Save image workflow</button><button id="studio-preview">Preview refined prompt</button><pre id="studio-refined"></pre><details><summary>Create a reusable image preset</summary><input id="studio-preset-name" placeholder="Preset name"><textarea id="studio-style" placeholder="Visual style, composition and lighting instructions"></textarea><button id="studio-preset-save">Save current image settings as preset</button><button id="studio-preset-delete">Delete selected custom preset</button></details><p id="studio-state"></p></div><div class="card" id="hero-comfy-hub">
+<h2>ComfyUI · model hub</h2>
+<p>Choose the result you want, not an API workflow. Hero Tavern configures the correct multi-file model graph, reuses existing weights, and saves every image in the normal gallery.</p>
+<div class="controls">
+<label>Image model<select id="hero-pack-select"><option value="sdxl">SDXL · artwork and LoRAs</option><option value="flux-klein">FLUX.2 Klein 4B · character edits</option><option value="z-turbo">Z-Image Turbo · fast scenes</option></select></label>
+<label>ComfyUI models directory (absolute Windows path)<input id="hero-pack-root" placeholder="C:\AI\ComfyUI\models"></label>
+</div>
+<div class="actions"><button id="hero-pack-check">Check installed model packs</button><button id="hero-pack-save">Use selected image model</button><button id="hero-pack-download">Download missing model files</button><button id="hero-pack-cancel">Cancel model download</button></div>
+<p id="hero-pack-state"></p><div id="hero-pack-cards" class="grid"></div>
+<details><summary>Install or connect ComfyUI engine</summary>
+<p>The official NVIDIA Portable package includes its Python/CUDA environment. Its archive is several gigabytes; downloading requires consent, enough free disk space and the locally installed 7-Zip extractor. No software is silently installed. You can also connect a previously installed ComfyUI instance at 127.0.0.1:8188.</p>
+<div class="controls">
+<label>Runtime mode<select id="hero-runtime-mode"><option value="external">Connect external (already running)</option><option value="managed">Manage ComfyUI Portable in Hero Tavern</option></select></label>
+<label>Existing ComfyUI Portable folder (if applicable)<input id="hero-runtime-folder" placeholder="C:\AI\ComfyUI_windows_portable"></label>
+<label class="check"><input id="hero-runtime-lowvram" type="checkbox" checked>Low VRAM (recommended for 12 GB GPU)</label>
+</div>
+<div class="actions"><button id="hero-runtime-save">Save runtime location</button><button id="hero-runtime-install">Install official ComfyUI Portable</button><button id="hero-runtime-start">Start managed ComfyUI</button><button id="hero-runtime-stop">Stop managed ComfyUI</button><button id="hero-runtime-cancel">Cancel installation</button></div>
+<p id="hero-runtime-state"></p>
+<p class="small"><a href="https://github.com/Comfy-Org/ComfyUI" target="_blank" rel="noopener noreferrer">Official ComfyUI repository</a> · <a href="https://7-zip.org/" target="_blank" rel="noopener noreferrer">7-Zip extractor</a></p>
+</details>
+</div>
+<div class="card" id="hero-comfy-panel"><h3>Image engine · ComfyUI / KoboldCpp</h3><p>Auto uses ComfyUI when available and a checkpoint is selected, otherwise KoboldCpp. ComfyUI runs locally on 127.0.0.1:8188 and is never stopped or deleted by Hero Tavern.</p><div class="controls"><label>Engine<select id="hero-engine"><option value="auto">Auto: ComfyUI → KoboldCpp</option><option value="comfyui">ComfyUI only</option><option value="koboldcpp">KoboldCpp only</option></select></label><label>ComfyUI checkpoint<select id="hero-comfy-checkpoint"><option value="">Select installed checkpoint</option></select></label></div><div class="actions"><button id="hero-comfy-probe">Check ComfyUI connection</button><button id="hero-comfy-save">Save engine selection</button><button id="hero-comfy-free">Unload ComfyUI models from RAM/VRAM</button><button id="hero-comfy-cancel">Cancel ComfyUI job</button></div><p id="hero-comfy-state">Engine status not checked.</p><details><summary>Edit an existing image: local inpainting</summary><p>Choose a generated PNG from the gallery, paint the area to change in red, and describe ONLY the replacement. Black parts of the mask are preserved exactly in the saved image; edits never overwrite the original.</p><label>Gallery image<select id="hero-inpaint-image"></select></label><div class="actions"><button id="hero-mask-load">Load image</button><button id="hero-mask-clear">Clear selection</button><button id="hero-mask-undo">Undo stroke</button><button id="hero-mask-eraser" aria-pressed="false">Erase mask</button><label>Brush size<input id="hero-mask-size" type="range" min="8" max="180" value="48"></label></div><div style="position:relative;max-width:700px;width:100%;touch-action:none;line-height:0" id="hero-mask-editor"><canvas id="hero-mask-preview" style="display:block;width:100%;border:1px solid #738298;border-radius:10px;touch-action:none"></canvas></div><label>Describe what should change in the selected region<textarea id="hero-inpaint-prompt" placeholder="Replace the sword with a silver rapier; keep character, pose and lighting unchanged."></textarea></label><label>Denoise strength<input id="hero-inpaint-denoise" type="range" min="0.1" max="1" step="0.05" value="0.75"></label><button id="hero-inpaint-run" class="primary">Edit only selected area</button><p id="hero-inpaint-status"></p></details></div><div class="card" id="hero-comfy-workflow-library">
 <h3>Modern ComfyUI workflows · FLUX / Z-Image / Qwen</h3><p class="small">For RTX 5070 12 GB, try a compatible SDXL checkpoint first. For newer model architectures, consider <a href="https://docs.comfy.org/tutorials/flux/flux-2-klein" target="_blank" rel="noopener noreferrer">FLUX.2 Klein 4B official guide</a> (fast generation and reference editing) and <a href="https://huggingface.co/Comfy-Org/z_image_turbo" target="_blank" rel="noopener noreferrer">Z-Image Turbo official model package</a> (fast detailed generations). Both use multi-component workflows. Import a compatible ComfyUI API JSON; do not rename diffusion weights as an SDXL checkpoint. Downloads are not automatic.</p>
 <p>For non-SDXL model families, import an official ComfyUI API workflow JSON. These models often need separate diffusion weights, text encoders and VAE; a single checkpoint menu cannot run them correctly.</p>
 <div class="controls"><label>Execution mode<select id="hero-api-workflow"><option value="">Built-in checkpoint workflow (SDXL / SD1.5)</option></select></label>
@@ -214,8 +235,8 @@ function heroSelectedLoras(){
  }
  return out;
 }
-el('image-generate').onclick=async()=>{el('image-generate').disabled=true;try{await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,releaseGPU:el('studio-release').checked,refine:el('studio-refine').checked});const value=await request('/studio/generate',{prompt:el('image-prompt').value,negative_prompt:el('image-negative').value,width:Number(el('image-width').value),height:Number(el('image-height').value),steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,preset:el('studio-preset').value,refine:el('studio-refine').checked,
- operation:el('hero-comfy-mode').value,batch_size:Number(el('hero-comfy-batch').value),lora:heroSelectedLoras(),workflowId:el('hero-api-workflow').value||undefined,
+el('image-generate').onclick=async()=>{el('image-generate').disabled=true;try{await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,modelPack:el('hero-pack-select').value,releaseGPU:el('studio-release').checked,refine:el('studio-refine').checked});const value=await request('/studio/generate',{prompt:el('image-prompt').value,negative_prompt:el('image-negative').value,width:Number(el('image-width').value),height:Number(el('image-height').value),steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,preset:el('studio-preset').value,refine:el('studio-refine').checked,
+ operation:el('hero-comfy-mode').value,batch_size:Number(el('hero-comfy-batch').value),lora:heroSelectedLoras(),modelPack:el('hero-pack-select').value,workflowId:el('hero-api-workflow').value||undefined,
  ...(el('hero-comfy-mode').value==='img2img'?{sourceName:el('hero-comfy-reference').value,denoise:Number(el('hero-comfy-denoise').value)}:{}),
  ...(el('scene-enabled').checked?{scene:sceneData()}:{})});lastImage=value.url;
  const variants=el('hero-batch-results');variants.replaceChildren();
@@ -325,6 +346,102 @@ refresh();setInterval(refresh,1800);
 
 /* ComfyUI is an optional loopback provider; masks are drawn in intrinsic image pixels. */
 let heroComfyInitialized=false,heroPainting=false,heroMaskDirty=false,heroCurrentSource='';
+
+/* First-class model family selection and managed ComfyUI Portable workflow. */
+let heroHubReady=false,heroHubDetails=null,heroHubInstalling=false,heroHubDownloading=false;
+function heroHubCard(pack){
+ const box=document.createElement('article');box.className='card';box.style.minWidth='220px';
+ const head=document.createElement('strong');head.textContent=pack.name;
+ const summary=document.createElement('p');summary.className='small';summary.textContent=pack.description+' · '+pack.vram;
+ const status=document.createElement('p');status.textContent=pack.installed?'Ready to use':'Missing: '+(pack.missing||[]).join(', ');
+ status.style.color=pack.installed?'#80d9ae':'#eabf7e';
+ const link=document.createElement('a');link.href=pack.docs;link.target='_blank';link.rel='noopener';link.textContent='Official model docs / license';
+ box.append(head,summary,status,link);return box;
+}
+async function heroHubRefresh(){
+ const status=el('hero-pack-state'),runtimeStatus=el('hero-runtime-state');
+ try{
+  const [hub,engine]=await Promise.all([request('/comfy/models'),request('/comfy/status')]);
+  heroHubDetails={hub,engine};
+  const cfg=hub.hub?.settings||{};
+  if(!heroHubReady){
+   const studio=await request('/studio/get');
+   el('hero-pack-select').value=studio.settings.modelPack||cfg.selected||'sdxl';
+   el('hero-pack-root').value=cfg.modelRoot||engine.runtime?.detected?.models||'';
+   el('hero-runtime-mode').value=engine.runtime?.mode||'external';
+   el('hero-runtime-folder').value=engine.runtime?.folder||'';
+   el('hero-runtime-lowvram').checked=engine.runtime?.lowVram!==false;
+   heroHubReady=true;
+  }
+  const packs=engine.packs||hub.packs||[];
+  el('hero-pack-cards').replaceChildren(...packs.map(heroHubCard));
+  const active=packs.find(p=>p.id===el('hero-pack-select').value);
+  const running=engine.modelHub?.download||hub.hub?.download||null;
+  el('hero-pack-download').disabled=!active||active.installed||active.id==='sdxl'||!!running;
+  el('hero-pack-cancel').disabled=!running;
+  status.textContent=running?'Downloading '+running.file+' · '+(running.bytes/1073741824).toFixed(2)+' GiB / '+(running.total/1073741824).toFixed(2)+' GiB · '+running.phase:
+   active?(active.installed?'Installed and ready: ':'Missing dependencies for: ')+active.name+(active.missing?.length?' · '+active.missing.join(', '):''):'Select an image model.';
+  runtimeStatus.textContent=engine.available?'ComfyUI connected on 127.0.0.1:8188':(engine.runtime?.running?'ComfyUI is loading…':'ComfyUI is not connected.');
+  if(engine.runtime?.install)runtimeStatus.textContent+=' · setup: '+engine.runtime.install.phase;
+  return engine;
+ }catch(e){status.textContent='Model Hub: '+e.message;return null}
+}
+el('hero-pack-check').onclick=heroHubRefresh;
+el('hero-pack-select').onchange=async()=>{
+ const pack=heroHubDetails?.engine?.packs?.find(p=>p.id===el('hero-pack-select').value);
+ if(pack){
+  el('image-width').value=pack.width;el('image-height').value=pack.height;
+  el('image-steps').value=pack.steps;el('image-cfg').value=pack.cfg;
+  if(pack.id!=='sdxl'){
+   el('hero-engine').value='comfyui';el('studio-preset').value='raw';
+   el('hero-comfy-mode').value='txt2img';el('hero-comfy-mode').dispatchEvent(new Event('change'));
+   el('hero-comfy-batch').value='1';
+  }
+ }
+ await heroHubRefresh();
+};
+el('hero-pack-save').onclick=async()=>{
+ try{
+  await request('/studio/configure',{modelPack:el('hero-pack-select').value,engine:el('hero-engine').value,preset:el('studio-preset').value,comfyCheckpoint:el('hero-comfy-checkpoint').value});
+  await request('/comfy/models/select',{id:el('hero-pack-select').value});
+  el('hero-pack-state').textContent='Selected '+el('hero-pack-select').selectedOptions[0].text+'. Hero Tavern chooses the workflow automatically.';
+ }catch(e){el('hero-pack-state').textContent=e.message}
+};
+el('hero-pack-download').onclick=async()=>{
+ const id=el('hero-pack-select').value;
+ if(!confirm('Download ALL missing '+id+' model components into the configured ComfyUI models folder? This can be more than 10 GB and will consume disk space. Source: official Hugging Face model repositories.'))return;
+ heroHubDownloading=true;el('hero-pack-download').disabled=true;
+ try{
+  if(el('hero-pack-root').value)await request('/comfy/models/configure',{modelRoot:el('hero-pack-root').value});
+  const outcome=await request('/comfy/models/download',{id,confirm:true});
+  el('hero-pack-state').textContent='Completed model installation for '+outcome.packId+'.';
+  await heroHubRefresh();
+ }catch(e){el('hero-pack-state').textContent=e.message}finally{heroHubDownloading=false;el('hero-pack-download').disabled=false}
+};
+el('hero-pack-cancel').onclick=async()=>{try{await request('/comfy/models/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
+el('hero-runtime-save').onclick=async()=>{
+ try{
+  const value=await request('/comfy/runtime/configure',{mode:el('hero-runtime-mode').value,folder:el('hero-runtime-folder').value||undefined,lowVram:el('hero-runtime-lowvram').checked});
+  if(value.detected?.models&&!el('hero-pack-root').value)el('hero-pack-root').value=value.detected.models;
+  if(value.detected?.models)await request('/comfy/models/configure',{modelRoot:value.detected.models});
+  el('hero-runtime-state').textContent='Runtime saved. You can now start ComfyUI or attach to the existing service.';
+ }catch(e){el('hero-runtime-state').textContent=e.message}
+};
+el('hero-runtime-start').onclick=async()=>{try{const x=await request('/comfy/runtime/start',{});el('hero-runtime-state').textContent=x.alreadyRunning?'Connected to an already running ComfyUI.':'ComfyUI starting…';setTimeout(heroHubRefresh,3000)}catch(e){el('hero-runtime-state').textContent=e.message}};
+el('hero-runtime-stop').onclick=async()=>{if(!confirm('Stop the ComfyUI process started by Hero Tavern? Running jobs will be cancelled.'))return;try{const x=await request('/comfy/runtime/stop',{});el('hero-runtime-state').textContent=x.stopped?'Managed ComfyUI stopped.':x.reason}catch(e){el('hero-runtime-state').textContent=e.message}};
+el('hero-runtime-install').onclick=async()=>{
+ if(!confirm('Download and install official NVIDIA ComfyUI Portable? Requires 7-Zip, ~15+ GiB free, and may take several GB of network traffic. Existing installations and model files are preserved.'))return;
+ heroHubInstalling=true;el('hero-runtime-install').disabled=true;
+ try{
+  const x=await request('/comfy/runtime/install',{confirm:true});
+  if(x.detected?.models){el('hero-pack-root').value=x.detected.models;await request('/comfy/models/configure',{modelRoot:x.detected.models});}
+  el('hero-runtime-state').textContent='ComfyUI Portable installed. Select Start managed ComfyUI.';
+  await heroHubRefresh();
+ }catch(e){el('hero-runtime-state').textContent=e.message}finally{heroHubInstalling=false;el('hero-runtime-install').disabled=false}
+};
+el('hero-runtime-cancel').onclick=async()=>{try{await request('/comfy/runtime/install-cancel',{});el('hero-runtime-state').textContent='Installation cancellation requested.'}catch(e){el('hero-runtime-state').textContent=e.message}};
+setInterval(()=>{if(!el('images').hidden&&heroHubReady)heroHubRefresh()},6000);
+
 const heroMaskCanvas=el('hero-mask-preview'),heroMaskCtx=heroMaskCanvas.getContext('2d',{willReadFrequently:false});
 const heroMaskPixels=document.createElement('canvas'),heroMaskPixelCtx=heroMaskPixels.getContext('2d');
 let heroSourceBitmap=null;let heroMaskHistory=[],heroErase=false;
@@ -424,7 +541,7 @@ async function heroAPIRefresh(){
 }
 async function heroInitializeComfy(){
  if(heroComfyInitialized)return;heroComfyInitialized=true;
- try{const result=await request('/studio/get');el('hero-engine').value=result.settings.engine||'auto';await heroComfyProbe();await heroRefreshSources();await heroAPIRefresh()}catch(e){el('hero-comfy-state').textContent=e.message}
+ try{const result=await request('/studio/get');el('hero-engine').value=result.settings.engine||'auto';await heroComfyProbe();await heroRefreshSources();await heroAPIRefresh();await heroHubRefresh()}catch(e){el('hero-comfy-state').textContent=e.message}
 }
 document.querySelector('[data-tab="images"]')?.addEventListener('click',heroInitializeComfy);
 

@@ -141,7 +141,8 @@ function createLoRAManager(root,{modelRoot=()=>'',fetchFn=globalThis.fetch}={}){
  async function getVersion(versionId,token=''){
   if(!Number.isInteger(versionId)||versionId<1)throw Error('Invalid Civitai version ID.');
   const v=await jsonFetch('https://civitai.com/api/v1/model-versions/'+versionId,token);
-  if(v.model?.type!=='LORA')throw Error('This Civitai resource is not a LoRA. Workflow ZIPs are managed separately.');
+  if(v.model?.type&&v.model.type!=='LORA')throw Error('This Civitai resource is not a LoRA. Workflow ZIPs are managed separately.');
+  if(!v.model?.type&&v.modelId){const model=await jsonFetch('https://civitai.com/api/v1/models/'+v.modelId,token);if(model.type!=='LORA')throw Error('This Civitai resource is not a LoRA. Workflow ZIPs are managed separately.');}
   const f=v.files?.find(f=>f.primary&&/\.safetensors$/i.test(f.name))||v.files?.find(f=>/\.safetensors$/i.test(f.name));
   if(!f)throw Error('No public safetensors file available for this version.');
   if(['Danger','Error'].includes(f.virusScanResult)||['Danger','Error'].includes(f.pickleScanResult))throw Error('Civitai flagged this file as unsafe.');

@@ -13,7 +13,7 @@ function action(label,click){const b=element('button',label);b.type='button';b.o
 let last=null,polling=false,pollTimer=null,visible=false,loading=false;
 const errorEl=()=> $('image-model-center-error');
 const alertError=e=>{const out=errorEl();if(out)out.textContent=e.message||String(e);const quick=$('image-create-feedback');if(quick)quick.textContent=e.message||String(e)};
-const choiceLabel=id=>({'flux-klein':'FLUX.2 Klein 4B','z-turbo':'Z-Image Turbo',sdxl:'SDXL',koboldcpp:'KoboldCpp classic',custom:'Custom ComfyUI workflow'}[id]||id);
+const choiceLabel=id=>id.startsWith('qwen21-')?'Qwen-Image-2.1 '+id.slice(7).toUpperCase():({'flux-klein':'FLUX.2 Klein 4B','z-turbo':'Z-Image Turbo',sdxl:'SDXL',koboldcpp:'KoboldCpp classic',custom:'Custom ComfyUI workflow'}[id]||id);
 function applyVisualSelection(id){
  if(!$('image-create-model'))return;
  $('image-create-model').value=id;
@@ -44,7 +44,7 @@ function modelCard(model){
   card.append(box);
  }
  const operations=element('div',null,'actions');
- if(['flux-klein','z-turbo','sdxl'].includes(model.id)){
+ if(['flux-klein','z-turbo','sdxl'].includes(model.id)||model.id.startsWith('qwen21-')){
   operations.append(action('Check workflow / dependencies',async()=>{
    const report=await req('/image/model-center/diagnose',{id:model.id});
    const message=report.ok?'✓ '+report.advice:
@@ -53,7 +53,7 @@ function modelCard(model){
    alertError(Error(message));
   }));
  }
- if(['sdxl','flux-klein','z-turbo'].includes(model.id)&&!model.installed&&!model.downloaded){
+ if(['sdxl','flux-klein','z-turbo'].includes(model.id)||model.id.startsWith('qwen21-')&&!model.installed&&!model.downloaded){
   operations.append(action('Download '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB models)':''),async()=>{
    await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);
   }));
@@ -133,7 +133,7 @@ function makeUI(){
  for(const [id,label] of [['global','Default model (Image Studio / native image API)'],['chat','Tavern chat image model'],['adventure','Adventure image model']]){
   const field=element('label',label),select=element('select');select.id='image-center-'+id;
   if(id!=='global')select.append(new Option('Use default model','inherit'));
-  for(const key of ['flux-klein','z-turbo','sdxl','koboldcpp','custom'])select.append(new Option(choiceLabel(key),key));
+  for(const key of [...(last?.models||[]).filter(m=>m.id.startsWith('qwen21-')).map(m=>m.id),'flux-klein','z-turbo','sdxl','koboldcpp','custom'])select.append(new Option(choiceLabel(key),key));
   select.onchange=async()=>{
    const value=select.value;
    try{await req('/image/model-center/select',id!=='global'&&value==='inherit'?{scope:id,inherit:true}:{scope:id,id:value});

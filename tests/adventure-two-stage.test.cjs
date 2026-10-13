@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const html=fs.readFileSync(require('node:path').join(__dirname,'../manager/Adventure.html'),'utf8');
+const html=fs.readFileSync(require('node:path').join(__dirname,'../manager/Adventure.html'),'utf8').replace(/\r\n/g,'\n');
 const runtime=html.slice(html.indexOf('// Adventure: private rules decision'),html.indexOf('boot().then(()=>',html.indexOf('// Adventure: private rules decision')));
 const lore=JSON.parse(html.match(/const HERO_ILREON_LORE=(.*);\n\/\/ Adventure:/)[1]);
 function setup(){

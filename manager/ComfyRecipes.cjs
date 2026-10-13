@@ -1,7 +1,7 @@
 'use strict';
 // Model-specific ComfyUI graphs. End users choose "FLUX" or "Z-Image"; no JSON or nodes.
 const crypto=require('node:crypto'),{buildWorkflow}=require('./ComfyWorkflows.cjs');
-function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}){
+function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFiles={}}={}){
  if(pack.family==='qwen21'){
   const mode=params.operation||'txt2img';
   if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
@@ -53,8 +53,9 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}
  if(pack.family==='flux2'&&source){
   const input=n('LoadImage',{image:source});
   const encoded=n('VAEEncode',{pixels:input,vae});
-  positiveCondition=n('ReferenceLatent',{conditioning:positive,latent:encoded});
+  positiveCondition=n('ReferenceLatent',{conditioning:positiveCondition,latent:encoded});
  }
+ if(pack.family==='flux2'&&reference){const ref=n('LoadImage',{image:reference});const refLatent=n('VAEEncode',{pixels:ref,vae});positiveCondition=n('ReferenceLatent',{conditioning:positiveCondition,latent:refLatent});}
  const negative=n('ConditioningZeroOut',{conditioning:positiveCondition});
  let sampled;
  if(pack.family==='zimage'){

@@ -17,7 +17,7 @@ function fixture(){
   return {settings:{engine,modelPack:activeModel,comfyCheckpoint:checkpoint}};
  }};
  const comfy={
-  catalog:async()=>({available:connected,packs,checkpoints:connected?['sd_xl_base_1.0.safetensors']:[],devices:[],error:connected?'':'Connection refused'}),
+  catalog:async()=>({available:connected,packs:packs.map(p=>({...p,installed:connected&&p.id!=='z-turbo'})),checkpoints:connected?['sd_xl_base_1.0.safetensors']:[],devices:[],error:connected?'':'Connection refused'}),
   models:{
    snapshot:()=>({settings:{modelRoot:configured,selected},download:null}),
    installed:()=>true,

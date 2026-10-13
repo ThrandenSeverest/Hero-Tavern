@@ -65,9 +65,9 @@ function isWriterNonProse(input){
  const text=String(input||'').trim();if(!text)return 'empty output';
  if(isMetaReply(text))return 'assistant commentary';
  if(/^(?:I understand(?: that)?|I (?:will|need to|should|can) (?:continue|write|describe|start)|Let me (?:start|begin|describe)|Sure[,!.]|Of course[,!.]|Here (?:is|are)|Based on (?:the|your) (?:instructions|prompt)|To continue (?:this|the) (?:story|scenario))/i.test(text))return 'assistant preface';
- if(/^(?:\\*\\*|#{1,4}\\s*)?(?:character (?:profile|description|sheet)|physical appearance|appearance|personality|background|overview|summary|scenario|outline)\\s*[:\\n]/i.test(text))return 'character dossier';
- if(/^\\*\\*[^\\n]{1,80}\\*\\*\\s*\\n\\s*(?:physical appearance|appearance|personality|age|height|background)\\s*:/i.test(text))return 'formatted profile';
- if(/^(?:[A-Z][a-z]+(?: [A-Z][a-z]+)?):\\s*(?:Tall|Short|A |An |She |He |They )/i.test(text)&&/\\n(?:Physical Appearance|Personality|Background|Age|Height):/i.test(text))return 'profile fields';
+ if(/^(?:\*\*|#{1,4}\s*)?(?:character (?:profile|description|sheet)|physical appearance|appearance|personality|background|overview|summary|scenario|outline)\s*[:\n]/i.test(text))return 'character dossier';
+ if(/^\*\*[^\n]{1,80}\*\*\s*\n\s*(?:physical appearance|appearance|personality|age|height|background)\s*:/i.test(text))return 'formatted profile';
+ if(/^(?:[A-Z][a-z]+(?: [A-Z][a-z]+)?):\s*(?:Tall|Short|A |An |She |He |They )/i.test(text)&&/\n(?:Physical Appearance|Personality|Background|Age|Height):/i.test(text))return 'profile fields';
  return '';
 }
 function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {

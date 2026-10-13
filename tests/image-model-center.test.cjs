@@ -81,6 +81,13 @@ test('SDXL installs through the same model downloader and picks a real checkpoin
   assert.ok(f.downloads.includes('sdxl'));
  }finally{fs.rmSync(f.root,{recursive:true,force:true})}
 });
+test('Trusted embedded iframe forwards shared image model requests and explicitly rejects unsupported routes',()=>{
+ const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'../manager/ModelPanel.html'),'utf8');
+ assert.match(html,/route\.startsWith\('\/image\/model-center\/'\)/);
+ assert.match(html,/Unsupported embedded bridge request/);
+ const bridge=require('node:fs').readFileSync(require('node:path').join(__dirname,'../manager/ModelBridge.cjs'),'utf8');
+ assert.match(bridge,/req\.url==='\/image\/model-center\/select'/);
+});
 test('Native adventure and Tavern providers pass image generation through shared scoped routing',()=>{
  const fs=require('node:fs'),path=require('node:path'),root=path.resolve(__dirname,'..');
  const adapter=fs.readFileSync(path.join(root,'manager','AdventureAdapter.js'),'utf8');

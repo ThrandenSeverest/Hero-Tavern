@@ -2,9 +2,10 @@
 // Image Studio LoRA library. Only safetensors, no pickle code execution.
 // Manual uploads are chunked so large LoRAs do not enter JSON memory at once.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const MAX=2*1024**3,CHUNK=2*1024**2,ROOTS=['sdxl','sd15','flux2-klein','flux1','qwen-image21','qwen-image','zimage'];
+const MAX=2*1024**3,CHUNK=2*1024**2,ROOTS=['sdxl','sd15','flux2-klein','flux2-klein-9b','flux1','qwen-image21','qwen-image','zimage'];
 function identifyBase(value=''){
  const s=String(value||'').toLowerCase().replace(/[_.-]/g,' ');
+ if(/flux\s*2.*klein.*9\s*b|klein.*9\s*b.*flux\s*2/.test(s))return 'flux2-klein-9b';
  if(/flux\s*2.*klein|klein.*flux\s*2/.test(s))return 'flux2-klein';
  if(/flux\s*1|flux\.1|flux dev|flux schnell/.test(s))return 'flux1';
  if(/qwen.*image.*2[.\s]*1/.test(s))return 'qwen-image21';
@@ -131,7 +132,7 @@ function createLoRAManager(root,{modelRoot=()=>'',fetchFn=globalThis.fetch}={}){
   if(family&&!ROOTS.includes(family))throw Error('Unsupported base model filter.');
   const params=new URLSearchParams({types:'LORA',limit:'20',nsfw:'false',sort,primaryFileOnly:'true'});
   if(query.trim())params.set('query',query.trim());
-  const base={'sdxl':'SDXL 1.0','flux1':'Flux.1 D','flux2-klein':'Flux.2 Klein 4B','qwen-image21':'Qwen-Image 2.1','qwen-image':'Qwen-Image','zimage':'Z-Image Turbo','sd15':'SD 1.5'}[family];
+  const base={'sdxl':'SDXL 1.0','flux1':'Flux.1 D','flux2-klein':'Flux.2 Klein 4B','flux2-klein-9b':'Flux.2 Klein 9B','qwen-image21':'Qwen-Image 2.1','qwen-image':'Qwen-Image','zimage':'Z-Image Turbo','sd15':'SD 1.5'}[family];
   if(base)params.set('baseModels',base);
   const data=await jsonFetch('https://civitai.com/api/v1/models?'+params,token);
   return {items:(data.items||[]).filter(m=>m.type==='LORA').flatMap(m=>(m.modelVersions||[]).slice(0,2).map(v=>({

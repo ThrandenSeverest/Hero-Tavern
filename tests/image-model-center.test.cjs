@@ -106,3 +106,11 @@ test('One install action provisions engine, model dependencies, starts and check
  const center=createImageModelCenter(root,{runtime,comfy,images:{snapshot:()=>({})},studio:{snapshot:()=>({settings}),action:async(_,d)=>{settings={...settings,...d}}}});
  try{assert.throws(()=>center.setup({id:'flux-klein'}),/Click Install/);assert.equal(center.setup({id:'flux-klein',confirm:true}).started,true);assert.throws(()=>center.setup({id:'z-turbo',confirm:true}),/already running/);await new Promise(r=>setTimeout(r,20));assert.deepEqual(calls,['engine','dependencies:flux-klein','start','diagnose','select']);assert.equal(center.choice('global'),'flux-klein');assert.equal((await center.status()).lastSetup.ok,true);}finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Separate engine install/start controls live only inside collapsed advanced settings',()=>{
+ const src=fs.readFileSync(path.join(__dirname,'../manager/ImageModelCenterUI.js'),'utf8');
+ assert.match(src,/advanced\.append\(summary,engineActions,note\)/);
+ assert.doesNotMatch(src,/actions\.append\(action\([^\n]+,install,start,restart/);
+ assert.match(src,/'Download '\+choiceLabel\(model.id\)/);
+ assert.match(src,/No separate engine installation or manual launch is needed/);
+});

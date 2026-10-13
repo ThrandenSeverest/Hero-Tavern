@@ -31,7 +31,7 @@ function modelCard(model){
  if(model.id===last?.choices.global)card.classList.add('hero-unified-selected');
  const head=element('div',null,'hero-unified-head'),details=element('div');
  details.append(element('strong',model.label||choiceLabel(model.id)),element('p',model.description||'', 'small'));
- const state=element('p',model.ready?'Ready in ComfyUI':model.canStart&&model.downloaded?'Installed · can launch engine':model.downloaded?'Downloaded · reload ComfyUI to discover':'Missing components / setup required','hero-unified-state');
+ const state=element('p',model.ready?'Ready to generate':model.canStart&&model.downloaded?'Downloaded · loads automatically when needed':model.downloaded?'Downloaded · ready to check':'Not downloaded','hero-unified-state');
  if(!model.ready)state.classList.add('hero-unified-warning');
  details.append(state);head.append(details);
  const choose=action(model.id===last.choices.global?'Selected as default':'Use for images',async()=>{
@@ -54,12 +54,12 @@ function modelCard(model){
   }));
  }
  if(['sdxl','flux-klein','z-turbo'].includes(model.id)&&!model.installed&&!model.downloaded){
-  operations.append(action('Install engine + '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB models)':''),async()=>{
+  operations.append(action('Download '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB models)':''),async()=>{
    await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);
   }));
  }
- if(model.downloaded&&!model.ready)operations.append(action('Load / repair '+choiceLabel(model.id),async()=>{await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true)}));
- if(model.issue)card.append(element('p',model.issue,'small'));
+ if(model.downloaded&&!model.ready)operations.append(action('Prepare '+choiceLabel(model.id),async()=>{await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true)}));
+ if(model.issue)card.append(element('p',!model.downloaded?'Download this model to prepare its engine and all required components automatically.':!last.comfy.connected&&last.comfy.detected?'The engine starts automatically when you generate an image.':model.issue,'small'));
  if(operations.children.length)card.append(operations);
  return card;
 }
@@ -82,22 +82,22 @@ function render(state){
  last=state;
  const display=$('image-center-connection');display.replaceChildren();
  const connect=state.comfy.connected;
- display.append(element('strong',connect?'● ComfyUI connected':state.comfy.detected?'○ Managed image engine stopped · loads automatically for generation':'○ Image engine not installed'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'Choose Install engine + model below. Hero Tavern installs the engine and all model components together.','small'));
- if(state.comfy.error)display.append(element('p',state.comfy.error,'small'));
+ display.append(element('strong',connect?'● Image engine ready':state.comfy.detected?'○ Image engine idle · starts automatically':'○ Download a model to prepare image generation'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'Choose Download on a model card. Hero Tavern prepares the required engine and model components automatically.','small'));
+ if(state.comfy.error&&(state.comfy.running||state.comfy.mode==='external'||!/fetch failed|ECONNREFUSED|not connected/i.test(state.comfy.error)))display.append(element('p',state.comfy.error,'small'));
  const jobs=$('image-center-generation');jobs.replaceChildren();
  const run=state.activeGeneration;
  if(run){
-  jobs.append(element('strong','ComfyUI · '+run.phase));
+  jobs.append(element('strong','Image generation · '+run.phase));
   const b=element('progress');b.max=100;if(run.progress!=null)b.value=Math.max(0,Math.min(100,run.progress*100));else b.removeAttribute('value');
   jobs.append(b,element('p',(run.step!=null?run.step+'/'+run.totalSteps+' steps · ':'')+Math.floor((run.elapsedMs||0)/1000)+'s elapsed','small'));
- }else jobs.append(element('small','No ComfyUI generation currently running.'));
+ }else jobs.append(element('small','No image generation currently running.'));
  const gpu=state.comfy.devices?.[0];
  if(gpu?.vramTotal||gpu?.vram_total){const total=gpu.vramTotal||gpu.vram_total,free=gpu.vramFree||gpu.vram_free;
   jobs.append(element('p',(gpu.name||'GPU')+' · '+(Number(free)/(1024**3)).toFixed(1)+' GB free of '+(Number(total)/(1024**3)).toFixed(1)+' GB VRAM (reported by ComfyUI)','small'));
  }
  const quick=$('image-create-model-status'),current=state.models.find(m=>m.id===state.choices.global);
  if(quick&&current){
-  quick.textContent=current.ready?'✓ '+current.label+' ready':current.downloaded?(connect?'Downloaded; not visible in running ComfyUI. Open Models & Setup.':'Model downloaded. Connect/launch ComfyUI in Models & Setup.'):'Model is not ready — open Models & Setup to install components.';
+  quick.textContent=current.ready?'✓ '+current.label+' ready':current.downloaded?(connect?'Downloaded; not visible in running ComfyUI. Open Models & Setup.':'Model downloaded. Its engine starts automatically when needed.'):'Download this model in Models. Hero Tavern prepares its engine and dependencies automatically.';
   quick.classList.toggle('error',!current.ready);
  }
  $('image-center-cards').replaceChildren(...state.models.filter(m=>m.id!=='custom'&&m.id!=='koboldcpp').map(modelCard));
@@ -127,7 +127,7 @@ function makeUI(){
  original.hidden=true;
  const main=element('div',null,'card hero-unified-root');
  main.id='image-model-center';
- main.append(element('h2','Image models · managed engines'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. No SDXL checkpoint selection is required for FLUX or Z-Image.','small'));
+ main.append(element('h2','Image models · managed engines'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. Downloading a model automatically installs its required engine and dependencies. No separate engine installation or manual launch is needed.','small'));
  const status=element('div',null,'hero-unified-connection');status.id='image-center-connection';main.append(status);
  const choices=element('div',null,'controls');
  for(const [id,label] of [['global','Default model (Image Studio / native image API)'],['chat','Tavern chat image model'],['adventure','Adventure image model']]){
@@ -156,14 +156,15 @@ function makeUI(){
   const current=await req('/studio/get');if(current.busy)throw Error('Finish generating before restarting.');
   await req('/comfy/runtime/stop',{});await req('/comfy/runtime/start',{});await refresh(true);
  });restart.id='image-center-restart';
- actions.append(action('Check all models',()=>refresh(true)),install,start,restart);
+ actions.append(action('Refresh model status',()=>refresh(true)));
+ const engineActions=element('div',null,'actions');engineActions.append(install,start,restart);
  const note=element('p','', 'small');note.id='image-center-restart-note';
- main.append(actions,note);
+ main.append(actions);
  const generation=element('div',null,'hero-unified-progress');generation.id='image-center-generation';main.append(generation);
  const models=element('div',null,'hero-unified-models');models.id='image-center-cards';
  main.append(models);
  const download=element('div',null,'hero-unified-progress');download.id='image-center-download';main.append(download);
- const advanced=element('details');const summary=element('summary','Engine installation, existing ComfyUI folder and advanced settings');advanced.append(summary);
+ const advanced=element('details');const summary=element('summary','Advanced · external engines and troubleshooting');advanced.append(summary,engineActions,note);
  const location=element('div',null,'controls'),label=element('label','Model folder (only for an external ComfyUI installation)'),
  input=element('input');input.id='image-center-model-path';input.placeholder='C:\\AI\\ComfyUI\\models';
  label.append(input);location.append(label);

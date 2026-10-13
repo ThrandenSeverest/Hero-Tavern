@@ -108,6 +108,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   if(!await panel.locator('#image-center-chat').count()||!await panel.locator('#image-center-adventure').count())throw Error('Chat/Adventure image model selectors missing');
   await panel.locator('[data-tab="image-setup"]').click();
   if(!await panel.locator('#image-center-global').isVisible())throw Error('Unified model controls must be visible in Models & Setup');
+  if(!await panel.locator('#image-center-install').isHidden()||!await panel.locator('#image-center-start').isHidden())throw Error('Separate engine setup controls must stay inside collapsed Advanced settings');
   await panel.locator('[data-tab="images"]').click();
   
   if(!await panel.locator('#image-generate').isEnabled())throw Error('FLUX Generate must not depend on legacy KoboldCpp ImageModels checkpoint');

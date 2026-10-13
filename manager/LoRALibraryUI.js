@@ -2,7 +2,7 @@
 'use strict';
 const $=id=>document.getElementById(id),token='__TOKEN__';
 async function api(route,data){const response=await fetch(route,{method:data===undefined?'GET':'POST',headers:{'X-Hero-Token':token,...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});const body=await response.json();if(!response.ok)throw Error(body.error||'LoRA service HTTP '+response.status);return body;}
-const familyNames={'sdxl':'SDXL / Pony / Illustrious','sd15':'Stable Diffusion 1.5','flux2-klein':'FLUX.2 Klein','flux1':'FLUX.1','qwen-image21':'Qwen Image 2.1','qwen-image':'Qwen Image','zimage':'Z-Image Turbo'};
+const familyNames={'sdxl':'SDXL / Pony / Illustrious','sd15':'Stable Diffusion 1.5','flux2-klein':'FLUX.2 Klein 4B','flux2-klein-9b':'FLUX.2 Klein 9B (requires different engine)','flux1':'FLUX.1','qwen-image21':'Qwen Image 2.1','qwen-image':'Qwen Image','zimage':'Z-Image Turbo'};
 const families=['',...Object.keys(familyNames)];
 function familyOf(id){if(id.startsWith('qwen21-'))return 'qwen-image21';return ({sdxl:'sdxl','flux-klein':'flux2-klein','z-turbo':'zimage'})[id]||'';}
 const node=(tag,attrs={},text)=>{const el=document.createElement(tag);for(const [key,value]of Object.entries(attrs)){if(key==='class')el.className=value;else el.setAttribute(key,value);}if(text!==undefined)el.textContent=text;return el;};

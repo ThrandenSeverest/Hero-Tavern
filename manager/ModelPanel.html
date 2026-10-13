@@ -175,7 +175,7 @@
  card('scene-composer',tools);
  const panel=document.getElementById('hero-comfy-panel');
  const inpaint=panel.querySelector('details');
- if(inpaint){const box=document.createElement('div');box.className='card';box.id='hero-inpaint-editor';box.append(inpaint);tools.append(box)}
+ if(inpaint){const box=document.createElement('div');box.className='card';box.id='hero-inpaint-editor';box.append(inpaint);primary.after(box);inpaint.open=true}
  move('hero-comfy-advanced',tools);
  for(const id of ['hero-comfy-hub','hero-comfy-panel','hero-comfy-workflow-library'])move(id,setup);
  const legacy=document.getElementById('image-installed').closest('.card');

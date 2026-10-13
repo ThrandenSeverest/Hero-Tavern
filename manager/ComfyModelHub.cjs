@@ -84,7 +84,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   return composeStatus(lists);
  }
  function snapshot(){
-  return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes+(download.part&&fs.existsSync(download.part)?fs.statSync(download.part).size:0),total:download.total,phase:download.phase,part:download.part},lastError};
+  return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes+(download.part&&fs.existsSync(download.part)?Math.max(0,fs.statSync(download.part).size-(download.partStart||0)):0),total:download.total,phase:download.phase,part:download.part},lastError};
  }
  async function sha256(file,signal){
   const hash=crypto.createHash('sha256');for await(const bytes of fs.createReadStream(file)){if(signal?.aborted)throw Error('Download cancelled.');hash.update(bytes);}
@@ -123,7 +123,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
    job.total=need;
    for(const e of entries){
     if(job.abort)throw Error('Download cancelled.');
-    job.file=e.f.name;job.part=e.location+'.part';job.phase='downloading';
+    job.file=e.f.name;job.part=e.location+'.part';job.partStart=e.start;job.phase='downloading';
     if(e.stat&&e.stat.size===e.meta.size){
      if(e.meta.hash){job.phase='verifying';if(await sha256(e.location)!==e.meta.hash)throw Error('Existing model checksum mismatch: '+e.f.name);}
      continue;
@@ -142,7 +142,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
     job.phase='verifying';
     if(e.meta.hash&&await sha256(job.part)!==e.meta.hash)throw Error('Checksum mismatch: '+e.f.name+'. Partial file retained for inspection.');
     fs.renameSync(job.part,e.location);
-    job.bytes+=e.meta.size;
+    job.bytes+=e.meta.size-e.start;job.part='';job.partStart=0;
    }
    settings.selected=id;save();job.phase='complete';lastError='';return {installed:true,packId:id,modelRoot:settings.modelRoot};
   }catch(e){lastError=e.message;throw e}finally{download=null}

@@ -56,7 +56,7 @@ function modelCard(model){
  }
  if((['sdxl','flux-klein','z-turbo'].includes(model.id)||model.id.startsWith('qwen21-'))&&!model.installed&&!model.downloaded){
   operations.append(action('Download '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB models)':''),async()=>{
-   await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);
+   if(!confirm('Download '+model.label+' and dependencies? This may require many GB.'))return;await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);
   }));
  }
  if(model.downloaded&&!model.ready)operations.append(action('Prepare '+choiceLabel(model.id),async()=>{await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true)}));
@@ -101,7 +101,13 @@ function render(state){
   quick.textContent=current.ready?'✓ '+current.label+' ready':current.downloaded?(connect?'Downloaded; not visible in running ComfyUI. Open Models & Setup.':'Model downloaded. Its engine starts automatically when needed.'):'Download this model in Models. Hero Tavern prepares its engine and dependencies automatically.';
   quick.classList.toggle('error',!current.ready);
  }
- $('image-center-cards').replaceChildren(...state.models.filter(m=>m.id!=='custom'&&m.id!=='koboldcpp').map(modelCard));
+ $('image-center-cards').replaceChildren(...state.models.filter(m=>m.id!=='custom'&&m.id!=='koboldcpp'&&(!m.id.startsWith('qwen21-')||m.id==='qwen21-q5km'||m.id===state.choices.global)).map(modelCard));
+ const optional=$('image-center-optional-qwen');
+ if(optional){const old=optional.querySelector('select')?.value||'';optional.replaceChildren();
+ const all=state.models.filter(m=>m.id.startsWith('qwen21-')&&m.id!=='qwen21-q5km');
+ const selector=element('select');selector.append(new Option('Choose optional Qwen quantization',''),...all.map(m=>new Option(m.label,m.id)));
+ const slot=element('div');optional.append(selector,slot);selector.value=all.some(m=>m.id===old)?old:'';
+ selector.onchange=()=>{slot.replaceChildren();const chosen=all.find(m=>m.id===selector.value);if(chosen)slot.append(modelCard(chosen));};selector.onchange();}
  renderDownload(state);
  for(const scope of ['global','chat','adventure']){
   const selector=$('image-center-'+scope);if(!selector||document.activeElement===selector)continue;
@@ -163,7 +169,7 @@ function makeUI(){
  main.append(actions);
  const generation=element('div',null,'hero-unified-progress');generation.id='image-center-generation';main.append(generation);
  const models=element('div',null,'hero-unified-models');models.id='image-center-cards';
- main.append(models);
+ main.append(models);const extras=element('details');extras.append(element('summary','Optional Qwen image quantizations'));const extraBody=element('div');extraBody.id='image-center-optional-qwen';extras.append(extraBody);main.append(extras);
  const download=element('div',null,'hero-unified-progress');download.id='image-center-download';main.append(download);
  const advanced=element('details');const summary=element('summary','Advanced · external engines and troubleshooting');advanced.append(summary,engineActions,note);
  const location=element('div',null,'controls'),label=element('label','Model folder (only for an external ComfyUI installation)'),
@@ -182,7 +188,7 @@ function makeUI(){
  if(technical){
   const tech=element('details'),h=element('summary','Advanced engine settings, checkpoints, masking tools');tech.append(h,technical);advanced.append(tech);
  }
- const workflows=$('hero-comfy-workflow-library');if(workflows)advanced.append(workflows);
+ const workflows=$('hero-comfy-workflow-library');if(workflows)$('comfy-workflows-library-mount').append(workflows);
  main.append(advanced);
  const error=element('p','', 'hero-unified-error');error.id='image-model-center-error';main.append(error);
  $('models').append(main);

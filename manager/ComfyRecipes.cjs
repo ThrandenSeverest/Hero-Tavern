@@ -15,10 +15,10 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}
   const vae=n('VAELoader',{vae_name:files.vae});
   const width=params.width||1024,height=params.height||1024;
   const sourceNode=source?n('LoadImage',{image:source}):null;
-  const textInputs={clip,vae,prompt:params.prompt,negative_prompt:params.negative_prompt||'',reference_latent_size:1024};
+  const textInputs={clip,vae,prompt:params.prompt,negative_prompt:params.negative_prompt||'',resolution:1024};
   if(sourceNode)textInputs['images.image_1']=sourceNode;
   const encoded=n('TextEncodeQwenImage21',textInputs);
-  const latent=sourceNode?n('VAEEncode',{pixels:sourceNode,vae}):n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
+  const latent=sourceNode?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
   const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps||25,cfg:params.cfg_scale||1,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});

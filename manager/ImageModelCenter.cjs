@@ -24,14 +24,20 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   if(local?.models)return local.models;
   return null;
  }
- function configureRoot(){
-  const target=rootForModels();
+ function configureRoot({preferManaged=false}={}){
+  const managed=runtime.installed()?.models;
+  const target=preferManaged&&managed?managed:rootForModels();
   if(!target)throw Error('No ComfyUI model directory detected. First install managed ComfyUI or choose your existing ComfyUI models directory.');
   fs.mkdirSync(target,{recursive:true});
   if(comfy.models.snapshot().settings.modelRoot!==target)comfy.models.configure({modelRoot:target});
   return target;
  }
  async function status(){
+  // Fresh installs already know their managed Portable folder. Discover it before
+  // inspecting files, otherwise all downloaded weights appear missing until manually configured.
+  if(!comfy.models.snapshot().settings.modelRoot&&runtime.installed()?.models){
+   try{configureRoot({preferManaged:true})}catch{}
+  }
   const [catalog]=await Promise.all([comfy.catalog()]);
   const managed=runtime.status(),download=comfy.models.snapshot().download;
   const local=catalog.packs||[];

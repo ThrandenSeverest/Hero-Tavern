@@ -334,7 +334,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
-        const assets={'/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
+        const assets={'/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }

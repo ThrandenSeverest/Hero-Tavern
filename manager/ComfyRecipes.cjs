@@ -2,6 +2,32 @@
 // Model-specific ComfyUI graphs. End users choose "FLUX" or "Z-Image"; no JSON or nodes.
 const crypto=require('node:crypto'),{buildWorkflow}=require('./ComfyWorkflows.cjs');
 function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}){
+ if(pack.family==='qwen21'){
+  const mode=params.operation||'txt2img';
+  if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
+  if(mode!=='txt2img'&&!source)throw Error('Select a gallery image for Qwen editing.');
+  if(mode==='inpaint'&&!mask)throw Error('Paint an area to change before Qwen inpainting.');
+  if(params.lora?.length)throw Error('Standard SDXL LoRAs are incompatible with Qwen Image.');
+  const nodes={};let k=0;const n=(class_type,inputs)=>{const id=String(++k);nodes[id]={class_type,inputs};return [id,0]};
+  const files=Object.fromEntries(pack.files.map(f=>[f.group,resolvedFiles[f.group]||f.name]));
+  const model=n('UnetLoaderGGUF',{unet_name:files.diffusion_models});
+  const clip=n('CLIPLoader',{clip_name:files.text_encoders,type:'qwen_image',device:'default'});
+  const vae=n('VAELoader',{vae_name:files.vae});
+  const width=params.width||1024,height=params.height||1024;
+  const sourceNode=source?n('LoadImage',{image:source}):null;
+  const textInputs={clip,vae,prompt:params.prompt,negative_prompt:params.negative_prompt||'',reference_latent_size:1024};
+  if(sourceNode)textInputs['images.image_1']=sourceNode;
+  const encoded=n('TextEncodeQwenImage21',textInputs);
+  const latent=sourceNode?n('VAEEncode',{pixels:sourceNode,vae}):n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
+  const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
+  const positive=[encoded[0],0],negative=[encoded[0],1];
+  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps||25,cfg:params.cfg_scale||1,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
+  const result=n('VAEDecode',{samples:sample,vae});
+  let output=result;
+  if(mode==='inpaint'){const masked=n('LoadImageMask',{image:mask,channel:'red'});output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
+  const saved=n('SaveImage',{images:output,filename_prefix:'HeroTavern_Qwen21'});
+  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id};
+ }
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';
  if(mode!=='txt2img'){

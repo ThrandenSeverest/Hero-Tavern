@@ -10,6 +10,8 @@ function mockLoRA(filename,metadata={'ss_base_model_version':'Flux.2 Klein 4B'})
 }
 test('LoRA family matching distinguishes Flux.2 Klein, Flux.1, SDXL and Qwen Image 2.1',()=>{
  assert.equal(identifyBase('Flux.2 Klein 4B'),'flux2-klein');
+ assert.equal(identifyBase('Flux.2 Klein 9B FP8'),'flux2-klein-9b');
+ assert.equal(compatible('flux2-klein-9b','flux-klein'),false);
  assert.equal(identifyBase('Flux.1 D'),'flux1');
  assert.equal(identifyBase('Pony Diffusion XL'),'sdxl');
  assert.equal(identifyBase('Qwen-Image 2.1'),'qwen-image21');

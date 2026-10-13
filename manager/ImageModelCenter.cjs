@@ -35,6 +35,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   const [catalog]=await Promise.all([comfy.catalog()]);
   const managed=runtime.status(),download=comfy.models.snapshot().download;
   const local=catalog.packs||[];
+  const selectedCheckpoint=studio.snapshot().settings.comfyCheckpoint||'';
   const models=IDS.map(id=>{
    if(id==='koboldcpp'){
     const state=images.snapshot();
@@ -43,8 +44,9 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    if(id==='custom')return {id,label:'Custom ComfyUI workflow',installed:true,ready:!!catalog.available,engine:'comfyui',missing:[]};
    const p=local.find(x=>x.id===id);
    const canStart=!catalog.available&&!!managed.detected&&managed.mode==='managed';
-   return {...p,id,label:p?.name||id,engine:'comfyui',downloaded:!!p?.downloaded,ready:!!p?.installed&&!!catalog.available,
-    canStart,issue:p?.installed?null:p?.downloaded&&catalog.available?
+   return {...p,id,label:p?.name||id,engine:'comfyui',downloaded:!!p?.downloaded,
+    ready:!!p?.installed&&!!catalog.available&&(id!=='sdxl'||!!selectedCheckpoint&&catalog.checkpoints?.includes(selectedCheckpoint)),
+    canStart,issue:id==='sdxl'&&p?.installed&&!selectedCheckpoint?'Select an SDXL checkpoint in Models & Setup (FLUX does not need one).':p?.installed?null:p?.downloaded&&catalog.available?
        'Model files exist on disk but are not visible to the running ComfyUI. Verify the model folder and restart managed ComfyUI.':
        !catalog.available&&!managed.detected?'ComfyUI is not running. Connect an existing instance or install Portable.':
        p?.missing?.length?'Missing: '+p.missing.join(', '):null};
@@ -61,7 +63,8 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   if(!safe(id))throw Error('Choose FLUX, Z-Image, SDXL, KoboldCpp or Custom');
   prefs[scope]=id;save();
   if(scope==='global'){
-   await studio.action('/studio/configure',{engine:id==='koboldcpp'?'koboldcpp':'comfyui',modelPack:['flux-klein','z-turbo'].includes(id)?id:'sdxl'});
+   const checkpoint=id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint?(await comfy.catalog()).checkpoints?.[0]||'':null;
+   await studio.action('/studio/configure',{engine:id==='koboldcpp'?'koboldcpp':'comfyui',modelPack:['flux-klein','z-turbo'].includes(id)?id:'sdxl',...(checkpoint?{comfyCheckpoint:checkpoint}:{})});
    if(['sdxl','flux-klein','z-turbo'].includes(id))comfy.models.select({id});
   }
   return {selected:choice(scope),scope,choices:{...prefs}};

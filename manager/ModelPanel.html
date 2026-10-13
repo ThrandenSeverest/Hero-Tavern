@@ -267,7 +267,7 @@ window.addEventListener('message',async e=>{
  if(e.data?.type==='hero-memory-chat'){memoryId=e.data.id;el('memory-chat').textContent=e.data.label||'No chat selected';await refreshMemory();}
  if(e.data?.type==='hero-request'){
   const {id,route,data}=e.data;
-  if(!['/memory/get','/memory/save','/task'].includes(route)&&!route.startsWith('/story/')&&!route.startsWith('/studio/'))return;
+  if(!['/memory/get','/memory/save','/task'].includes(route)&&!route.startsWith('/story/')&&!route.startsWith('/studio/')&&!route.startsWith('/image/model-center/')){e.source.postMessage({type:'hero-response',id,error:'Unsupported embedded bridge request: '+route},e.origin);return;}
   try{e.source.postMessage({type:'hero-response',id,value:await request(route,data)},e.origin)}catch(error){e.source.postMessage({type:'hero-response',id,error:error.message},e.origin)}
  }
 });

@@ -61,6 +61,15 @@ async function completionText(response) {
     const item=await response.json();if(item.error)throw new Error(item.error.message||'Generation failed.');
     return item.choices?.[0]?.text??item.choices?.[0]?.message?.content??item.results?.[0]?.text??'';
 }
+function isWriterNonProse(input){
+ const text=String(input||'').trim();if(!text)return 'empty output';
+ if(isMetaReply(text))return 'assistant commentary';
+ if(/^(?:I understand(?: that)?|I (?:will|need to|should|can) (?:continue|write|describe|start)|Let me (?:start|begin|describe)|Sure[,!.]|Of course[,!.]|Here (?:is|are)|Based on (?:the|your) (?:instructions|prompt)|To continue (?:this|the) (?:story|scenario))/i.test(text))return 'assistant preface';
+ if(/^(?:\\*\\*|#{1,4}\\s*)?(?:character (?:profile|description|sheet)|physical appearance|appearance|personality|background|overview|summary|scenario|outline)\\s*[:\\n]/i.test(text))return 'character dossier';
+ if(/^\\*\\*[^\\n]{1,80}\\*\\*\\s*\\n\\s*(?:physical appearance|appearance|personality|age|height|background)\\s*:/i.test(text))return 'formatted profile';
+ if(/^(?:[A-Z][a-z]+(?: [A-Z][a-z]+)?):\\s*(?:Tall|Short|A |An |She |He |They )/i.test(text)&&/\\n(?:Physical Appearance|Personality|Background|Age|Height):/i.test(text))return 'profile fields';
+ return '';
+}
 function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
     let active = null,lastRun=null;const runSnapshot=()=>lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
     async function generate(body, signal, {mode='chat'}={}) {
@@ -136,7 +145,16 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             const history=body.hero_context?.messages||[...body.prompt.matchAll(/<\|im_start\|>(user|assistant)\n([\s\S]*?)<\|im_end\|>/g)].map(x=>({role:x[1],text:x[2]}));
             const repetitive=mode==='chat'&&settings.avoidRepetition?repetitionIssue(text,history,settings.repetitionSensitivity):'';
+            const writerMeta=mode==='writer'&&isWriterNonProse(text);
             const meta=mode==='chat'&&settings.repairMetaReplies&&isMetaReply(text);
+            if(writerMeta){
+                stage('repairing-writer-prose');
+                const rebuilt=await buildWriterContext({...body.hero_writer,repair:true},budget,countTokens);
+                const corrected=replyPrompt(rebuilt.prompt,extra+'\nThe output MUST be a passage from the novel, not an assistant reply, character description, outline or Markdown document.');
+                text=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.min(settings.temperature,0.75)}),filters);
+                lastRun.writerRepair={trigger:writerMeta,success:!!text&&!isWriterNonProse(text)};
+                if(!text||isWriterNonProse(text))throw Error('The local model generated an explanation or character profile instead of fiction twice. Nothing was added to the manuscript. Try a fiction-oriented model or rephrase your story prompt.');
+            }
             if(meta||repetitive) {
                 const repairedPrompt=replyPrompt(body.prompt,extra+'\nCORRECT THE DRAFT: '+(repetitive||'The draft was writer commentary.')+' Write a fresh reply that answers the most recent user message and moves the scene forward. Do not reuse previous reply sentences, echo the user, announce narrator roles or explain how you will answer.');
                 text=filterReply(await sendChecked({...body,prompt:repairedPrompt,stream:false,max_tokens:replyTokens,temperature:repetitive?Math.max(0.75,Math.min(settings.temperature,1)):Math.min(settings.temperature,0.7),rep_pen:Math.max(settings.repetition_penalty,1.15),repetition_penalty:Math.max(settings.repetition_penalty,1.15),rep_pen_range:1024}),settings);

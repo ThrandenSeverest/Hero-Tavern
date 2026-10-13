@@ -615,10 +615,9 @@ el('hero-pack-download').onclick=async()=>{
  heroHubDownloading=true;el('hero-pack-download').disabled=true;
  try{
   if(el('hero-pack-root').value)await request('/comfy/models/configure',{modelRoot:el('hero-pack-root').value});
-  const outcome=await request('/comfy/models/download',{id,confirm:true});
-  el('hero-pack-state').textContent='Completed model installation for '+outcome.packId+'.';
+  const outcome=await request(id.startsWith('qwen21-')?'/image/model-center/setup':'/image/model-center/download',{id,confirm:true});
+  el('hero-pack-state').textContent='Setup started for '+outcome.packId+'. Download and dependency installation progress will update automatically.';
   await heroHubRefresh();
-  await selectStudioModel(id);
  }catch(e){el('hero-pack-state').textContent=e.message}finally{heroHubDownloading=false;el('hero-pack-download').disabled=false}
 };
 el('hero-pack-cancel').onclick=async()=>{try{await request('/comfy/models/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
@@ -643,7 +642,7 @@ el('hero-runtime-install').onclick=async()=>{
  }catch(e){el('hero-runtime-state').textContent=e.message}finally{heroHubInstalling=false;el('hero-runtime-install').disabled=false}
 };
 el('hero-runtime-cancel').onclick=async()=>{try{await request('/comfy/runtime/install-cancel',{});el('hero-runtime-state').textContent='Installation cancellation requested.'}catch(e){el('hero-runtime-state').textContent=e.message}};
-setInterval(()=>{if(heroHubReady&&(!el('images').hidden||!el('image-setup').hidden)&&!heroHubDownloading&&!heroHubInstalling)heroHubRefresh()},15000);
+setInterval(()=>{if(heroHubReady&&(!el('images').hidden||!el('image-setup').hidden)&&!heroHubInstalling)heroHubRefresh()},15000);
 
 const heroMaskCanvas=el('hero-mask-preview'),heroMaskCtx=heroMaskCanvas.getContext('2d',{willReadFrequently:false});
 const heroMaskPixels=document.createElement('canvas'),heroMaskPixelCtx=heroMaskPixels.getContext('2d');

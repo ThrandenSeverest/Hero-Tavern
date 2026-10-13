@@ -175,7 +175,7 @@
  card('scene-composer',tools);
  const panel=document.getElementById('hero-comfy-panel');
  const inpaint=panel.querySelector('details');
- if(inpaint){const box=document.createElement('div');box.className='card';box.append(inpaint);tools.append(box)}
+ if(inpaint){const box=document.createElement('div');box.className='card';box.id='hero-inpaint-editor';box.append(inpaint);tools.append(box)}
  move('hero-comfy-advanced',tools);
  for(const id of ['hero-comfy-hub','hero-comfy-panel','hero-comfy-workflow-library'])move(id,setup);
  const legacy=document.getElementById('image-installed').closest('.card');
@@ -637,19 +637,22 @@ async function heroLoadMaskImage(){
  heroMaskHistory=[];heroMaskDirty=false;heroMaskRender();
  el('hero-inpaint-status').textContent='Paint the red area that ComfyUI should redraw.';
 }
+let heroShapeMode='brush',heroShapeStart=null,heroShapeBefore=null;
 function heroBrush(ev){
  if(!heroPainting||!heroSourceBitmap)return;
  const b=heroMaskCanvas.getBoundingClientRect(),x=(ev.clientX-b.left)/b.width*heroMaskPixels.width,y=(ev.clientY-b.top)/b.height*heroMaskPixels.height;
  const radius=Number(el('hero-mask-size').value);
+ if(heroShapeMode==='rectangle'&&heroShapeStart){heroMaskPixelCtx.putImageData(heroShapeBefore,0,0);heroMaskPixelCtx.fillStyle=heroErase?'#000':'#fff';heroMaskPixelCtx.fillRect(Math.min(heroShapeStart[0],x),Math.min(heroShapeStart[1],y),Math.abs(x-heroShapeStart[0]),Math.abs(y-heroShapeStart[1]));heroMaskDirty=true;heroMaskRender();return;}
  heroMaskPixelCtx.fillStyle=heroErase?'#000':'#fff';heroMaskPixelCtx.strokeStyle=heroErase?'#000':'#fff';
  heroMaskPixelCtx.lineWidth=radius;heroMaskPixelCtx.lineCap='round';heroMaskPixelCtx.lineJoin='round';
  if(heroBrush.previous){heroMaskPixelCtx.beginPath();heroMaskPixelCtx.moveTo(heroBrush.previous[0],heroBrush.previous[1]);heroMaskPixelCtx.lineTo(x,y);heroMaskPixelCtx.stroke()}
  else{heroMaskPixelCtx.beginPath();heroMaskPixelCtx.arc(x,y,radius/2,0,Math.PI*2);heroMaskPixelCtx.fill()}
  heroBrush.previous=[x,y];heroMaskDirty=true;heroMaskRender();
 }
-heroMaskCanvas.addEventListener('pointerdown',ev=>{if(!heroSourceBitmap)return;heroMaskHistory.push(heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height));if(heroMaskHistory.length>8)heroMaskHistory.shift();heroPainting=true;heroBrush.previous=null;heroMaskCanvas.setPointerCapture(ev.pointerId);heroBrush(ev)});
+heroMaskCanvas.addEventListener('pointerdown',ev=>{if(!heroSourceBitmap)return;heroMaskHistory.push(heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height));if(heroMaskHistory.length>8)heroMaskHistory.shift();heroPainting=true;heroBrush.previous=null;const b=heroMaskCanvas.getBoundingClientRect();heroShapeStart=[(ev.clientX-b.left)/b.width*heroMaskPixels.width,(ev.clientY-b.top)/b.height*heroMaskPixels.height];heroShapeBefore=heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height);heroMaskCanvas.setPointerCapture(ev.pointerId);heroBrush(ev)});
 heroMaskCanvas.addEventListener('pointermove',heroBrush);
-for(const name of ['pointerup','pointercancel','lostpointercapture'])heroMaskCanvas.addEventListener(name,()=>{heroPainting=false;heroBrush.previous=null});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])heroMaskCanvas.addEventListener(name,()=>{heroPainting=false;heroBrush.previous=null;heroShapeStart=null;heroShapeBefore=null});
+const shapeRow=document.createElement('div');shapeRow.className='actions';for(const [id,label] of [['brush','Brush · freehand'],['rectangle','Rectangle · select area']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{heroShapeMode=id;for(const q of shapeRow.querySelectorAll('button'))q.setAttribute('aria-pressed',String(q===b));};b.setAttribute('aria-pressed',String(id==='brush'));shapeRow.append(b)};el('hero-mask-editor').before(shapeRow);
 el('hero-mask-load').onclick=()=>heroLoadMaskImage().catch(e=>el('hero-inpaint-status').textContent=e.message);
 el('hero-mask-undo').onclick=()=>{const state=heroMaskHistory.pop();if(state){heroMaskPixelCtx.putImageData(state,0,0);heroMaskDirty=true;heroMaskRender()}};
 el('hero-mask-eraser').onclick=()=>{heroErase=!heroErase;el('hero-mask-eraser').setAttribute('aria-pressed',String(heroErase));el('hero-mask-eraser').textContent=heroErase?'Eraser ON':'Erase mask'};
@@ -689,7 +692,7 @@ el('hero-inpaint-run').onclick=async()=>{
   if(el('hero-engine').value==='koboldcpp')throw Error('Choose ComfyUI or Auto for inpainting.');
   await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,releaseGPU:el('studio-release').checked});
   out.textContent='Sending masked edit to ComfyUI…';
-  const result=await request('/studio/generate',{prompt:el('hero-inpaint-prompt').value,sourceName:heroCurrentSource,maskData:heroMaskPixels.toDataURL('image/png'),denoise:Number(el('hero-inpaint-denoise').value),width:heroMaskPixels.width,height:heroMaskPixels.height,steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,negative_prompt:el('image-negative').value,refine:false});
+  const result=await request('/studio/generate',{prompt:el('hero-inpaint-prompt').value,sourceName:heroCurrentSource,maskData:heroMaskPixels.toDataURL('image/png'),denoise:Number(el('hero-inpaint-denoise').value),width:heroMaskPixels.width,height:heroMaskPixels.height,steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,negative_prompt:el('image-negative').value,refine:false,modelPack:activeStudioModel().startsWith('qwen21-')||['flux-klein','z-turbo'].includes(activeStudioModel())?activeStudioModel():'sdxl',engine:'comfyui',operation:'inpaint'});
   lastImage=result.url;el('image-result').src=result.url;el('image-result').hidden=false;el('image-download').href=result.url;el('image-download').hidden=false;el('image-to-chat').disabled=false;
   out.textContent='Saved edited image as '+result.url+'; original preserved.';await loadGallery();
  }catch(e){out.textContent=e.message}finally{btn.disabled=false}

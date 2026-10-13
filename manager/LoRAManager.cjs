@@ -4,7 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const MAX=2*1024**3,CHUNK=2*1024**2,ROOTS=['sdxl','sd15','flux2-klein','flux1','qwen-image21','qwen-image','zimage'];
 function identifyBase(value=''){
- const s=String(value||'').toLowerCase().replace(/[_-]/g,' ');
+ const s=String(value||'').toLowerCase().replace(/[_.-]/g,' ');
  if(/flux\s*2.*klein|klein.*flux\s*2/.test(s))return 'flux2-klein';
  if(/flux\s*1|flux\.1|flux dev|flux schnell/.test(s))return 'flux1';
  if(/qwen.*image.*2[.\s]*1/.test(s))return 'qwen-image21';

@@ -39,6 +39,25 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   return names.filter(name=>{try{modelName(name);return name.length<=260}catch{return false}});
  }
  const checkpoints=()=>modelList('checkpoints').then(names=>names.filter(n=>/\.safetensors$/i.test(n)));
+
+ const NODE_REQUIREMENTS={
+  'flux-klein':['UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','EmptyFlux2LatentImage','Flux2Scheduler','SamplerCustomAdvanced','RandomNoise','KSamplerSelect','CFGGuider','VAEDecode','SaveImage'],
+  'z-turbo':['UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','ModelSamplingAuraFlow','EmptyLatentImage','KSampler','VAEDecode','SaveImage'],
+  'sdxl':['CheckpointLoaderSimple','CLIPTextEncode','EmptyLatentImage','KSampler','VAEDecode','SaveImage']
+ };
+ async function diagnosePack(id){
+  const required=NODE_REQUIREMENTS[id];if(!required)throw Error('Select a supported ComfyUI model pack.');
+  if(!await available())return {ok:false,connected:false,missingNodes:required,missingFiles:[],advice:'ComfyUI is not connected. Start the managed Portable engine or connect an existing ComfyUI service.'};
+  const status=await catalog(),pack=status.packs.find(p=>p.id===id);
+  const info=await (await request('/object_info',{},18000)).json();
+  const missingNodes=required.filter(node=>!Object.prototype.hasOwnProperty.call(info,node));
+  const missingFiles=pack?.missing||[];
+  return {ok:!missingNodes.length&&!missingFiles.length,connected:true,missingNodes,missingFiles,packId:id,
+    advice:missingNodes.length?'ComfyUI is missing required core nodes. Update ComfyUI Portable, then restart it.':
+       missingFiles.length?'ComfyUI cannot find the model weights. Check the active models folder and restart managed ComfyUI.':
+       'Required model components and workflow nodes are visible. Actual GPU inference must still be tested.'};
+ }
+
  async function catalog(){
   if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.localStatus().map(pack=>({...pack,downloaded:pack.installed})),modelHub:models.snapshot(),offlineInventory:true};
   const groups=['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'];
@@ -221,7 +240,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   }catch(e){lastError=e.message;logEvent({action:'comfy-job-error',error:e.message,promptId:job.id});throw e}
   finally{signal?.removeEventListener('abort',onAbort);try{job.socket?.close()}catch{};if(active===job)active=null}
  }
- return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,workflows,models,
+ return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,workflows,models,diagnosePack,
   snapshot:()=>({healthy,lastCheck,error:lastError,active:active&&{id:active.id,phase:active.phase,progress:active.progress,step:active.step,totalSteps:active.totalSteps,etaMs:active.etaMs,elapsedMs:Date.now()-active.startedAt},completed,url:base,
     devices:(lastStats?.devices||[]).map(x=>({name:x.name,type:x.type,vramFree:x.vram_free,vramTotal:x.vram_total}))})};
 }

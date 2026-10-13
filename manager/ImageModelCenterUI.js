@@ -75,6 +75,17 @@ function render(state){
  const connect=state.comfy.connected;
  display.append(element('strong',connect?'● ComfyUI connected':'○ ComfyUI not connected'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'No model folder configured. Install ComfyUI or select a directory below.','small'));
  if(state.comfy.error)display.append(element('p',state.comfy.error,'small'));
+ const jobs=$('image-center-generation');jobs.replaceChildren();
+ const run=state.activeGeneration;
+ if(run){
+  jobs.append(element('strong','ComfyUI · '+run.phase));
+  const b=element('progress');b.max=100;if(run.progress!=null)b.value=Math.max(0,Math.min(100,run.progress*100));else b.removeAttribute('value');
+  jobs.append(b,element('p',(run.step!=null?run.step+'/'+run.totalSteps+' steps · ':'')+Math.floor((run.elapsedMs||0)/1000)+'s elapsed','small'));
+ }else jobs.append(element('small','No ComfyUI generation currently running.'));
+ const gpu=state.comfy.devices?.[0];
+ if(gpu?.vramTotal||gpu?.vram_total){const total=gpu.vramTotal||gpu.vram_total,free=gpu.vramFree||gpu.vram_free;
+  jobs.append(element('p',(gpu.name||'GPU')+' · '+(Number(free)/(1024**3)).toFixed(1)+' GB free of '+(Number(total)/(1024**3)).toFixed(1)+' GB VRAM (reported by ComfyUI)','small'));
+ }
  const quick=$('image-create-model-status'),current=state.models.find(m=>m.id===state.choices.global);
  if(quick&&current){
   quick.textContent=current.ready?'✓ '+current.label+' ready':current.downloaded?(connect?'Downloaded; not visible in running ComfyUI. Open Models & Setup.':'Model downloaded. Connect/launch ComfyUI in Models & Setup.'):'Model is not ready — open Models & Setup to install components.';
@@ -139,6 +150,7 @@ function makeUI(){
  actions.append(action('Check all models',()=>refresh(true)),install,start,restart);
  const note=element('p','', 'small');note.id='image-center-restart-note';
  main.append(actions,note);
+ const generation=element('div',null,'hero-unified-progress');generation.id='image-center-generation';main.append(generation);
  const models=element('div',null,'hero-unified-models');models.id='image-center-cards';
  main.append(models);
  const download=element('div',null,'hero-unified-progress');download.id='image-center-download';main.append(download);

@@ -2,18 +2,19 @@
 // One source of truth for image generation in Create, character chats and Adventure.
 // Never download or install software without explicit confirmation.
 const fs=require('node:fs'),path=require('node:path');
-const IDS=['flux-klein','z-turbo','sdxl','koboldcpp','custom'],SCOPES=['global','chat','adventure'];
+const QWEN_IDS=require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>p.id);
+const IDS=[...QWEN_IDS,'flux-klein','z-turbo','sdxl','koboldcpp','custom'],SCOPES=['global','chat','adventure'];
 const safe=(x)=>IDS.includes(x);
 function createImageModelCenter(root,{studio,comfy,runtime,images}){
  const file=path.join(root,'image-model-choices.json');
- let prefs={global:null,chat:null,adventure:null},operation=null,lastDownload=null,setupJob=null,lastSetup=null;
+ let prefs={global:'qwen21-q5km',chat:null,adventure:null},operation=null,lastDownload=null,setupJob=null,lastSetup=null;
  try{const saved=JSON.parse(fs.readFileSync(file,'utf8'));for(const k of SCOPES)if(safe(saved[k]))prefs[k]=saved[k]}catch{}
  const save=()=>{const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(prefs,null,2));fs.renameSync(temp,file)};
  const initial=()=>{
   if(prefs.global)return prefs.global;
   if(studio.snapshot().settings.engine==='koboldcpp')return 'koboldcpp';
   const hub=comfy.models.snapshot().settings.selected;
-  if(['flux-klein','z-turbo'].includes(hub)&&comfy.models.localStatus().some(p=>p.id===hub&&p.installed))return hub;
+  if([...QWEN_IDS,'flux-klein','z-turbo'].includes(hub)&&comfy.models.localStatus().some(p=>p.id===hub&&p.installed))return hub;
   return studio.snapshot().settings.modelPack||'sdxl';
  };
  const choice=scope=>prefs[scope]||initial();
@@ -68,12 +69,12 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  async function select({id,scope='global',inherit=false}={}){
   if(!SCOPES.includes(scope))throw Error('Unknown image-use location');
   if(inherit&&scope!=='global'){prefs[scope]=null;save();return {choices:{...prefs},selected:choice(scope)}}
-  if(!safe(id))throw Error('Choose FLUX, Z-Image, SDXL, KoboldCpp or Custom');
+  if(!safe(id))throw Error('Choose an installed image model or quantization.');
   prefs[scope]=id;save();
   if(scope==='global'){
    const checkpoint=id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint?(await comfy.catalog()).checkpoints?.[0]||'':null;
-   await studio.action('/studio/configure',{engine:id==='koboldcpp'?'koboldcpp':'comfyui',modelPack:['flux-klein','z-turbo'].includes(id)?id:'sdxl',...(checkpoint?{comfyCheckpoint:checkpoint}:{})});
-   if(['sdxl','flux-klein','z-turbo'].includes(id))comfy.models.select({id});
+   await studio.action('/studio/configure',{engine:id==='koboldcpp'?'koboldcpp':'comfyui',modelPack:[...QWEN_IDS,'flux-klein','z-turbo'].includes(id)?id:'sdxl',...(checkpoint?{comfyCheckpoint:checkpoint}:{})});
+   if(['sdxl','flux-klein','z-turbo',...QWEN_IDS].includes(id))comfy.models.select({id});
   }
   return {selected:choice(scope),scope,choices:{...prefs}};
  }
@@ -89,7 +90,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   return {...input,modelPack:id==='koboldcpp'?'sdxl':id,engine};
  }
  function startDownload({id,confirm=false}={}){
-  if(!['flux-klein','z-turbo','sdxl'].includes(id))throw Error('Select FLUX, Z-Image or SDXL for a downloadable ComfyUI model.');
+  if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Select FLUX, Z-Image or SDXL for a downloadable ComfyUI model.');
   if(confirm!==true)throw Error('Confirm downloading the model and all of its dependencies.');
   if(operation||comfy.models.snapshot().download)throw Error('A model download is already running.');
   const folder=configureRoot();
@@ -107,7 +108,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  }
  function setup({id,confirm=false}={}){
   if(confirm!==true)throw Error('Click Install engine + model to download the selected model and runtime.');
-  if(!['flux-klein','z-turbo','sdxl'].includes(id))throw Error('Choose a downloadable image model.');
+  if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Choose a downloadable image model.');
   if(setupJob||operation||comfy.models.snapshot().download)throw Error('Image model setup is already running.');
   const job={id,phase:'checking engine',startedAt:Date.now(),cancelled:false};setupJob=job;lastSetup=null;
   const check=()=>{if(job.cancelled)throw Error('Setup cancelled. Downloaded files are preserved.');};

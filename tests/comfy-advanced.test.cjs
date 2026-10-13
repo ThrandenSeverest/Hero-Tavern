@@ -72,6 +72,14 @@ test('Live ComfyUI mock preserves batch PNGs and exact seed in local image galle
   assert.ok(Object.values(graph).some(node=>node.class_type==='Flux2Scheduler'));
   assert.ok(Object.values(graph).some(node=>node.class_type==='EmptyFlux2LatentImage'));
   assert.ok(!Object.values(graph).some(node=>node.class_type==='CheckpointLoaderSimple'),'FLUX must not depend on SDXL checkpoint node');
+  // Regression: selected FLUX must not hijack a standalone upscale request.
+  const original='1720000000000-aabbccddeeff.png';
+  fs.writeFileSync(path.join(root,'Images',original),png);
+  const upscaled=await adapter.generate({...params,modelPack:'flux-klein',operation:'upscale',upscaleFactor:2,upscaleMethod:'bicubic'},{sourceName:original,checkpoint:''});
+  assert.match(upscaled.url,/images\\/output\\//);
+  assert.ok(Object.values(graph).some(node=>node.class_type==='ImageScaleBy'&&node.inputs.upscale_method==='bicubic'));
+  assert.ok(!Object.values(graph).some(node=>node.class_type==='Flux2Scheduler'));
+
 
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));fs.rmSync(root,{recursive:true,force:true})}
 });

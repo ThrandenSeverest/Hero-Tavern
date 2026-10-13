@@ -9,7 +9,13 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  let prefs={global:null,chat:null,adventure:null},operation=null,lastDownload=null;
  try{const saved=JSON.parse(fs.readFileSync(file,'utf8'));for(const k of SCOPES)if(safe(saved[k]))prefs[k]=saved[k]}catch{}
  const save=()=>{const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(prefs,null,2));fs.renameSync(temp,file)};
- const initial=()=>prefs.global||(studio.snapshot().settings.engine==='koboldcpp'?'koboldcpp':studio.snapshot().settings.modelPack||'sdxl');
+ const initial=()=>{
+  if(prefs.global)return prefs.global;
+  if(studio.snapshot().settings.engine==='koboldcpp')return 'koboldcpp';
+  const hub=comfy.models.snapshot().settings.selected;
+  if(['flux-klein','z-turbo'].includes(hub)&&comfy.models.localStatus().some(p=>p.id===hub&&p.installed))return hub;
+  return studio.snapshot().settings.modelPack||'sdxl';
+ };
  const choice=scope=>prefs[scope]||initial();
  function rootForModels(){
   const configured=comfy.models.snapshot().settings.modelRoot;
@@ -71,14 +77,18 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   return {...input,modelPack:id==='koboldcpp'?'sdxl':id,engine:id==='koboldcpp'?'koboldcpp':'comfyui'};
  }
  function startDownload({id,confirm=false}={}){
-  if(!['flux-klein','z-turbo'].includes(id))throw Error('Select a downloadable ComfyUI model pack (FLUX or Z-Image). SDXL uses installed checkpoints.');
+  if(!['flux-klein','z-turbo','sdxl'].includes(id))throw Error('Select FLUX, Z-Image or SDXL for a downloadable ComfyUI model.');
   if(confirm!==true)throw Error('Confirm downloading the model and all of its dependencies.');
   if(operation||comfy.models.snapshot().download)throw Error('A model download is already running.');
   const folder=configureRoot();
   operation={id};lastDownload=null;
   // Keep this background promise observed. HTTP responds immediately so UI can poll/cancel.
   Promise.resolve().then(()=>comfy.models.downloadPack({id,confirm:true}))
-   .then(x=>{lastDownload={ok:true,packId:id,finishedAt:new Date().toISOString(),message:'Model files saved to '+x.modelRoot+'. If ComfyUI is already running, refresh or restart it to discover new files.'}})
+   .then(async x=>{
+     if(id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint)
+      await studio.action('/studio/configure',{comfyCheckpoint:'sd_xl_base_1.0.safetensors'});
+     lastDownload={ok:true,packId:id,finishedAt:new Date().toISOString(),message:'Model files saved to '+x.modelRoot+'. If ComfyUI was already running, restart it to discover new files.'};
+    })
    .catch(e=>{lastDownload={ok:false,packId:id,finishedAt:new Date().toISOString(),message:e.message}})
    .finally(()=>{operation=null});
   return {started:true,packId:id,directory:folder};

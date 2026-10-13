@@ -371,7 +371,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
              if(req.url==='/image/model-center/select'){json(200,await imageCenter.select(data));return;}
              if(req.url==='/image/model-center/download'){if(imageJob)throw Error('Finish the image first.');json(202,imageCenter.startDownload(data));return;}
              if(req.url==='/image/model-center/cancel'){json(200,imageCenter.cancelDownload());return;}
-             if(req.url==='/image/model-center/folder'){json(200,{modelRoot:imageCenter.configureRoot()});return;}
+             if(req.url==='/image/model-center/folder'){json(200,{modelRoot:imageCenter.configureRoot({preferManaged:true})});return;}
              if(req.url==='/comfy/runtime/configure'){json(200,comfyRuntime.configure(data));return;}
              if(req.url==='/comfy/runtime/start'){json(200,await comfyRuntime.start());return;}
              if(req.url==='/comfy/runtime/stop'){if(imageJob)throw Error('Image generation is active.');json(200,await comfyRuntime.stop());return;}

@@ -11,6 +11,7 @@ const {createStoryAPI}=require('./StoryAPI.cjs');
 const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {createComfyAdapter}=require('./ComfyAdapter.cjs');
+const {createLoRAManager}=require('./LoRAManager.cjs');
 const {createComfyRuntime}=require('./ComfyRuntime.cjs');
 const {createImageModelCenter}=require('./ImageModelCenter.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
@@ -86,6 +87,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
     const comfy=createComfyAdapter(root);
+    const loraManager=createLoRAManager(root,{modelRoot:()=>comfy.models.snapshot().settings.modelRoot||comfyRuntime.installed()?.models||''});
     const comfyRuntime=createComfyRuntime(root);
     const pipeline = createPipeline({root,backendURL,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
     const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady});
@@ -336,12 +338,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
-        const assets={'/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
+        const assets={'/lora-library.js':'LoRALibraryUI.js','/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
         if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
         if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
+        if(req.method==='GET'&&req.url.startsWith('/lora/library')){const q=new URL(req.url,'http://127.0.0.1').searchParams;try{json(200,loraManager.list({pack:q.get('pack')||'',checkpoint:q.get('checkpoint')||''}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/image/model-center'){json(200,await imageCenter.status());return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
@@ -368,6 +371,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 }
                 json(200,await assistant.action(req.url,data));return;
              }
+             if(req.url.startsWith('/lora/')){const operations={'/lora/assign':()=>loraManager.assign(data),'/lora/upload/start':()=>loraManager.begin(data),'/lora/upload/chunk':()=>loraManager.chunk(data),'/lora/upload/finish':()=>loraManager.finish(data),'/lora/cancel':()=>loraManager.cancel(),'/lora/browse':()=>loraManager.browse(data),'/lora/version':()=>loraManager.getVersion(data.versionId,data.token),'/lora/download':()=>loraManager.startDownload(data)};if(!operations[req.url])throw Error('Unknown LoRA action.');json(200,await operations[req.url]());return;}
              if(req.url==='/image/model-center/status'){json(200,await imageCenter.status());return;}
              if(req.url==='/image/model-center/setup'){if(imageJob)throw Error('Finish image generation before setting up or restarting an image engine.');json(202,imageCenter.setup(data));return;}
              if(req.url==='/image/model-center/diagnose'){json(200,await comfy.diagnosePack(data.id));return;}
@@ -394,7 +398,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/gallery/import'){json(200,imageGallery.importPNG(data));return;}
              if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
-            if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,req.url==='/studio/generate'?imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global'):data));return;}
+            if(req.url.startsWith('/studio/')){const input=req.url==='/studio/generate'?imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global'):data;if(req.url==='/studio/generate'&&input.lora?.length)input.lora=loraManager.validateSelection(input.lora,input.modelPack,studio.snapshot().settings.comfyCheckpoint);json(200,await studio.action(req.url,input));return;}
             if(req.url==='/performance/system'){json(200,await diagnosticEnvironment());return;}
             if(req.url==='/performance/apply'){const preset=performancePreset(data.preset,await systemInfo());if(data.contextSize!==undefined)preset.contextSize=data.contextSize;lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,null,30000);const configFile=path.join(root,'backend.json'),before=fs.existsSync(configFile)?fs.readFileSync(configFile):null;fs.writeFileSync(configFile,JSON.stringify(preset));try{backendArguments(root,'');}catch(e){if(before)fs.writeFileSync(configFile,before);throw e;}const gen=readSettings(root),isQwen=profileFor(root,selected()).Family?.includes('Qwen');saveSettings(root,{...gen,temperature:isQwen?0.7:0.8,top_p:isQwen?0.8:0.95,min_p:isQwen?0:0.05,top_k:20,maxReplyTokens:768,memoryTokens:384,recentMessages:24,thinkingMode:'off'});await runBackend();json(200,{preset,environment:await diagnosticEnvironment()});return;}
             if(req.url.startsWith('/writer/api/')){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});json(200,await writerAPI.action(req.url,data,controller.signal));return;}
@@ -408,7 +412,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/thinking/start'){json(200,await thinking.start());return;}
             if(req.url==='/thinking/stop'){thinking.stop();json(200,thinking.snapshot());return;}
             if(req.url==='/images/cancel'){studio.cancel();await comfy.cancel();await images.action('/images/cancel',{});json(200,{cancelRequested:true,studio:studio.snapshot(),comfy:comfy.snapshot()});return;}
-             if(req.url==='/images/start'&&studio.snapshot().settings.releaseGPU&&backend){textPausedForImages=true;lastAttempt=selected();stopBackend('image');await waitUntil(()=>!backend,null,30000);}if(req.url==='/images/generate'){json(200,await studio.action('/studio/generate',imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global')));return;}if(req.url.startsWith('/images/')){const result=await images.action(req.url,data);if(req.url==='/images/stop'&&textPausedForImages){await waitUntil(()=>!images.snapshot().running,null,30000);textPausedForImages=false;await ensureText();}json(200,result);return;}
+             if(req.url==='/images/start'&&studio.snapshot().settings.releaseGPU&&backend){textPausedForImages=true;lastAttempt=selected();stopBackend('image');await waitUntil(()=>!backend,null,30000);}if(req.url==='/images/generate'){const input=imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global');if(input.lora?.length)input.lora=loraManager.validateSelection(input.lora,input.modelPack,studio.snapshot().settings.comfyCheckpoint);json(200,await studio.action('/studio/generate',input));return;}if(req.url.startsWith('/images/')){const result=await images.action(req.url,data);if(req.url==='/images/stop'&&textPausedForImages){await waitUntil(()=>!images.snapshot().running,null,30000);textPausedForImages=false;await ensureText();}json(200,result);return;}
             if(req.url==='/memory/get'){json(200,readMemory(root,data.id));return;}
             if(req.url==='/memory/save'){json(200,editMemory(root,data.id,data));return;}
             if(req.url==='/task'){

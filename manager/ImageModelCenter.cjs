@@ -51,9 +51,11 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
        !catalog.available&&!managed.detected?'ComfyUI is not running. Connect an existing instance or install Portable.':
        p?.missing?.length?'Missing: '+p.missing.join(', '):null};
   });
+  const generation=comfy.snapshot?.().active||null;
   return {choices:{global:initial(),chat:choice('chat'),adventure:choice('adventure'),overrides:{chat:prefs.chat,adventure:prefs.adventure}},
     models,comfy:{connected:!!catalog.available,error:catalog.error||managed.error||'',mode:managed.mode,running:managed.running,detected:managed.detected,devices:catalog.devices||[],warnings:catalog.warnings||[],
       modelsDirectory:rootForModels(),modelDirectorySet:!!comfy.models.snapshot().settings.modelRoot},
+    activeGeneration:generation&&{phase:generation.phase,progress:generation.progress,step:generation.step,totalSteps:generation.totalSteps,elapsedMs:generation.elapsedMs,jobId:generation.id},
     download:download?{kind:'model',...download}:operation?{kind:'model',phase:'starting',packId:operation.id,bytes:0,total:0}:null,
     lastDownload,install:managed.install||null,createdAt:new Date().toISOString()};
  }

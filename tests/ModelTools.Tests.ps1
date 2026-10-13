@@ -9,7 +9,8 @@ function Expect-Failure([scriptblock]$Action) {
 }
 try {
     $catalogPath = Join-Path $PSScriptRoot '..\manager\models.json'
-    $expectedCount = @(Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json).Count
+    $rawCatalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+    $expectedCount = $rawCatalog.Count
     $catalog = @(Read-ModelCatalog $catalogPath)
     if ($catalog.Count -ne $expectedCount -or $catalog[0].Label -isnot [string]) { throw 'Catalog must contain individual model entries, not a nested array.' }
     if ([long]$catalog[0].Size -ne 5030000000L) { throw 'Default model size conversion failed.' }

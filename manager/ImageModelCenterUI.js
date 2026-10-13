@@ -44,6 +44,15 @@ function modelCard(model){
   card.append(box);
  }
  const operations=element('div',null,'actions');
+ if(['flux-klein','z-turbo','sdxl'].includes(model.id)){
+  operations.append(action('Check workflow / dependencies',async()=>{
+   const report=await req('/image/model-center/diagnose',{id:model.id});
+   const message=report.ok?'✓ '+report.advice:
+      '⚠ '+report.advice+(report.missingNodes?.length?'\nMissing nodes: '+report.missingNodes.join(', '):'')+
+      (report.missingFiles?.length?'\nMissing models: '+report.missingFiles.join(', '):'');
+   alertError(Error(message));
+  }));
+ }
  if(['sdxl','flux-klein','z-turbo'].includes(model.id)&&!model.installed&&!model.downloaded){
   operations.append(action('Install '+choiceLabel(model.id)+' files',async()=>{
    const size=model.downloadGiB?' (~'+model.downloadGiB+' GB download)':'';

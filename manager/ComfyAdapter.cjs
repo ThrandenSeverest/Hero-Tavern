@@ -153,7 +153,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(freeBytes<1024*1024*1024)throw Error('Less than 1 GiB free where Hero Tavern saves images. Free disk space before generating.');
    const custom=!!params.workflowId;
    const chosenPack=custom?null:models.pack(params.modelPack||models.snapshot().settings.selected||'sdxl');
-   const managed=!!chosenPack&&chosenPack.id!=='sdxl';
+   const managed=!!chosenPack&&chosenPack.id!=='sdxl'&&params.operation!=='upscale';
    const mode=custom?'custom':params.operation||((sourceName&&maskData)?'inpaint':sourceName?'img2img':'txt2img');
    let resolvedFiles=null;
    if(managed){
@@ -165,6 +165,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    }else if(!custom&&mode!=='upscale'){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
    else if(custom&&params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
    if(mode==='upscale'&&!sourceName)throw Error('Choose a gallery image to upscale.');
+   if(mode==='upscale'&&params.lora?.length)throw Error('LoRAs apply to diffusion generation, not standalone upscaling.');
    if(params.lora?.length){
     const installed=await modelList('loras');
     if(params.lora.some(item=>!installed.includes(item.name)))throw Error('Selected LoRA was not found in ComfyUI model library.');

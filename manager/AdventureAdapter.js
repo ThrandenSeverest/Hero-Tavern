@@ -2,7 +2,7 @@
 const HERO_TOKEN='__TOKEN__';
 async function heroRequest(route,data){const r=await fetch(route,{method:data===undefined?'GET':'POST',headers:{'X-Hero-Token':HERO_TOKEN,'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'Local service failed');return j}
 window.kv={gameState:{get:async key=>(await heroRequest('/adventure/storage/get',{key})).value,set:async(key,value)=>heroRequest('/adventure/storage/set',{key,value})}};
-window.generateText=async prompt=>{
+window.generateText=async (prompt,options={})=>{
  let notes='';
  if(typeof G!=='undefined'&&G?.log){
   const entries=G.log.filter(x=>x.text).map(x=>({type:x.type,npcId:x.npcId,text:x.text})),cut=Math.max(0,entries.length-12);
@@ -17,7 +17,7 @@ window.generateText=async prompt=>{
    notes=memory.summary;
   }
  }
- return (await heroRequest('/task',{prompt:String(prompt)+(notes?'\nESTABLISHED EARLIER EVENTS (continuity, current game mechanics override outdated numbers):\n'+notes:''),mode:'adventure'})).text;
+ return (await heroRequest('/task',{prompt:String(prompt)+(notes?'\nESTABLISHED EARLIER EVENTS (continuity, current game mechanics override outdated numbers):\n'+notes:''),mode:options.stage==='dm'?'adventure-dm':options.stage==='narrator'?'adventure-narrator':'adventure'})).text;
 };
 window.generateImage=async(prompt,options={})=>new URL((await heroRequest('/images/generate',{prompt:String(prompt),...options,surface:'adventure'})).url,location.origin).href;
 // Bundle the pinned 514-spell catalogue so offline boot does not depend on GitHub.

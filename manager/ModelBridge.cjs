@@ -413,7 +413,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/memory/save'){json(200,editMemory(root,data.id,data));return;}
             if(req.url==='/task'){
                 if(!backendReady)throw Error('Load a text model in Models first.');
-                if(!['adventure','character','summary'].includes(data.mode)||typeof data.prompt!=='string')throw Error('Invalid task.');
+                if(!['adventure','adventure-dm','adventure-narrator','character','summary'].includes(data.mode)||typeof data.prompt!=='string')throw Error('Invalid task.');
                 const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});
                 const prompt='<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n';
                 const structured=data.mode==='adventure'&&/\bJSON\b|Return\s*\{/i.test(data.prompt);const result=await pipeline.generate({prompt,stream:false,stop:['<|im_end|>','<|endoftext|>']},controller.signal,{mode:structured?'adventure-json':data.mode});json(200,{text:result.choices[0].text});return;

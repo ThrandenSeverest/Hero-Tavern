@@ -82,6 +82,9 @@ const initHeroTavern = async () => {
         if(engine.backendReady)connectLocalAI(engine);
         else lastEngine='';
     });
+    window.addEventListener('message',event=>{
+      if(event.origin===bridgeOrigin&&event.source===adventure.contentWindow&&event.data?.type==='hero-open-panel'&&event.data.section==='image-setup')show('image-setup');
+    });
     const chatIdentity=()=>{const c=context?.();return c&&(c.characterId!==undefined||c.groupId)&&c.chatId?String(c.groupId||c.characters?.[c.characterId]?.avatar||'character')+':'+c.chatId:'';};
     const pending=new Map();
     function bridgeRequest(route,data){return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);reject(Error('Local service timed out.'))},600000);pending.set(id,{resolve,reject,timer});frame.contentWindow.postMessage({type:'hero-request',id,route,data},bridgeOrigin)});}

@@ -2,6 +2,7 @@
 // One source of truth for image generation in Create, character chats and Adventure.
 // Never download or install software without explicit confirmation.
 const fs=require('node:fs'),path=require('node:path');
+const {spawn}=require('node:child_process');
 const QWEN_IDS=require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>p.id);
 const IDS=[...QWEN_IDS,'flux-klein','z-turbo','sdxl','koboldcpp','custom'],SCOPES=['global','chat','adventure'];
 const safe=(x)=>IDS.includes(x);
@@ -106,6 +107,29 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    .finally(()=>{operation=null});
   return {started:true,packId:id,directory:folder};
  }
+ async function installQwenGGUFNode(job){
+  if(!job.id.startsWith('qwen21-'))return;
+  const installed=runtime.installed();
+  if(!installed?.base||!installed?.python)throw Error('Qwen GGUF requires a managed ComfyUI Portable runtime. Install or configure managed Portable before installing the custom node.');
+  const dir=path.join(installed.base,'ComfyUI','custom_nodes','ComfyUI-GGUF');
+  if(fs.existsSync(path.join(dir,'nodes.py')))return;
+  if(fs.existsSync(dir))throw Error('Incomplete ComfyUI-GGUF folder detected at '+dir+'. Repair it manually; no existing files were removed.');
+  fs.mkdirSync(path.dirname(dir),{recursive:true});
+  const log=path.join(root,'Logs','qwen-gguf-install.log');
+  async function run(cmd,args,cwd){
+   const fd=fs.openSync(log,'a');
+   try{
+    const child=spawn(cmd,args,{cwd,windowsHide:true,stdio:['ignore',fd,fd]});
+    const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)});
+    if(code!==0)throw Error('Dependency installer exited with '+code+'. Inspect '+log);
+   }finally{fs.closeSync(fd)}
+  }
+  job.phase='installing ComfyUI-GGUF custom loader';
+  await run('git',['clone','--depth','1','https://github.com/city96/ComfyUI-GGUF.git',dir],path.dirname(dir));
+  if(!fs.existsSync(path.join(dir,'nodes.py')))throw Error('ComfyUI-GGUF clone has no nodes.py; inspect '+log);
+  const requirements=path.join(dir,'requirements.txt');
+  if(fs.existsSync(requirements)){job.phase='installing GGUF Python requirements';await run(installed.python,['-m','pip','install','-r',requirements],dir);}
+ }
  function setup({id,confirm=false}={}){
   if(confirm!==true)throw Error('Click Install engine + model to download the selected model and runtime.');
   if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Choose a downloadable image model.');
@@ -114,7 +138,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   const check=()=>{if(job.cancelled)throw Error('Setup cancelled. Downloaded files are preserved.');};
   Promise.resolve().then(async()=>{
    check();if(!runtime.installed()&&!await comfy.available()){job.phase='installing ComfyUI engine';await runtime.installPortable({confirm:true});}
-   check();job.phase='detecting model folder';configureRoot();
+   check();job.phase='detecting model folder';configureRoot();await installQwenGGUFNode(job);
    job.phase='downloading model and dependencies';await comfy.models.downloadPack({id,confirm:true});
    check();if(id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint)await studio.action('/studio/configure',{comfyCheckpoint:'sd_xl_base_1.0.safetensors'});
    if(runtime.installed()){

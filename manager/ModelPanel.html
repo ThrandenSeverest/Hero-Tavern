@@ -583,10 +583,12 @@ async function heroHubRefresh(){
   const packs=engine.packs||hub.packs||[];
   el('hero-pack-cards').replaceChildren(...packs.map(heroHubCard));
   const active=packs.find(p=>p.id===el('hero-pack-select').value);
-  const running=engine.modelHub?.download||hub.hub?.download||null;
-  el('hero-pack-download').disabled=!active||active.installed||active.downloaded||active.id==='sdxl'||!!running;
-  el('hero-pack-cancel').disabled=!running;
-  status.textContent=running?'Downloading '+running.file+' · '+(running.bytes/1073741824).toFixed(2)+' GiB / '+(running.total/1073741824).toFixed(2)+' GiB · '+running.phase:
+  const center=await request('/image/model-center/status');
+  const running=engine.modelHub?.download||hub.hub?.download||center.download||null;
+  const setup=center.setup||null;
+  el('hero-pack-download').disabled=!active||active.installed||active.downloaded||!!running||!!setup;
+  el('hero-pack-cancel').disabled=!running&&!setup;
+  status.textContent=setup?'Installing '+setup.packId+' · '+setup.phase:running?'Downloading '+(running.file||running.packId)+' · '+(running.bytes/1073741824).toFixed(2)+' GiB / '+(running.total/1073741824).toFixed(2)+' GiB · '+running.phase:
    active?(active.installed?'Ready in ComfyUI: ':active.downloaded?'Downloaded but not loaded by current ComfyUI: ':'Missing components for: ')+active.name+(active.missing?.length?' · '+active.missing.join(', '):''):'Select an image model.';
   runtimeStatus.textContent=engine.available?'ComfyUI connected on 127.0.0.1:8188':(engine.runtime?.running?'ComfyUI is loading…':'ComfyUI is not connected.');
   if(engine.runtime?.install){
@@ -620,7 +622,7 @@ el('hero-pack-download').onclick=async()=>{
   await heroHubRefresh();
  }catch(e){el('hero-pack-state').textContent=e.message}finally{heroHubDownloading=false;el('hero-pack-download').disabled=false}
 };
-el('hero-pack-cancel').onclick=async()=>{try{await request('/comfy/models/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
+el('hero-pack-cancel').onclick=async()=>{try{await request('/image/model-center/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
 el('hero-runtime-save').onclick=async()=>{
  try{
   const value=await request('/comfy/runtime/configure',{mode:el('hero-runtime-mode').value,folder:el('hero-runtime-folder').value||undefined,lowVram:el('hero-runtime-lowvram').checked});

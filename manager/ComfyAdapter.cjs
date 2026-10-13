@@ -173,7 +173,8 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const installed=await modelList('upscale_models');
     if(!installed.includes(params.upscaleModel))throw Error('The selected AI upscaler is not installed in ComfyUI.');
    }
-   let source,mask,sourceDimensions;
+   let source,mask,reference,sourceDimensions;
+   if(params.referenceName){const referenceBytes=fs.readFileSync(galleryFile(params.referenceName));checkPNG(referenceBytes,28*1024*1024);reference=await upload(referenceBytes,'reference',job.controller.signal);}
    if(sourceName){
     const sourceBytes=fs.readFileSync(galleryFile(sourceName));sourceDimensions=checkPNG(sourceBytes,28*1024*1024);
     if(sourceDimensions.width>2048||sourceDimensions.height>2048)throw Error('For 12 GB GPU safety, source images above 2048px need resizing first.');
@@ -189,7 +190,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(mode==='inpaint'&&!mask)throw Error('The inpaint brush selection cannot be empty.');
    if(mode==='upscale'&&sourceDimensions){if(params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)>1024)throw Error('For safe AI upscaling on 12 GB VRAM, select a source at most 1024 pixels per side.');if(!params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
-   const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,resolvedFiles:resolvedFiles}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
+   const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,reference,resolvedFiles:resolvedFiles}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
    job.phase='queued';listen(job);
    const response=await (await request('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:spec.graph,client_id:job.clientId}),signal:job.controller.signal},45000)).json();
    if(!response?.prompt_id)throw Error('ComfyUI rejected the workflow: '+JSON.stringify(response?.node_errors||response).slice(0,1500));
@@ -228,7 +229,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const name=Date.now()+'-'+crypto.randomBytes(6).toString('hex')+'.png';
     const dest=path.join(dir,name);
     fs.writeFileSync(dest,bytes,{flag:'wx'});
-    const details={engine:'comfyui',modelPack:chosenPack?.id||null,mode:spec.mode,workflowId:spec.workflowId||null,workflowName:spec.workflowName||null,model:custom?(spec.workflowName||'Custom ComfyUI workflow'):managed?chosenPack.name:checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
+    const details={engine:'comfyui',modelPack:chosenPack?.id||null,referenceName:params.referenceName||null,mode:spec.mode,workflowId:spec.workflowId||null,workflowName:spec.workflowName||null,model:custom?(spec.workflowName||'Custom ComfyUI workflow'):managed?chosenPack.name:checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
       width:size.width,height:size.height,steps:params.steps,seed:spec.seed,sampler_name:params.sampler_name,denoise:params.denoise,
       lora:params.lora||[],upscaleModel:params.upscaleModel||'',batch_size:spec.batch,batchIndex:images.length,promptId:job.id,remoteOutput:{filename:remote.filename,subfolder:remote.subfolder||'',type:'output'},
       createdAt:new Date().toISOString()};

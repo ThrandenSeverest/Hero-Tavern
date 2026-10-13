@@ -89,6 +89,7 @@ function render(state){
  const help=$('image-center-restart-note');
  help.textContent=connect?'ComfyUI is online. Newly downloaded model files may require restarting the engine.':state.comfy.detected?'Managed Portable detected; click Start ComfyUI below.':'Use Install ComfyUI below or connect your existing installation.';
  $('image-center-start').disabled=connect||!state.comfy.detected;
+ $('image-center-install').disabled=!!state.comfy.detected||!!state.install;
  $('image-center-restart').disabled=!state.comfy.detected||state.comfy.mode!=='managed'||!connect;
  $('image-center-model-path').placeholder=state.comfy.modelsDirectory||'C:\\AI\\ComfyUI\\models';
 }
@@ -124,12 +125,18 @@ function makeUI(){
  main.append(choices);
  const actions=element('div',null,'actions');
  const start=action('Start ComfyUI',async()=>{await req('/comfy/runtime/start',{});await refresh(true)});start.id='image-center-start';
+ const install=action('Install ComfyUI Portable',async()=>{
+  const oldInstall=$('hero-runtime-install');
+  if(!oldInstall)throw Error('ComfyUI installation control is missing.');
+  oldInstall.click();
+  await refresh(true);
+ });install.id='image-center-install';
  const restart=action('Restart managed ComfyUI (detect new models)',async()=>{
   if(!confirm('Restart the managed ComfyUI engine? Only the Hero Tavern-owned process will be restarted; existing images/models stay untouched.'))return;
   const current=await req('/studio/get');if(current.busy)throw Error('Finish generating before restarting.');
   await req('/comfy/runtime/stop',{});await req('/comfy/runtime/start',{});await refresh(true);
  });restart.id='image-center-restart';
- actions.append(action('Check all models',()=>refresh(true)),start,restart);
+ actions.append(action('Check all models',()=>refresh(true)),install,start,restart);
  const note=element('p','', 'small');note.id='image-center-restart-note';
  main.append(actions,note);
  const models=element('div',null,'hero-unified-models');models.id='image-center-cards';

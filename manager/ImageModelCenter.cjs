@@ -77,7 +77,8 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    if(!input.workflowId)throw Error('Select a saved custom ComfyUI workflow before generating.');
    return {...input,modelPack:'sdxl',engine:'comfyui'};
   }
-  return {...input,modelPack:id==='koboldcpp'?'sdxl':id,engine:id==='koboldcpp'?'koboldcpp':'comfyui'};
+  const engine=id==='koboldcpp'?'koboldcpp':id==='sdxl'?(studio.snapshot().settings.engine||'auto'):'comfyui';
+  return {...input,modelPack:id==='koboldcpp'?'sdxl':id,engine};
  }
  function startDownload({id,confirm=false}={}){
   if(!['flux-klein','z-turbo','sdxl'].includes(id))throw Error('Select FLUX, Z-Image or SDXL for a downloadable ComfyUI model.');

@@ -3,7 +3,7 @@
 // A pack is a complete recipe, not a single checkpoint. No hidden background installs.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const PACKS=[
- {id:'sdxl',name:'SDXL · art & LoRA',family:'sdxl',downloadGiB:null,license:'Depends on checkpoint',description:'Painted and photographic artwork; compatible checkpoint & LoRA selection.',recommended:'Illustration and classic Stable Diffusion workflows',vram:'8–12 GB',files:[],docs:'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0',steps:28,cfg:6,width:1024,height:1024},
+ {id:'sdxl',name:'SDXL · art & LoRA',family:'sdxl',downloadGiB:6.94,license:'OpenRAIL++ (Stability AI)',description:'Painted and photographic artwork; compatible checkpoint & LoRA selection.',recommended:'Illustration and classic Stable Diffusion workflows',vram:'8–12 GB',files:[{group:'checkpoints',name:'sd_xl_base_1.0.safetensors',repo:'stabilityai/stable-diffusion-xl-base-1.0',source:'sd_xl_base_1.0.safetensors'}],docs:'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0',steps:28,cfg:6,width:1024,height:1024},
  {id:'flux-klein',name:'FLUX.2 Klein 4B · character edits',family:'flux2',downloadGiB:16.3,license:'Apache-2.0 (verify each upstream file)',description:'Fast multi-component image engine for reference editing and coherent scenes.',recommended:'Character fidelity and references',vram:'~9 GB+ (varies by workflow)',docs:'https://docs.comfy.org/tutorials/flux/flux-2-klein',steps:4,cfg:1,width:1024,height:1024,
   files:[
    {group:'diffusion_models',name:'flux-2-klein-4b.safetensors',repo:'Comfy-Org/vae-text-encorder-for-flux-klein-4b',source:'split_files/diffusion_models/flux-2-klein-4b.safetensors'},
@@ -88,7 +88,8 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   return hash.digest('hex');
  }
  async function metadata(file){
-  const url='https://huggingface.co/api/models/'+file.repo+'/tree/main/'+file.source.slice(0,file.source.lastIndexOf('/'))+'?recursive=false';
+  const parent=file.source.includes('/')?'/'+file.source.slice(0,file.source.lastIndexOf('/')):'';
+  const url='https://huggingface.co/api/models/'+file.repo+'/tree/main'+parent+'?recursive=false';
   const res=await fetchFn(url,{signal:AbortSignal.timeout(20000)});
   if(!res.ok)throw Error('Hugging Face model manifest HTTP '+res.status);
   const result=await res.json(),item=Array.isArray(result)?result.find(n=>n.path===file.source):null;
@@ -100,7 +101,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
  async function downloadPack({id,confirm=false}={}){
   const p=pack(id);
   if(confirm!==true)throw Error('Confirm the model pack download first. Files can take many GB.');
-  if(p.id==='sdxl')throw Error('Select an existing SDXL checkpoint from Image Studio. There is no pinned SDXL pack here.');
+  
   if(download)throw Error('Another model download is running.');
   if(!settings.modelRoot)throw Error('Configure the ComfyUI models directory before downloading.');
   const job={packId:id,file:'',bytes:0,total:0,phase:'preflight',process:null,abort:false,part:''};download=job;

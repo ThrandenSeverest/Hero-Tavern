@@ -121,9 +121,9 @@
 <label>Image-to-image strength (denoise)<input id="hero-comfy-denoise" type="range" min="0.1" max="1" step="0.05" value="0.55"></label>
 </div>
 <div class="controls">
-<label>LoRA #1<select id="hero-comfy-lora-1"><option value="">None</option></select></label>
+<label>Compatible LoRA #1<select id="hero-comfy-lora-1"><option value="">None</option></select></label>
 <label>LoRA strength #1<input id="hero-comfy-lora-weight-1" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
-<label>LoRA #2<select id="hero-comfy-lora-2"><option value="">None</option></select></label>
+<label>Compatible LoRA #2<select id="hero-comfy-lora-2"><option value="">None</option></select></label>
 <label>LoRA strength #2<input id="hero-comfy-lora-weight-2" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
 </div>
 <p class="small">Batch variants share a sampled seed for reproducibility. Regional multi-person generation works with the Scene Composer above when ComfyUI is selected. LoRAs must already be installed in ComfyUI.</p>
@@ -333,7 +333,7 @@ function updateStudioModelStatus(){
   if(!pack.installed)status.classList.add('error');
  }else status.textContent='Checking model files and ComfyUI availability…';
  const isSDXL=choice==='sdxl';
- for(let i=1;i<=2;i++)el('hero-comfy-lora-'+i).disabled=!isSDXL;
+ for(let i=1;i<=2;i++)el('hero-comfy-lora-'+i).disabled=!(isSDXL||choice==='flux-klein');
  const noEdit=choice==='koboldcpp'||choice==='z-turbo';
  if(noEdit&&el('hero-comfy-mode').value!=='txt2img'){
   el('hero-comfy-mode').value='txt2img';el('hero-comfy-mode').dispatchEvent(new Event('change'));
@@ -411,7 +411,7 @@ el('image-generate').onclick=async()=>{
    refine:el('studio-refine').checked,engine,modelPack:pack,
    operation:choice==='koboldcpp'?'txt2img':el('hero-comfy-mode').value,
    batch_size:choice==='koboldcpp'?1:Number(el('hero-comfy-batch').value),
-   lora:choice==='sdxl'?heroSelectedLoras():[],
+   lora:['sdxl','flux-klein'].includes(choice)?heroSelectedLoras():[],
    ...(workflowId?{workflowId}:{}),
    ...(el('hero-comfy-mode').value==='img2img'&&choice!=='koboldcpp'?{sourceName:el('hero-comfy-reference').value,denoise:Number(el('hero-comfy-denoise').value)}:{}),
    ...(el('scene-enabled').checked?{scene:sceneData()}:{})

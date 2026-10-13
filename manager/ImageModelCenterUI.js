@@ -83,7 +83,7 @@ function render(state){
  $('image-center-cards').replaceChildren(...state.models.filter(m=>m.id!=='custom'&&m.id!=='koboldcpp').map(modelCard));
  renderDownload(state);
  for(const scope of ['global','chat','adventure']){
-  const selector=$('image-center-'+scope);if(!selector||document.activeElement===selector)return;
+  const selector=$('image-center-'+scope);if(!selector||document.activeElement===selector)continue;
   const value=scope==='global'?state.choices.global:(state.choices.overrides[scope]||'inherit');selector.value=value;
  }
  const help=$('image-center-restart-note');

@@ -9,7 +9,7 @@ export async function initStory({getContext,frame,show}){
  function identities(){for(const m of c().chat){m.extra=m.extra||{};m.extra.heroMessageId ||=m.heroMessageId||crypto.randomUUID();m.heroMessageId=m.extra.heroMessageId;}}
  let personaModule=await import('../../personas.js');
  async function sync(){if(!selected())return null;identities();await c().saveChat();const v=await rpc('/story/sync',{location:location(),template:card(),members:c().groupId?(c().groups.find(g=>g.id===c().groupId)?.members||[]):[],legacyMemoryKey:legacy(),profile:{personaAvatar:personaModule.user_avatar,persona:c().powerUserSettings?.persona_description||'',model:c().onlineStatus,promptProfile:c().powerUserSettings?.instruct?.preset||''}});c().chatMetadata.hero_tavern={schemaVersion:1,sessionId:v.session.id,characterId:v.session.characterId};view=v;publish();return v;}
- function publish(){frame.contentWindow.postMessage({type:'hero-story-view',view},origin);updateMessageMenus();const title=document.querySelector('#hero-session-name');if(title)title.textContent=view?.session.title||'Select a chat';}
+ function publish(){frame.contentWindow.postMessage({type:'hero-story-view',view},origin);updateMessageMenus();renderTrackerStrip();const title=document.querySelector('#hero-session-name');if(title)title.textContent=view?.session.title||'Select a chat';}
  function notify(error){window.toastr?.error(error.message||String(error),'Hero Tavern');}
  async function open(session){c().stopGeneration?.();if(session.profile?.personaAvatar){if(c().powerUserSettings.personas?.[session.profile.personaAvatar])await personaModule.setUserAvatar(session.profile.personaAvatar);else window.toastr?.warning('The saved player persona is missing; its association was preserved.');}if(c().groupId!==session.location.group){if(session.location.group){await c().openGroupChat(session.location.group,session.location.filename);return sync()}const index=c().characters.findIndex(x=>x.avatar===session.location.avatar);if(index<0)throw Error('This session’s character is missing. Import its card or archive first.');if(Number(c().characterId)!==index)await c().selectCharacterById(String(index));}if(session.location.group)await c().openGroupChat(session.location.group,session.location.filename);else await c().openCharacterChat(session.location.filename);await sync();show('chat');}
  async function run(op,data={}){
@@ -66,6 +66,62 @@ export async function initStory({getContext,frame,show}){
   for(const mark of v.session.bookmarks){const button=document.createElement('button');button.textContent='Start from '+mark.label;button.onclick=async()=>{try{const index=v.messages.findIndex(m=>m.extra.heroMessageId===mark.messageId);await run('fork',{mode:'branch',atIndex:index,bookmarkId:mark.id,title:title.value||mark.label});bg.remove()}catch(error){notify(error)}};box.append(button);}
  }
  async function rewind(index){const preview=await run('preview',{index}),{bg,box}=dialog('Rollback preview'),text=document.createElement('pre');text.textContent=preview.affected+' later messages are affected.\n'+preview.changes.map(x=>x.key+': '+JSON.stringify(x.from)+' → '+JSON.stringify(x.to)).join('\n')+'\n'+preview.memory+'\n'+preview.media;box.append(text);for(const [op,label]of [['fork','Rewind as New Branch (recommended)'],['restore','Restore This Session · preserve future as recovery']]){const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{b.disabled=true;await run(op,{mode:'branch',atIndex:index,expectedHead:preview.head});bg.remove()}catch(e){b.disabled=false;notify(e)}};box.append(b)}}
+
+ const trackerStrip=document.createElement('section');trackerStrip.id='hero-live-trackers';trackerStrip.setAttribute('aria-label','Live character trackers');if(sheld)sheld.prepend(trackerStrip);
+ const trackStyle=document.createElement('style');trackStyle.textContent=`
+ #hero-live-trackers{background:#1b2737;color:#e9edf6;border-bottom:1px solid #40556d;padding:8px 12px;font:12px system-ui;display:block}
+ #hero-live-trackers[hidden]{display:none}
+ #hero-live-trackers .hero-track-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+ #hero-live-trackers .hero-track-head strong{font-size:13px}
+ #hero-live-trackers button{font:inherit;background:#273850;border:1px solid #50617b;border-radius:7px;color:inherit;padding:5px 9px;cursor:pointer}
+ #hero-live-trackers .hero-track-grid{display:flex;gap:8px;flex-wrap:wrap}
+ #hero-live-trackers .hero-track-card{border:1px solid #40546c;background:#233247;border-radius:10px;padding:9px 11px;min-width:145px;max-width:260px;flex:1 1 150px;display:flex;flex-direction:column;gap:6px}
+ #hero-live-trackers .hero-track-title{display:flex;gap:6px;align-items:center;font-weight:600}
+ #hero-live-trackers .hero-track-value{font-size:13px;overflow-wrap:anywhere}
+ #hero-live-trackers .hero-track-bar{height:6px;border-radius:12px;background:#46546a;overflow:hidden}
+ #hero-live-trackers .hero-track-bar>span{display:block;background:#e3bc7c;height:100%;border-radius:12px}
+ #hero-live-trackers .hero-track-card small{color:#b0c0d2;font-size:11px;line-height:1.4;max-height:44px;overflow:hidden}
+ #hero-live-trackers .hero-track-meta{color:#acc0d5}
+ #hero-live-trackers details{width:100%}
+ #hero-live-trackers details>summary{cursor:pointer;margin-top:3px}
+ #hero-live-trackers .hero-track-actions{display:flex;gap:5px;flex-wrap:wrap}
+ @media(max-width:700px){#hero-live-trackers .hero-track-card{min-width:110px;flex-basis:130px}#hero-live-trackers{padding:7px}}
+ `;document.head.append(trackStyle);
+ function prettyTracker(d,value){if(d.type==='boolean')return value?'Yes':'No';if(d.type==='number')return String(value)+(d.unit||'');if(d.type==='enum')return String(value);if(d.type==='list')return value?.length?value.join(', '):'None';if(d.type==='relationship')return Object.entries(value||{}).map(([k,v])=>k+': '+v).join(' · ')||'No bonds';if(d.type==='timer')return value?.remaining+' '+(d.unit||'units')+' remaining';if(d.type==='quest')return (value?.stage||'Not started')+' · '+(value?.status||'inactive');return String(value??'');}
+ function renderTrackerStrip(){
+  if(!trackerStrip||!view||!selected()){if(trackerStrip)trackerStrip.hidden=true;return;}
+  const defs=view.session.definitions.filter(d=>d.enabled!==false&&d.visibility!=='hidden'),state=view.context?.state||{};
+  const visible=defs.filter(d=>Object.hasOwn(state,d.owner+':'+d.id));
+  trackerStrip.hidden=false;trackerStrip.replaceChildren();
+  const head=document.createElement('div');head.className='hero-track-head';
+  const title=document.createElement('strong');title.textContent='✦ Live story state';head.append(title);
+  const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
+  const edit=document.createElement('button');edit.textContent='Manage trackers';edit.onclick=()=>{show('trackers');sync().catch(notify)};head.append(edit);
+  const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.setAttribute('aria-expanded',String(trackerStrip.dataset.collapsed!=='true'));collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);
+  trackerStrip.append(head);
+  if(trackerStrip.dataset.collapsed==='true')return;
+  if(!visible.length){const empty=document.createElement('div');empty.className='hero-track-meta';empty.textContent='No visible trackers yet. Add a preset or use the AI tracker designer in Trackers.';trackerStrip.append(empty);return;}
+  const grid=document.createElement('div');grid.className='hero-track-grid';
+  for(const d of visible){
+   const value=state[d.owner+':'+d.id],tile=document.createElement('article');tile.className='hero-track-card';
+   const label=document.createElement('div');label.className='hero-track-title';label.textContent=(d.icon?d.icon+' ':'')+d.label;tile.append(label);
+   const amount=document.createElement('div');amount.className='hero-track-value';amount.textContent=prettyTracker(d,value);tile.append(amount);
+   if(d.type==='number'&&Number.isFinite(value)&&Number.isFinite(d.min)&&Number.isFinite(d.max)&&d.max>d.min){const bar=document.createElement('div');bar.className='hero-track-bar';bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',String(value));bar.setAttribute('aria-valuemin',String(d.min));bar.setAttribute('aria-valuemax',String(d.max));const fill=document.createElement('span');fill.style.width=(100*(value-d.min)/(d.max-d.min)).toFixed(1)+'%';bar.append(fill);tile.append(bar);}
+   const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=d.category||'Tracker details';details.append(summary);
+   for(const detail of [d.description,d.rules?.[String(value)],d.instructions,d.changeRules].filter(Boolean)){const p=document.createElement('p');p.textContent=detail;details.append(p);}
+   const actions=document.createElement('div');actions.className='hero-track-actions';const change=document.createElement('button');change.textContent='Edit value';change.onclick=async()=>{
+    try{const raw=prompt('New '+d.label+' (JSON for lists, relationships and quests)',JSON.stringify(value));if(raw===null)return;let next;
+     if(d.type==='number')next=Number(raw);else if(d.type==='boolean')next=raw==='true';else if(['list','relationship','timer','quest'].includes(d.type))next=JSON.parse(raw);else next=raw.replace(/^"|"$/g,'');
+     if(d.type==='enum'&&!d.allowedValues.includes(next))throw Error('Allowed: '+d.allowedValues.join(', '));
+     const current=await sync(),source=current.messages.at(-1);if(!source)throw Error('Send a message before editing a live state value.');
+     const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'Manual state update from chat'}]});view=result;publish();
+    }catch(e){notify(e)}
+   };actions.append(change);
+   const evidence=view.context?.provenance?.filter(e=>e.key===d.owner+':'+d.id).at(-1);if(evidence){const source=document.createElement('small');source.textContent='Last change: '+evidence.reason;details.append(source);}
+   details.append(actions);tile.append(details);grid.append(tile);
+  }
+  trackerStrip.append(grid);
+ }
  function updateMessageMenus(){for(const node of document.querySelectorAll('#chat .mes')){if(node.querySelector('.hero-message-menu'))continue;const index=Number(node.getAttribute('mesid'));if(!Number.isInteger(index))continue;const menu=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Story actions';menu.className='hero-message-menu';menu.append(summary);for(const [label,action]of [['Bookmark',async()=>{const label=prompt('Bookmark name','Before the next scene');if(label)await run('bookmark',{index,label})}],['Branch Here',()=>run('fork',{mode:'branch',atIndex:index})],['Rollback to Here',()=>rewind(index)],['View State Here',async()=>{const p=await run('preview',{index}),{box}=dialog('State at this message'),pre=document.createElement('pre');const v=await rpc('/story/state-at',{id:view.session.id,index});const visible=new Set(v.definitions.filter(d=>d.visibility!=='hidden').map(d=>d.owner+':'+d.id));pre.textContent=JSON.stringify(Object.fromEntries(Object.entries(v.state).filter(([k])=>visible.has(k))),null,2)+'\nReversals from current state:\n'+p.changes.map(x=>x.key+' → '+JSON.stringify(x.to)).join('\n');box.append(pre)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=e=>{e.preventDefault();Promise.resolve(action()).catch(notify)};menu.append(b);}node.append(menu);}}
  let currentGeneration='normal';c().eventSource.on(c().eventTypes.GENERATION_STARTED,type=>{currentGeneration=type;});
  c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration)||data.api_type!=='koboldcpp')return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};if(actionInstruction)data.hero_context.oneReply=actionInstruction;});

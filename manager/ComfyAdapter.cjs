@@ -42,7 +42,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
 
  const NODE_REQUIREMENTS={
   ...Object.fromEntries(require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>[p.id,['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','KSampler','VAEDecode','SaveImage']])),
-  'flux-klein':['UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','EmptyFlux2LatentImage','Flux2Scheduler','SamplerCustomAdvanced','RandomNoise','KSamplerSelect','CFGGuider','VAEDecode','SaveImage'],
+  'flux-klein':['LoraLoaderModelOnly','UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','EmptyFlux2LatentImage','Flux2Scheduler','SamplerCustomAdvanced','RandomNoise','KSamplerSelect','CFGGuider','VAEDecode','SaveImage'],
   'z-turbo':['UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','ModelSamplingAuraFlow','EmptyLatentImage','KSampler','VAEDecode','SaveImage'],
   'sdxl':['CheckpointLoaderSimple','CLIPTextEncode','EmptyLatentImage','KSampler','VAEDecode','SaveImage']
  };
@@ -165,7 +165,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    }else if(!custom&&mode!=='upscale'){const availableCheckpoints=await checkpoints();if(!availableCheckpoints.includes(checkpoint))throw Error('Select an installed ComfyUI checkpoint in Image Studio.');}
    else if(custom&&params.lora?.length)throw Error('Custom workflows manage their own LoRAs. Remove separate LoRA selections.');
    if(mode==='upscale'&&!sourceName)throw Error('Choose a gallery image to upscale.');
-   if(params.lora?.length&&!managed){
+   if(params.lora?.length){
     const installed=await modelList('loras');
     if(params.lora.some(item=>!installed.includes(item.name)))throw Error('Selected LoRA was not found in ComfyUI model library.');
    }

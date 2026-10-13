@@ -122,9 +122,9 @@
 </div>
 <div class="controls">
 <label>LoRA #1<select id="hero-comfy-lora-1"><option value="">None</option></select></label>
-<label>Weight #1<input id="hero-comfy-lora-weight-1" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
+<label>LoRA strength #1<input id="hero-comfy-lora-weight-1" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
 <label>LoRA #2<select id="hero-comfy-lora-2"><option value="">None</option></select></label>
-<label>Weight #2<input id="hero-comfy-lora-weight-2" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
+<label>LoRA strength #2<input id="hero-comfy-lora-weight-2" type="number" min="-2" max="2" step="0.05" value="0.8"></label>
 </div>
 <p class="small">Batch variants share a sampled seed for reproducibility. Regional multi-person generation works with the Scene Composer above when ComfyUI is selected. LoRAs must already be installed in ComfyUI.</p>
 <h3>Import a photo or illustration</h3>
@@ -692,6 +692,7 @@ async function heroComfyProbe(existing=null){
 function heroFillComfyAdvanced(x){
  const choices=[['hero-comfy-lora-1',x.loras||[], 'None'],['hero-comfy-lora-2',x.loras||[],'None'],['hero-upscale-model',x.upscalers||[],'Lanczos · fast, no additional model']];
  for(const [id,names,none]of choices){
+  if(id.startsWith('hero-comfy-lora-'))continue;
   const element=el(id),previous=element.value;
   element.replaceChildren(new Option(none,''),...names.map(n=>new Option(n,n)));
   element.value=names.includes(previous)?previous:'';
@@ -820,4 +821,4 @@ el('hero-upscale-run').onclick=async()=>{
  }catch(e){status.textContent=e.message}finally{button.disabled=false}
 };
 
-</script><script src="/image-model-center.js"></script><script src="/assistant-panel.js"></script><script src="/story-panel.js"></script><script src="/creator-panel.js"></script></body></html>
+</script><script src="/image-model-center.js"></script><script src="/lora-library.js"></script><script src="/assistant-panel.js"></script><script src="/story-panel.js"></script><script src="/creator-panel.js"></script></body></html>

@@ -11,6 +11,7 @@ const {createThinkingWorker}=require('./ThinkingWorker.cjs');
 const {createImages}=require('./ImageService.cjs');
 const {createComfyAdapter}=require('./ComfyAdapter.cjs');
 const {createComfyRuntime}=require('./ComfyRuntime.cjs');
+const {createImageModelCenter}=require('./ImageModelCenter.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
 const {runtimeEnvironment}=require('./EngineRuntime.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
@@ -274,6 +275,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
       }
     };
     const studio=createStudio(root,{pipeline,ensureText,generateImage:generateStudioImage,getImageState:()=>images.snapshot()});
+    const imageCenter=createImageModelCenter(root,{studio,comfy,runtime:comfyRuntime,images});
     const assistant=createAssistantWorkspace(root,{backendURL,ensureText,getModelProfile:()=>profileFor(root,runningModel||selected()),modelName:()=>runningModel||selected(),contextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,readGeneration:()=>readSettings(root)});
     const tuner=createAutoTune(root,{systemInfo,readGeneration:()=>readSettings(root),saveGeneration:value=>saveSettings(root,value),abort:()=>pipeline.abort(),stop:async()=>{lastAttempt=selected();stopBackend();if(images.snapshot().running)await images.action('/images/stop',{});await waitUntil(()=>!backend&&!images.snapshot().running,null,30000);},load:async(signal,limit)=>{await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Engine failed to load.');return backendReady;},signal,limit);},benchmark:async signal=>{const started=Date.now();const r=await pipeline.generate({prompt:'<|im_start|>user\n'+('A traveller enters an inn and remembers a blue cloak. '.repeat(120))+'\nWrite a brief vivid continuation with a new action.<|im_end|>\n<|im_start|>assistant\n',stream:false,seed:1234},signal,{mode:'utility'});return {...r,elapsedMs:Date.now()-started};}});
     const diagnosticEnvironment=async()=>({system:await systemInfo(),text:{running:!!backend,ready:backendReady,pausedForImage:imageJob||textPausedForImages,queuedReplies:queuedInference,model:runningModel,pid:backend?.pid,phase:generationState,configured:backendArguments(root,'').config,loaded:launchConfig,args:launchArgs,url:backendURL,error:backendError},image:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(),planner:thinking.snapshot(),pipeline:pipeline.runSnapshot(),context:contextDiagnostics,enginePerformance:backendReady?await engineFetch(backendURL+'/api/extra/perf',{timeoutMs:3000}).then(r=>r.json()).catch(e=>({error:e.message})):null,logs:{text:logTail(path.join(logs,'koboldcpp.log')),textError:logTail(path.join(logs,'koboldcpp-error.log')),image:logTail(path.join(logs,'image-engine.log'))}});
@@ -282,12 +284,12 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
             tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,assistant:assistant.snapshot(),pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
-            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(), thinking:thinking.snapshot(), generation: readSettings(root),
+            engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(), imageModels:{choices:{global:imageCenter.choice('global'),chat:imageCenter.choice('chat'),adventure:imageCenter.choice('adventure')}}, thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
     };
     async function nativeImages(req,res){const reply=(status,value)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};if(req.headers.origin){reply(403,{error:'Use the chat server for image API calls.'});return;}const endpoint=req.url.split('?')[0];try{const names=images.snapshot().installed;if(req.method==='GET'){if(endpoint.endsWith('/sd-models')){reply(200,names.map(name=>({title:name,model_name:name,filename:name})));return;}if(endpoint.endsWith('/samplers')){reply(200,['Euler','Euler a','DPM++ 2M Karras','DPM++ 2S ancestral Karras','LCM'].map(name=>({name,aliases:[],options:{}})));return;}if(endpoint.endsWith('/schedulers')){reply(200,[{name:'normal',label:'Normal'},{name:'karras',label:'Karras'}]);return;}if(endpoint.endsWith('/options')){reply(200,{sd_model_checkpoint:images.snapshot().selected});return;}if(endpoint.endsWith('/sd-vae')||endpoint.endsWith('/upscalers')||endpoint.endsWith('/latent-upscale-modes')){reply(200,[]);return;}if(endpoint.endsWith('/progress')){reply(200,{progress:studio.snapshot().busy?0.5:0,state:{job:studio.snapshot().phase}});return;}}
-      let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>2000000)throw Error('Image request too large.');}const data=JSON.parse(raw||'{}');if(endpoint.endsWith('/interrupt')){studio.cancel();await images.action('/images/cancel',{});reply(200,{});return;}if(endpoint.endsWith('/options')){if(data.sd_model_checkpoint&&names.includes(data.sd_model_checkpoint))await images.action('/images/select',{name:data.sd_model_checkpoint});reply(200,{});return;}if(endpoint.endsWith('/txt2img')){const result=await studio.action('/studio/generate',data),bytes=fs.readFileSync(path.join(images.outputs,path.basename(result.url)));reply(200,{images:[bytes.toString('base64')],info:JSON.stringify(result),parameters:data});return;}reply(404,{error:'Unsupported image endpoint.'});}catch(e){reply(400,{error:e.message,failure:errorDetails(e)});}}
+      let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>2000000)throw Error('Image request too large.');}const data=JSON.parse(raw||'{}');if(endpoint.endsWith('/interrupt')){studio.cancel();await images.action('/images/cancel',{});reply(200,{});return;}if(endpoint.endsWith('/options')){if(data.sd_model_checkpoint&&names.includes(data.sd_model_checkpoint))await images.action('/images/select',{name:data.sd_model_checkpoint});reply(200,{});return;}if(endpoint.endsWith('/txt2img')){const result=await studio.action('/studio/generate',imageCenter.forGeneration(data,'chat')),bytes=fs.readFileSync(path.join(images.outputs,path.basename(result.url)));reply(200,{images:[bytes.toString('base64')],info:JSON.stringify(result),parameters:data});return;}reply(404,{error:'Unsupported image endpoint.'});}catch(e){reply(400,{error:e.message,failure:errorDetails(e)});}}
     const server = http.createServer(async (req, res) => {
         const host = req.headers.host;
         if (host !== '127.0.0.1:' + server.address().port) { res.writeHead(403); res.end('Invalid host'); return; }
@@ -338,6 +340,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
         if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
         if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
+        if(req.method==='GET'&&req.url==='/image/model-center'){json(200,await imageCenter.status());return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
          if(req.method==='GET'&&req.url==='/comfy/models'){json(200,{hub:comfy.models.snapshot(),packs:(await comfy.catalog()).packs||[]});return;}
@@ -363,6 +366,10 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 }
                 json(200,await assistant.action(req.url,data));return;
              }
+             if(req.url==='/image/model-center/select'){json(200,await imageCenter.select(data));return;}
+             if(req.url==='/image/model-center/download'){if(imageJob)throw Error('Finish the image first.');json(202,imageCenter.startDownload(data));return;}
+             if(req.url==='/image/model-center/cancel'){json(200,imageCenter.cancelDownload());return;}
+             if(req.url==='/image/model-center/folder'){json(200,{modelRoot:imageCenter.configureRoot()});return;}
              if(req.url==='/comfy/runtime/configure'){json(200,comfyRuntime.configure(data));return;}
              if(req.url==='/comfy/runtime/start'){json(200,await comfyRuntime.start());return;}
              if(req.url==='/comfy/runtime/stop'){if(imageJob)throw Error('Image generation is active.');json(200,await comfyRuntime.stop());return;}
@@ -382,7 +389,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/gallery/import'){json(200,imageGallery.importPNG(data));return;}
              if(req.url==='/gallery/favorite'){json(200,imageGallery.favorite(data));return;}
             if(req.url==='/gallery/delete'){json(200,imageGallery.remove(data));return;}
-            if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,data));return;}
+            if(req.url.startsWith('/studio/')){json(200,await studio.action(req.url,req.url==='/studio/generate'?imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global'):data));return;}
             if(req.url==='/performance/system'){json(200,await diagnosticEnvironment());return;}
             if(req.url==='/performance/apply'){const preset=performancePreset(data.preset,await systemInfo());if(data.contextSize!==undefined)preset.contextSize=data.contextSize;lastAttempt=selected();stopBackend();await waitUntil(()=>!backend,null,30000);const configFile=path.join(root,'backend.json'),before=fs.existsSync(configFile)?fs.readFileSync(configFile):null;fs.writeFileSync(configFile,JSON.stringify(preset));try{backendArguments(root,'');}catch(e){if(before)fs.writeFileSync(configFile,before);throw e;}const gen=readSettings(root),isQwen=profileFor(root,selected()).Family?.includes('Qwen');saveSettings(root,{...gen,temperature:isQwen?0.7:0.8,top_p:isQwen?0.8:0.95,min_p:isQwen?0:0.05,top_k:20,maxReplyTokens:768,memoryTokens:384,recentMessages:24,thinkingMode:'off'});await runBackend();json(200,{preset,environment:await diagnosticEnvironment()});return;}
             if(req.url.startsWith('/story/')){const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});json(200,await storyAPI.action(req.url,data,controller.signal));return;}
@@ -395,7 +402,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/thinking/start'){json(200,await thinking.start());return;}
             if(req.url==='/thinking/stop'){thinking.stop();json(200,thinking.snapshot());return;}
             if(req.url==='/images/cancel'){studio.cancel();await comfy.cancel();await images.action('/images/cancel',{});json(200,{cancelRequested:true,studio:studio.snapshot(),comfy:comfy.snapshot()});return;}
-             if(req.url==='/images/start'&&studio.snapshot().settings.releaseGPU&&backend){textPausedForImages=true;lastAttempt=selected();stopBackend('image');await waitUntil(()=>!backend,null,30000);}if(req.url==='/images/generate'){json(200,await studio.action('/studio/generate',data));return;}if(req.url.startsWith('/images/')){const result=await images.action(req.url,data);if(req.url==='/images/stop'&&textPausedForImages){await waitUntil(()=>!images.snapshot().running,null,30000);textPausedForImages=false;await ensureText();}json(200,result);return;}
+             if(req.url==='/images/start'&&studio.snapshot().settings.releaseGPU&&backend){textPausedForImages=true;lastAttempt=selected();stopBackend('image');await waitUntil(()=>!backend,null,30000);}if(req.url==='/images/generate'){json(200,await studio.action('/studio/generate',imageCenter.forGeneration(data,data.surface==='chat'?'chat':data.surface==='adventure'?'adventure':'global')));return;}if(req.url.startsWith('/images/')){const result=await images.action(req.url,data);if(req.url==='/images/stop'&&textPausedForImages){await waitUntil(()=>!images.snapshot().running,null,30000);textPausedForImages=false;await ensureText();}json(200,result);return;}
             if(req.url==='/memory/get'){json(200,readMemory(root,data.id));return;}
             if(req.url==='/memory/save'){json(200,editMemory(root,data.id,data));return;}
             if(req.url==='/task'){

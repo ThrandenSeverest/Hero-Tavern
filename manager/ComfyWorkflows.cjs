@@ -12,7 +12,7 @@ function clamp(n,min,max,name){
  if(typeof n!=='number'||!Number.isFinite(n)||n<min||n>max)throw Error('Invalid '+name+' ('+min+'–'+max+').');
  return n;
 }
-function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel='',upscaleFactor=2}={}){
+function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel='',upscaleFactor=2,upscaleMethod='lanczos'}={}){
  const validModes=['txt2img','img2img','inpaint','outpaint','upscale'],operation=mode||(source?(mask?'inpaint':'img2img'):'txt2img');
  if(!validModes.includes(operation))throw Error('Unsupported ComfyUI operation.');
  if(operation!=='upscale'){modelName(checkpoint,'Checkpoint');if(!/\.safetensors$/i.test(checkpoint))throw Error('Choose an installed .safetensors checkpoint.');}
@@ -25,7 +25,7 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
   const image=node('LoadImage',{image:source});
   let result;
   if(upscaleModel){modelName(upscaleModel,'Upscaler');result=node('ImageUpscaleWithModel',{upscale_model:node('UpscaleModelLoader',{model_name:upscaleModel}),image});}
-  else result=node('ImageScaleBy',{image,upscale_method:'lanczos',scale_by:clamp(Number(upscaleFactor),1,4,'upscale factor')});
+  else result=node('ImageScaleBy',{image,upscale_method:['lanczos','bicubic','bilinear','nearest-exact'].includes(upscaleMethod)?upscaleMethod:'lanczos',scale_by:clamp(Number(upscaleFactor),1,4,'upscale factor')});
   const saved=node('SaveImage',{images:result,filename_prefix:'HeroTavern_Upscaled'});
   return {graph,saveId:saved[0],mode:operation,seed:null,batch:1};
  }

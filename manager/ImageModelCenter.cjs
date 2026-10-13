@@ -6,7 +6,7 @@ const IDS=['flux-klein','z-turbo','sdxl','koboldcpp','custom'],SCOPES=['global',
 const safe=(x)=>IDS.includes(x);
 function createImageModelCenter(root,{studio,comfy,runtime,images}){
  const file=path.join(root,'image-model-choices.json');
- let prefs={global:null,chat:null,adventure:null},operation=null,lastDownload=null;
+ let prefs={global:null,chat:null,adventure:null},operation=null,lastDownload=null,setupJob=null,lastSetup=null;
  try{const saved=JSON.parse(fs.readFileSync(file,'utf8'));for(const k of SCOPES)if(safe(saved[k]))prefs[k]=saved[k]}catch{}
  const save=()=>{const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(prefs,null,2));fs.renameSync(temp,file)};
  const initial=()=>{
@@ -63,7 +63,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
       modelsDirectory:rootForModels(),modelDirectorySet:!!comfy.models.snapshot().settings.modelRoot},
     activeGeneration:generation&&{phase:generation.phase,progress:generation.progress,step:generation.step,totalSteps:generation.totalSteps,elapsedMs:generation.elapsedMs,jobId:generation.id},
     download:download?{kind:'model',...download}:operation?{kind:'model',phase:'starting',packId:operation.id,bytes:0,total:0}:null,
-    lastDownload,install:managed.install||null,createdAt:new Date().toISOString()};
+    lastDownload,setup:setupJob&&{packId:setupJob.id,phase:setupJob.phase,startedAt:setupJob.startedAt},lastSetup,install:managed.install||null,createdAt:new Date().toISOString()};
  }
  async function select({id,scope='global',inherit=false}={}){
   if(!SCOPES.includes(scope))throw Error('Unknown image-use location');
@@ -105,7 +105,29 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    .finally(()=>{operation=null});
   return {started:true,packId:id,directory:folder};
  }
- function cancelDownload(){return comfy.models.cancel()}
- return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot};
+ function setup({id,confirm=false}={}){
+  if(confirm!==true)throw Error('Click Install engine + model to download the selected model and runtime.');
+  if(!['flux-klein','z-turbo','sdxl'].includes(id))throw Error('Choose a downloadable image model.');
+  if(setupJob||operation||comfy.models.snapshot().download)throw Error('Image model setup is already running.');
+  const job={id,phase:'checking engine',startedAt:Date.now(),cancelled:false};setupJob=job;lastSetup=null;
+  const check=()=>{if(job.cancelled)throw Error('Setup cancelled. Downloaded files are preserved.');};
+  Promise.resolve().then(async()=>{
+   check();if(!runtime.installed()&&!await comfy.available()){job.phase='installing ComfyUI engine';await runtime.installPortable({confirm:true});}
+   check();job.phase='detecting model folder';configureRoot();
+   job.phase='downloading model and dependencies';await comfy.models.downloadPack({id,confirm:true});
+   check();if(id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint)await studio.action('/studio/configure',{comfyCheckpoint:'sd_xl_base_1.0.safetensors'});
+   if(runtime.installed()){
+    job.phase='refreshing engine models';if(runtime.status().running)await runtime.stop();check();await runtime.start();
+    job.phase='waiting for engine';const deadline=Date.now()+120000;
+    while(!await comfy.available()){check();if(Date.now()>deadline||runtime.status().error)throw Error(runtime.status().error||'Engine startup timed out. Check Logs/comfy-engine.log.');await new Promise(r=>setTimeout(r,1500));}
+   }
+   check();job.phase='checking model readiness';const report=await comfy.diagnosePack(id);if(!report.ok)throw Error(report.advice||'Model dependencies are not ready.');
+   await select({id,scope:'global'});lastSetup={ok:true,packId:id,message:'Engine and '+id+' are ready for Image Studio, Tavern and Adventure.'};
+  }).catch(e=>{lastSetup={ok:false,packId:id,message:e.message}}).finally(()=>{setupJob=null});
+  return {started:true,packId:id};
+ }
+ function cancelDownload(){if(setupJob)setupJob.cancelled=true;runtime.cancelInstall?.();return comfy.models.cancel()}
+
+ return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot,setup};
 }
 module.exports={createImageModelCenter,IDS,SCOPES};

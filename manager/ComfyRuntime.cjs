@@ -1,6 +1,9 @@
 'use strict';
 // Optional ComfyUI Portable manager. Detects installed/external runtimes, owns only
 // processes it starts. Never deletes user ComfyUI installation, models or outputs.
+const crypto=require('node:crypto');
+const EXTRACTOR_URL='https://github.com/ip7z/7zip/releases/download/26.04/7zr.exe';
+const EXTRACTOR_SHA256='256feca8e274e5da655e2a284fabafd9f554365eb164862089dacd4e8276d282';
 const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process');
 const ARCHIVE_URL='https://github.com/Comfy-Org/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z';
 function resolveRuntime(folder){
@@ -22,11 +25,11 @@ function sevenZip(){
 function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fetch}={}){
  const configFile=path.join(root,'comfy-runtime.json'),downloads=path.join(root,'Downloads'),logs=path.join(root,'Logs');
  fs.mkdirSync(downloads,{recursive:true});fs.mkdirSync(logs,{recursive:true});
- let config={mode:'external',folder:'',lowVram:true};
+ let config={mode:'managed',folder:'',lowVram:true};
  try{config={...config,...JSON.parse(fs.readFileSync(configFile,'utf8'))}}catch{}
  let child=null,install=null,error='',started=0,ready=false;
  const installed=()=>resolveRuntime(config.folder||path.join(root,'ComfyUI-Portable'))||resolveRuntime(path.join(root,'ComfyUI-Portable'));
- const status=()=>({mode:config.mode,folder:config.folder,lowVram:config.lowVram,detected:installed(),running:!!child,pid:child?.pid||null,ready,error,install:install&&{phase:install.phase,bytes:(install.phase==='downloading'&&fs.existsSync(install.archive+'.part')?fs.statSync(install.archive+'.part').size:install.bytes),expected:install.expected,archive:install.archive},officialArchive:ARCHIVE_URL,extractorInstalled:!!sevenZip()});
+ const status=()=>({mode:config.mode,folder:config.folder,lowVram:config.lowVram,detected:installed(),running:!!child,pid:child?.pid||null,ready,error,install:install&&{phase:install.phase,bytes:(install.phase==='downloading'&&fs.existsSync(install.archive+'.part')?fs.statSync(install.archive+'.part').size:install.bytes),expected:install.expected,archive:install.archive},officialArchive:ARCHIVE_URL,extractorInstalled:!!sevenZip()||fs.existsSync(path.join(root,'Tools','7zr-26.04.exe'))});
  const save=()=>fs.writeFileSync(configFile,JSON.stringify(config,null,2));
  function configure({mode,folder,lowVram}={}){
   if(child||install)throw Error('Stop ComfyUI and finish installation before changing runtime.');
@@ -36,7 +39,7 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
   save();return status();
  }
  async function isReachable(){
-  try{const res=await fetchFn('http://127.0.0.1:'+port+'/system_stats',{signal:AbortSignal.timeout(1800)});return res.ok}catch{return false}
+  try{const res=await fetchFn('http://127.0.0.1:'+port+'/system_stats',{signal:AbortSignal.timeout(1800)});ready=res.ok;return ready}catch{ready=false;return false}
  }
  function shareHeroCheckpoints(runtime){
   // Write only to the Hero Tavern-owned Portable installation; never modify an external app.
@@ -89,11 +92,7 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
   if(process.platform!=='win32')throw Error('Automatic Portable installation is only supported on Windows.');
   if(install)throw Error('ComfyUI setup is already running.');
   if(installed())return {alreadyInstalled:true,...status()};
-  const extractor=sevenZip();
-  // Windows 11 builds with a recent libarchive tar can extract .7z without 7-Zip.
-  // Validate the archive with that tool before attempting extraction.
-  const systemTar=path.join(process.env.SystemRoot||'C:\\Windows','System32','tar.exe');
-  if(!extractor&&!fs.existsSync(systemTar))throw Error('7-Zip (or Windows 11 archive-capable tar.exe) is required. Install 7-Zip from https://7-zip.org/ first.');
+  let extractor=sevenZip();
   const target=path.join(root,'ComfyUI-Portable'),staging=target+'.installing',archive=path.join(downloads,'ComfyUI_windows_portable_nvidia.7z'),partial=archive+'.part';
   if(fs.existsSync(target)||fs.existsSync(staging))throw Error('ComfyUI target or interrupted staging folder exists. Nothing was deleted; inspect it before retrying.');
   const job={phase:'preflight',bytes:0,expected:0,archive,process:null,cancel:false};install=job;
@@ -105,14 +104,22 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
    if(disk.bavail*disk.bsize<need)throw Error('Not enough free space for portable install/extraction. Keep at least '+Math.ceil(need/1024**3)+' GiB free.');
    const curl=path.join(process.env.SystemRoot||'C:\\Windows','System32','curl.exe');
    if(!fs.existsSync(curl))throw Error('Windows curl.exe unavailable.');
+   if(!extractor){
+    const tools=path.join(root,'Tools');fs.mkdirSync(tools,{recursive:true});const portable=path.join(tools,'7zr-26.04.exe');
+    const valid=()=>fs.existsSync(portable)&&fs.statSync(portable).size===602624&&crypto.createHash('sha256').update(fs.readFileSync(portable)).digest('hex')===EXTRACTOR_SHA256;
+    if(!valid()){
+     const part=portable+'.part';await spawnWait(curl,['--proto','=https','--proto-redir','=https','--fail','--location','--retry','3','--output',part,EXTRACTOR_URL],'comfy-install.log','downloading archive helper',job);
+     if(fs.statSync(part).size!==602624||crypto.createHash('sha256').update(fs.readFileSync(part)).digest('hex')!==EXTRACTOR_SHA256)throw Error('Archive helper checksum mismatch. Installation stopped before executing it.');
+     fs.renameSync(part,portable);
+    }
+    extractor=portable;
+   }
    await spawnWait(curl,['--proto','=https','--proto-redir','=https','--fail','--location','--retry','3','--continue-at','-','--output',partial,ARCHIVE_URL],'comfy-install.log','downloading',job);
    job.bytes=fs.statSync(partial).size;
    if(job.expected&&job.bytes!==job.expected)throw Error('Incomplete official ComfyUI archive.');
-   const with7zip=!!extractor;
-   try{await spawnWait(with7zip?extractor:systemTar,with7zip?['t',partial]:['-tf',partial],'comfy-install.log','validating',job);}
-   catch(e){if(!with7zip)throw Error('Windows tar could not read this .7z archive. Install 7-Zip and click Install again; the downloaded archive is preserved.');throw e;}
+   await spawnWait(extractor,['t',partial],'comfy-install.log','validating',job);
    fs.mkdirSync(staging,{recursive:true});
-   await spawnWait(with7zip?extractor:systemTar,with7zip?['x',partial,'-o'+staging,'-y']:['-xf',partial,'-C',staging],'comfy-install.log','extracting',job);
+   await spawnWait(extractor,['x',partial,'-o'+staging,'-y'],'comfy-install.log','extracting',job);
    const found=resolveRuntime(staging);if(!found)throw Error('ComfyUI Portable archive layout is unexpected; see staging folder.');
    fs.renameSync(staging,target);
    fs.renameSync(partial,archive);

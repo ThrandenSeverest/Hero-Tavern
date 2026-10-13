@@ -99,3 +99,10 @@ test('Native adventure and Tavern providers pass image generation through shared
  assert.match(chat,/image\/model-center\/select/);
  assert.match(bridge,/imageCenter\.forGeneration\(data,/);
 });
+test('One install action provisions engine, model dependencies, starts and checks readiness before selecting',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-managed-setup-'));let runtimeExists=false,connected=false,modelRoot='',settings={engine:'auto',modelPack:'sdxl'},calls=[];
+ const folder=path.join(root,'Portable','models');const runtime={installed:()=>runtimeExists?{models:folder}:null,status:()=>({mode:'managed',running:false,detected:runtimeExists?{models:folder}:null}),installPortable:async({confirm})=>{assert.equal(confirm,true);calls.push('engine');fs.mkdirSync(folder,{recursive:true});runtimeExists=true},start:async()=>{calls.push('start');connected=true},stop:async()=>calls.push('stop'),cancelInstall:()=>{}};
+ const comfy={available:async()=>connected,catalog:async()=>({available:connected,packs:[]}),diagnosePack:async()=>{calls.push('diagnose');return {ok:true}},snapshot:()=>({}),models:{snapshot:()=>({settings:{modelRoot},download:null}),configure:d=>{modelRoot=d.modelRoot},downloadPack:async({id})=>{calls.push('dependencies:'+id)},select:()=>calls.push('select'),cancel:()=>({cancelled:true}),localStatus:()=>[]}};
+ const center=createImageModelCenter(root,{runtime,comfy,images:{snapshot:()=>({})},studio:{snapshot:()=>({settings}),action:async(_,d)=>{settings={...settings,...d}}}});
+ try{assert.throws(()=>center.setup({id:'flux-klein'}),/Click Install/);assert.equal(center.setup({id:'flux-klein',confirm:true}).started,true);assert.throws(()=>center.setup({id:'z-turbo',confirm:true}),/already running/);await new Promise(r=>setTimeout(r,20));assert.deepEqual(calls,['engine','dependencies:flux-klein','start','diagnose','select']);assert.equal(center.choice('global'),'flux-klein');assert.equal((await center.status()).lastSetup.ok,true);}finally{fs.rmSync(root,{recursive:true,force:true})}
+});

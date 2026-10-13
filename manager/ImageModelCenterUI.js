@@ -54,14 +54,11 @@ function modelCard(model){
   }));
  }
  if(['sdxl','flux-klein','z-turbo'].includes(model.id)&&!model.installed&&!model.downloaded){
-  operations.append(action('Install '+choiceLabel(model.id)+' files',async()=>{
-   const size=model.downloadGiB?' (~'+model.downloadGiB+' GB download)':'';
-   if(!confirm('Download '+choiceLabel(model.id)+' and required components'+size+' into the configured ComfyUI models directory? Existing user models will not be deleted.'))return;
-   await req('/image/model-center/download',{id:model.id,confirm:true});
-   await req('/image/model-center/select',{scope:'global',id:model.id});
-   applyVisualSelection(model.id);await refresh(true);
+  operations.append(action('Install engine + '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB models)':''),async()=>{
+   await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);
   }));
  }
+ if(model.downloaded&&!model.ready)operations.append(action('Load / repair '+choiceLabel(model.id),async()=>{await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true)}));
  if(model.issue)card.append(element('p',model.issue,'small'));
  if(operations.children.length)card.append(operations);
  return card;
@@ -69,6 +66,9 @@ function modelCard(model){
 function renderDownload(state){
  const region=$('image-center-download');region.replaceChildren();
  const dl=state.download,done=state.lastDownload;
+ if(state.install){region.append(element('strong','Installing managed image engine · '+state.install.phase));const p=element('progress');p.max=state.install.expected||1;if(state.install.expected>0&&state.install.phase==='downloading')p.value=state.install.bytes;else p.removeAttribute('value');region.append(p,element('small',(state.install.bytes/1024**3).toFixed(2)+' GB downloaded'+(state.install.expected?' / '+(state.install.expected/1024**3).toFixed(2)+' GB':'')));}
+ if(state.setup){region.append(element('strong','Setting up '+choiceLabel(state.setup.packId)),element('p',state.setup.phase));const progress=element('progress');progress.removeAttribute('value');region.append(progress,action('Cancel setup',async()=>{await req('/image/model-center/cancel',{});await refresh(true)}));}
+ else if(state.lastSetup)region.append(element('p',(state.lastSetup.ok?'✓ ':'⚠ ')+state.lastSetup.message));
  if(dl){
   region.append(element('strong','Installing '+choiceLabel(dl.packId)),element('p',(dl.file||'Checking files and disk space')+' · '+dl.phase));
   const p=element('progress');p.max=100;if(dl.total>0)p.value=Math.min(100,Math.round(100*dl.bytes/dl.total));else p.removeAttribute('value');
@@ -82,7 +82,7 @@ function render(state){
  last=state;
  const display=$('image-center-connection');display.replaceChildren();
  const connect=state.comfy.connected;
- display.append(element('strong',connect?'● ComfyUI connected':'○ ComfyUI not connected'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'No model folder configured. Install ComfyUI or select a directory below.','small'));
+ display.append(element('strong',connect?'● ComfyUI connected':state.comfy.detected?'○ Managed image engine stopped · loads automatically for generation':'○ Image engine not installed'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'Choose Install engine + model below. Hero Tavern installs the engine and all model components together.','small'));
  if(state.comfy.error)display.append(element('p',state.comfy.error,'small'));
  const jobs=$('image-center-generation');jobs.replaceChildren();
  const run=state.activeGeneration;
@@ -127,7 +127,7 @@ function makeUI(){
  original.hidden=true;
  const main=element('div',null,'card hero-unified-root');
  main.id='image-model-center';
- main.append(element('h2','AI Image Models'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. No SDXL checkpoint selection is required for FLUX or Z-Image.','small'));
+ main.append(element('h2','Image models · managed engines'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. No SDXL checkpoint selection is required for FLUX or Z-Image.','small'));
  const status=element('div',null,'hero-unified-connection');status.id='image-center-connection';main.append(status);
  const choices=element('div',null,'controls');
  for(const [id,label] of [['global','Default model (Image Studio / native image API)'],['chat','Tavern chat image model'],['adventure','Adventure image model']]){
@@ -183,19 +183,15 @@ function makeUI(){
  const workflows=$('hero-comfy-workflow-library');if(workflows)advanced.append(workflows);
  main.append(advanced);
  const error=element('p','', 'hero-unified-error');error.id='image-model-center-error';main.append(error);
- setup.prepend(main);
+ $('models').append(main);
+ const mount=()=>{const target=$('image-setup').hidden?$('models'):setup;if(main.parentElement!==target)target.append(main)};new MutationObserver(mount).observe($('image-setup'),{attributes:true,attributeFilter:['hidden']});mount();
  const quick=element('div',null,'hero-unified-quick');
  quick.append(action('Install / fix selected image model',async()=>{
   const model=last?.models.find(m=>m.id===$('image-create-model').value);
   if(!model)throw Error('Choose an image model first.');
   if(['koboldcpp','custom'].includes(model.id)){document.querySelector('[data-tab="image-setup"]')?.click();return}
   if(model.ready){alertError(Error('Model is already ready to generate.'));return}
-  if(!model.installed&&!model.downloaded){
-   if(!confirm('Install '+choiceLabel(model.id)+(model.downloadGiB?' (~'+model.downloadGiB+' GB)':'')+'?'))return;
-   await req('/image/model-center/download',{id:model.id,confirm:true});
-   await refresh(true);document.querySelector('[data-tab="image-setup"]')?.click();return;
-  }
-  document.querySelector('[data-tab="image-setup"]')?.click();
+  await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);document.querySelector('[data-tab="models"]')?.click();return;
  }));
  $('image-create-model-status').after(quick);
  $('image-create-model').onchange=async()=>{
@@ -206,5 +202,5 @@ function makeUI(){
  visible=true;refresh(true);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',makeUI,{once:true});else makeUI();
-setInterval(()=>{visible=!!last?.download||!$('image-setup')?.hidden||!$('images')?.hidden;refresh()},3000);
+setInterval(()=>{visible=!!last?.download||!!last?.setup||!$('models')?.hidden||!$('image-setup')?.hidden||!$('images')?.hidden;refresh()},3000);
 })();

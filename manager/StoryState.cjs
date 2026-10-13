@@ -1,7 +1,7 @@
 // Versioned state contract. Shared by the service and unit tests; dialogue never contains patches.
 const crypto=require('node:crypto');
 const clone=x=>JSON.parse(JSON.stringify(x)),hash=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const TYPES=['number','boolean','enum','text','list','relationship','timer','quest'];
+const TYPES=['number','boolean','enum','text','list','relationship','timer','quest','injuries'];
 const keyOf=d=>d.owner+':'+d.id;
 function validateDefinition(input){
  const d=clone(input);if(!d||!/^[-\w]{1,80}$/.test(d.id)||typeof d.owner!=='string'||!/^(character|player):[-\w]{1,100}$/.test(d.owner)||!TYPES.includes(d.type))throw Error('Tracker needs a unique ID, owner and supported type.');
@@ -30,7 +30,22 @@ function validateValue(d,v){
  if(d.type==='relationship'&&(!v||typeof v!=='object'||Array.isArray(v)||Object.values(v).some(x=>!Number.isFinite(x)||x<d.min||x>d.max)))throw Error(d.label+': invalid relationship values.');
  if(d.type==='timer'&&(!v||!Number.isFinite(v.remaining)||v.remaining<0||!['story','wall'].includes(v.clock)))throw Error(d.label+': timer needs remaining duration and story/wall clock.');
  if(d.type==='quest'&&(!v||typeof v.stage!=='string'||!['inactive','active','complete','failed'].includes(v.status)))throw Error(d.label+': quest needs stage and status.');
+ if(d.type==='injuries')validateInjuries(v);
  return v;
+}
+function validateInjuries(v){
+ if(!Array.isArray(v)||v.length>100)throw Error('Injuries must be an array of at most 100 records.');
+ const ids=new Set();
+ for(const injury of v){
+  if(!injury||typeof injury!=='object'||Array.isArray(injury)||!/^[-\w]{1,80}$/.test(injury.id)||ids.has(injury.id))throw Error('Each injury needs a stable unique ID.');ids.add(injury.id);
+  for(const key of ['location','cause','symptoms','limitations','treatment','scar'])if(typeof injury[key]!=='string'||injury[key].length>1200)throw Error('Injury '+key+' must be concise text.');
+  if(!injury.location.trim()||!['minor','moderate','severe','critical'].includes(injury.severity)||!['fresh','treated','healing','healed','scarred'].includes(injury.status)||!Number.isFinite(injury.pain)||injury.pain<0||injury.pain>10)throw Error('Injury needs location, severity, status and pain 0–10.');
+ }
+ return v;
+}
+function validateInjuryChange(prior,next){
+ const allowed={fresh:['fresh','treated','healing','healed','scarred'],treated:['treated','fresh','healing','healed','scarred'],healing:['healing','fresh','treated','healed','scarred'],healed:['healed','fresh','scarred'],scarred:['scarred','fresh']};
+ for(const old of prior){const changed=next.find(n=>n.id===old.id);if(!changed)throw Error('Keep injury history, marking healed or scarred instead of deleting records.');if(changed.location!==old.location||changed.cause!==old.cause)throw Error('Injury ID, location and origin are stable; add a new injury for a different wound.');if(!allowed[old.status].includes(changed.status))throw Error('Invalid injury progression.');if(old.scar&&!changed.scar)throw Error('Preserve established scars.');}
 }
 function initialState(definitions){return Object.fromEntries(definitions.map(d=>[keyOf(d),clone(d.initialValue)]));}
 function signature(m){return hash({id:m.extra?.heroMessageId,text:m.mes||m.text||'',swipe:m.swipe_id??0,owner:m.original_avatar||m.name||'',role:!!m.is_user});}
@@ -59,7 +74,7 @@ function propose(session,messages,patch,{manual=false,approve=false}={}){
   const introduced=d.introducedAt?messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt):-1;if(!manual&&introduced>messages.indexOf(source))throw Error('Tracker starting values were established after this message; no retrospective AI change.');validateValue(d,item.value);if(!manual&&(d.updateMode==='manual'||d.enabled===false))throw Error('This tracker is manual only.');
   const evidence=String(item.evidence||'');if(!manual&&(!evidence||!String(source.mes).includes(evidence)))throw Error('State change needs an exact evidence quote from its source message.');
   if(!manual&&session.events.some(e=>e.key===item.key&&e.sourceMessageId===item.sourceMessageId&&e.status==='confirmed'&&e.authority==='user'))continue;
-  const prior=state[item.key];if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
+  const prior=state[item.key];if(d.type==='injuries'&&!manual)validateInjuryChange(prior,item.value);if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
   const major=d.type==='number'&&Math.abs(item.value-prior)>d.maxDelta||d.type==='list'&&JSON.stringify(prior)!==JSON.stringify(item.value)||d.type==='quest'&&['complete','failed'].includes(item.value.status)||d.type==='timer'&&item.value.clock==='wall';
   const status=manual||approve?'confirmed':d.updateMode==='approval'||major||item.ambiguous?'pending':'confirmed';
   const sourceSignature=signature(source),eventId=manual?crypto.randomUUID():hash({key:item.key,sourceMessageId:item.sourceMessageId,sourceSignature,value:item.value});
@@ -78,9 +93,9 @@ function reconcile(session,messages){
 }
 const TEMPLATE_DATA=[
  ['Health & Injuries',[
-  {id:'health',label:'Physical condition',category:'Vitals',icon:'❤️',description:'Overall physical wellbeing, not hit points. 100 is healthy; 0 is incapacitated.',type:'number',initialValue:100,min:0,max:100,maxDelta:15,unit:'%',updateMode:'approval',instructions:'At 75–99 show fatigue or mild pain if established; 40–74 make exertion difficult; 1–39 show severe functional limits; at 0 incapacitation needs an explicit event.',changeRules:'Only change after explicit harm, illness, treatment or recovery in the story. Ordinary rest never instantly removes injuries.'},
-  {id:'wound',label:'Left shoulder injury',category:'Injuries',icon:'🩹',description:'Progression of a left shoulder wound. Do not create an injury if none occurred.',type:'enum',initialValue:'uninjured',allowedValues:['uninjured','fresh','bandaged','healing','scarred'],transitions:{uninjured:['fresh'],fresh:['bandaged','healing'],bandaged:['healing'],healing:['scarred','uninjured'],scarred:['fresh']},rules:{uninjured:'No injury or impairment.',fresh:'Pain, possible bleeding and limited use of the left arm.',bandaged:'Wound is dressed, but still painful; bandaging is not healing.',healing:'Symptoms improve gradually after established treatment and story time.',scarred:'Wound is healed; preserve its visible scar.'},changeRules:'A bandage changes wound care, not recovery. Only a narrated treatment and time can move to healing or scarred.',updateMode:'automatic'},
-  {id:'wound_details',label:'Injury details',category:'Injuries',icon:'📝',type:'text',initialValue:'No injuries established',updateMode:'approval',description:'Describe affected body part, cause, pain, functional impairment and any treatment already confirmed.',instructions:'Apply established physical restrictions consistently. Do not invent injuries or treatment.'}
+  {id:'health',label:'Physical condition',category:'Vitals',icon:'❤️',description:'Overall physical wellbeing, not hit points. 100 is healthy; 0 is incapacitated.',type:'number',initialValue:100,min:0,max:100,maxDelta:15,unit:'%',updateMode:'automatic',instructions:'At 75–99 show fatigue or mild pain if established; 40–74 make exertion difficult; 1–39 show severe functional limits; at 0 incapacitation needs an explicit event.',changeRules:'Only change after explicit harm, illness, treatment or recovery in the story. Ordinary rest never instantly removes injuries.'},
+  {id:'injuries',label:'Injuries & recovery',category:'Injuries',icon:'🩹',type:'injuries',initialValue:[],updateMode:'automatic',description:'Persistent records for every established injury: body location, origin, severity, pain, limitations, treatment, healing and scars.',instructions:'Respect each active injury in actions and dialogue. Treated wounds still hurt. Healed injuries retain their history and established scars.',changeRules:'Add only explicit injuries. Keep stable IDs and origin. Update symptoms, pain and treatment when narrated; recovery requires elapsed story time or explicit healing. Mark healed/scarred rather than deleting. Do not copy the overall health percentage into this ledger.'}
+
  ]],
  ['Scars & Appearance',[
   {id:'scars',label:'Permanent scars',category:'Appearance',icon:'🩹',type:'list',initialValue:[],updateMode:'approval',description:'One entry per scar: body location, appearance, origin and whether visible.',changeRules:'Only add after healing or an explicitly established old scar. Never erase permanent scars without an explicit event.'},
@@ -115,4 +130,4 @@ const TEMPLATE_DATA=[
  ]]
 ];
 function scopeTemplate(value,owner){if(typeof value==='string'&&value.startsWith('character:self'))return value.replace('character:self',owner);if(Array.isArray(value))return value.map(v=>scopeTemplate(v,owner));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[scopeTemplate(k,owner),scopeTemplate(v,owner)]));return value;}
-module.exports={scopeTemplate,clone,hash,TYPES,keyOf,validateDefinition,validateValue,initialState,signature,stateAt,conditionPass,activeContext,propose,reconcile,TEMPLATE_DATA};
+module.exports={scopeTemplate,clone,hash,TYPES,keyOf,validateDefinition,validateValue,initialState,signature,stateAt,conditionPass,activeContext,propose,reconcile,validateInjuries,validateInjuryChange,TEMPLATE_DATA};

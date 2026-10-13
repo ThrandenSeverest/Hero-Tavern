@@ -8,7 +8,7 @@ const repo=path.resolve(__dirname,'..'),st=path.join(repo,'.ci/SillyTavern'),roo
 async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}let detail='';try{const html=await(await fetch('http://127.0.0.1:8001/')).text(),token=/const token='([^']+)'/.exec(html)?.[1];detail=JSON.stringify(await(await fetch('http://127.0.0.1:8001/status',{headers:{'X-Hero-Token':token}})).json())}catch{}throw Error('Timed out waiting for UI/engine: '+detail)}
 (async()=>{
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -36,6 +36,20 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');return getContext().onlineStatus==='fixture-kobold-model'}));
   const connected=await page.evaluate(()=>({api:document.querySelector('#main_api').value,type:document.querySelector('#textgen_type').value,url:document.querySelector('#koboldcpp_api_url_text').value}));
   if(connected.api!=='textgenerationwebui'||connected.type!=='koboldcpp'||new URL(connected.url).origin!=='http://127.0.0.1:8001'||new URL(connected.url).pathname.replace(/\/$/,'')!=='/inference')throw Error('Incorrect auto connection: '+JSON.stringify(connected));
+  // Writer is a dedicated top-level manuscript workspace using the existing engine.
+  await page.locator('.hero-nav[data-hero="writer"]').click();
+  const writer=page.frameLocator('#hero-writer-frame');
+  await writer.locator('#manuscript').waitFor();
+  await writer.locator('#manuscript').fill('Лира ждала у двери таверны.');
+  await writer.locator('#memory').fill('Лира ранена в левое плечо.');
+  await writer.locator('#save').click();
+  await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved ·'));
+  await writer.locator('#continue').click();await writer.locator('#candidate').waitFor({state:'visible',timeout:60000});
+  if(await writer.locator('#manuscript').inputValue()!=='Лира ждала у двери таверны.')throw Error('Writer preview modified draft before acceptance');
+  await writer.locator('#retry').click();await waitFor(async()=>await writer.locator('#alternatives option').count()===2);
+  await writer.locator('#accept').click();await waitFor(async()=>(await writer.locator('#manuscript').inputValue()).includes('Fixture generation works.'));
+  await writer.locator('#fork').click();await waitFor(async()=>(await writer.locator('#title').inputValue()).includes('branch'));
+  await page.screenshot({path:path.join(repo,'.ci/hero-writer-qa.png')});
   await page.locator('.hero-nav[data-hero="generation"]').click();
   await panel.locator('#thinkingMode').selectOption('separate');await panel.locator('#replyStyle').selectOption('dialogue');
   await panel.locator('#instructions').fill('Keep answers concise.');await panel.locator('#save-generation').click();

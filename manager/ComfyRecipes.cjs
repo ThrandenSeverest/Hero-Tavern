@@ -34,7 +34,7 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}
   if(pack.family==='zimage')throw Error('Z-Image Turbo preset is text-to-image only. Switch to FLUX.2 Klein for reference editing or SDXL for masked inpainting.');
   if(!['img2img','inpaint'].includes(mode)||!source||(mode==='inpaint'&&!mask))throw Error('FLUX.2 Klein reference editing requires a saved source image (plus a mask for local editing).');
  }
- if(params.lora?.length)throw Error('This preset needs a model-specific LoRA workflow. Clear standard SDXL LoRAs before generating.');
+ if(params.lora?.length&&pack.family!=='flux2')throw Error('This image family does not yet support model-specific LoRA injection.');
  const files=Object.fromEntries(pack.files.map(x=>[x.group,resolvedFiles[x.group]||x.name]));
  const nodes={};let seq=0;
  const n=(type,inputs)=>{const id=String(++seq);nodes[id]={class_type:type,inputs};return [id,0]};
@@ -44,7 +44,8 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,resolvedFiles={}}={}
  if(!Number.isInteger(width)||!Number.isInteger(height)||width%8||height%8||width<256||height<256||width>1536||height>1536)throw Error('Use width/height 256–1536, multiples of 8.');
  if(![1,2,4].includes(count))throw Error('Choose 1, 2 or 4 images.');
  if(typeof params.prompt!=='string'||!params.prompt.trim()||params.prompt.length>12000)throw Error('Enter an image description.');
- const model=n('UNETLoader',{unet_name:files.diffusion_models,weight_dtype:'default'});
+ let model=n('UNETLoader',{unet_name:files.diffusion_models,weight_dtype:'default'});
+ if(pack.family==='flux2')for(const item of params.lora||[]){if(typeof item.name!=='string'||!/^[^\\/]+(?:[\\/][^\\/]+)*\.safetensors$/i.test(item.name)||item.name.includes('..'))throw Error('Invalid FLUX LoRA name.');const weight=Number(item.strength??0.8);if(!Number.isFinite(weight)||weight< -2||weight>2)throw Error('Invalid FLUX LoRA strength.');model=n('LoraLoaderModelOnly',{model,lora_name:item.name,strength_model:weight});}
  const clip=n('CLIPLoader',{clip_name:files.text_encoders,type:pack.family==='zimage'?'lumina2':'flux2',device:'default'});
  const vae=n('VAELoader',{vae_name:files.vae});
  const positive=n('CLIPTextEncode',{text:params.prompt,clip});

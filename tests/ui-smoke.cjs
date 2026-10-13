@@ -90,8 +90,11 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   if(!['flux-klein','z-turbo','sdxl','koboldcpp','custom'].every(id=>options.includes(id)))throw Error('Image Studio unified model selector is incomplete');
   await panel.locator('#image-create-model').selectOption('flux-klein');
   await panel.locator('#image-model-center').waitFor({state:'attached'});
-  if(!await panel.locator('#image-center-global').isVisible())throw Error('Unified Image Model Center did not initialize');
-  if(!await panel.locator('#image-center-chat').isVisible()||!await panel.locator('#image-center-adventure').isVisible())throw Error('Chat/Adventure image model selectors missing');
+  if(!await panel.locator('#image-center-global').count())throw Error('Unified Image Model Center did not initialize');
+  if(!await panel.locator('#image-center-chat').count()||!await panel.locator('#image-center-adventure').count())throw Error('Chat/Adventure image model selectors missing');
+  await panel.locator('[data-tab="image-setup"]').click();
+  if(!await panel.locator('#image-center-global').isVisible())throw Error('Unified model controls must be visible in Models & Setup');
+  await panel.locator('[data-tab="images"]').click();
   
   if(!await panel.locator('#image-generate').isEnabled())throw Error('FLUX Generate must not depend on legacy KoboldCpp ImageModels checkpoint');
   if(!await panel.locator('#image-installed').isHidden())throw Error('Legacy checkpoint picker belongs only in Models & Setup');

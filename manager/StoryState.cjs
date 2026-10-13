@@ -5,7 +5,17 @@ const TYPES=['number','boolean','enum','text','list','relationship','timer','que
 const keyOf=d=>d.owner+':'+d.id;
 function validateDefinition(input){
  const d=clone(input);if(!d||!/^[-\w]{1,80}$/.test(d.id)||typeof d.owner!=='string'||!/^(character|player):[-\w]{1,100}$/.test(d.owner)||!TYPES.includes(d.type))throw Error('Tracker needs a unique ID, owner and supported type.');
- d.label=String(d.label||d.id).slice(0,150);d.updateMode=d.updateMode||'approval';if(!['automatic','approval','manual'].includes(d.updateMode))throw Error('Invalid tracker update mode.');
+ d.label=String(d.label||d.id).slice(0,150);
+ d.description=String(d.description||'').slice(0,1200);
+ d.category=String(d.category||'General').slice(0,50);
+ d.icon=String(d.icon||'').slice(0,12);
+ d.unit=String(d.unit||'').slice(0,24);
+ d.instructions=String(d.instructions||'').slice(0,2400);
+ d.changeRules=String(d.changeRules||'').slice(0,2400);
+ d.alwaysInject=d.alwaysInject!==false;
+ if(d.rules!==undefined&&(typeof d.rules!=='object'||Array.isArray(d.rules)||!d.rules))throw Error('Status rules must map statuses to story effects.');
+ if(d.transitions!==undefined&&(typeof d.transitions!=='object'||Array.isArray(d.transitions)||!d.transitions))throw Error('Status transitions must map statuses to allowed next values.');
+ d.updateMode=d.updateMode||'approval';if(!['automatic','approval','manual'].includes(d.updateMode))throw Error('Invalid tracker update mode.');
  d.visibility=d.visibility||'player';if(!['player','hidden'].includes(d.visibility))throw Error('Invalid visibility.');d.version=Number(d.version)||1;d.relevantKeywords=Array.isArray(d.relevantKeywords)?d.relevantKeywords.map(String):[];
  if(d.type==='number'||d.type==='relationship'){d.min=Number.isFinite(d.min)?d.min:0;d.max=Number.isFinite(d.max)?d.max:100;if(d.min>d.max)throw Error('Invalid tracker range.');d.maxDelta=Number.isFinite(d.maxDelta)?Math.max(0,d.maxDelta):10;}
  if(d.type==='enum'){if(!Array.isArray(d.allowedValues)||!d.allowedValues.length||d.allowedValues.some(x=>typeof x!=='string'))throw Error('Enum needs allowed statuses.');}
@@ -37,10 +47,10 @@ function conditionPass(condition,state,context={}){
 }
 function activeContext(session,messages,query='',cap=24){
  const state=stateAt(session,messages),text=String(query).toLowerCase(),selected=[],omitted=[];
- for(const d of session.definitions){const key=keyOf(d),relevant=d.enabled!==false&&(d.alwaysInject!==false||d.relevantKeywords.some(x=>text.includes(x.toLowerCase())));if(Object.hasOwn(state,key)&&relevant&&selected.length<cap){selected.push({key,label:d.label,value:state[key],rule:d.rules?.[String(state[key])]||d.instructions||'',hidden:d.visibility==='hidden'});}else omitted.push(key);}
+ for(const d of session.definitions){const key=keyOf(d),relevant=d.enabled!==false&&(d.alwaysInject!==false||d.relevantKeywords.some(x=>text.includes(x.toLowerCase())));if(Object.hasOwn(state,key)&&relevant&&selected.length<cap){selected.push({key,label:d.label,category:d.category,description:d.description,value:state[key],unit:d.unit,rule:[d.rules?.[String(state[key])],d.instructions,d.changeRules].filter(Boolean).join(' | '),hidden:d.visibility==='hidden'});}else omitted.push(key);}
  const ctx={text,location:selected.filter(x=>/location/i.test(x.key)).map(x=>x.value).join(' '),time:selected.filter(x=>/time/i.test(x.key)).map(x=>x.value).join(' ')};
  const lore=(session.lore||[]).map(e=>{const keyword=!e.keywords?.length||e.keywords.some(k=>text.includes(k.toLowerCase()));const active=keyword&&conditionPass(e.condition,state,ctx);return {...e,active,reason:!keyword?'No keyword match':!active?'State condition not met':'Keyword and state condition matched'};});
- return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Confirmed story state — authoritative over conflicting older dialogue or memory; respect naturally, do not recite]\n'+selected.map(x=>x.label+': '+JSON.stringify(x.value)+(x.rule?' — '+x.rule:'')).join('\n')+'\n'+lore.filter(e=>e.active).map(e=>'[Lore '+e.id+'] '+e.text).join('\n')};
+ return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Confirmed story state — authoritative over conflicting older dialogue or memory; respect naturally, do not recite]\n'+selected.map(x=>x.label+(x.unit?' ('+x.unit+')':'')+': '+JSON.stringify(x.value)+(x.description?' — '+x.description:'')+(x.rule?' | Story and change rules: '+x.rule:'')).join('\n')+'\n'+lore.filter(e=>e.active).map(e=>'[Lore '+e.id+'] '+e.text).join('\n')};
 }
 function propose(session,messages,patch,{manual=false,approve=false}={}){
  if(!Array.isArray(patch)||patch.length>100)throw Error('State analysis must return at most 100 changes.');const state=stateAt(session,messages),events=[];
@@ -67,15 +77,42 @@ function reconcile(session,messages){
  session.messageSignatures=fresh;session.headMessageId=messages.at(-1)?.extra?.heroMessageId||null;session.state=stateAt(session,messages);return {changed:changed<old.length,firstChanged:changed};
 }
 const TEMPLATE_DATA=[
- ['Health & Injuries',[{id:'health',label:'Health',type:'number',initialValue:100,min:0,max:100,updateMode:'approval'},{id:'wound',label:'Left shoulder injury',type:'enum',initialValue:'uninjured',allowedValues:['uninjured','fresh','bandaged','healing','scarred'],transitions:{uninjured:['fresh'],fresh:['bandaged','healing'],bandaged:['healing'],healing:['scarred','uninjured'],scarred:['fresh']},rules:{fresh:'Pain and limited use of the left arm.',bandaged:'Protected, but still painful; bandaging is not healing.',healing:'Improving with established treatment and story time.',scarred:'Healed with a lasting visible mark.'},updateMode:'automatic'}]],
- ['Scars & Appearance',[{id:'scars',label:'Scars',type:'list',initialValue:[],updateMode:'approval'},{id:'appearance',label:'Current appearance',type:'text',initialValue:'Unchanged',updateMode:'automatic'}]],
- ['Trust & Affection',[{id:'trust',label:'Trust',type:'number',initialValue:30,min:0,max:100,updateMode:'approval'},{id:'relationships',label:'Relationships',type:'relationship',initialValue:{},min:0,max:100,updateMode:'approval'}]],
- ['Stress & Mood',[{id:'mood',label:'Mood',type:'enum',initialValue:'calm',allowedValues:['calm','happy','worried','angry','afraid'],updateMode:'automatic'},{id:'stress',label:'Stress',type:'number',initialValue:0,min:0,max:100,updateMode:'approval'}]],
- ['Inventory & Equipment',[{id:'inventory',label:'Inventory',type:'list',initialValue:[],updateMode:'approval'},{id:'equipment',label:'Equipment',type:'list',initialValue:[],updateMode:'approval'}]],
- ['Secrets & Knowledge',[{id:'secret_known',label:'Secret known',type:'boolean',initialValue:false,visibility:'hidden',updateMode:'approval'},{id:'known_names',label:'Known names',type:'list',initialValue:[],updateMode:'approval'}]],
- ['Location & Time',[{id:'location',label:'Location',type:'text',initialValue:'Starting location',updateMode:'automatic'},{id:'recovery',label:'Recovery time (days)',type:'timer',unit:'days',initialValue:{remaining:3,clock:'story'},updateMode:'approval'}]],
- ['Quests & Flags',[{id:'quest',label:'Current quest',type:'quest',initialValue:{stage:'Not started',status:'inactive'},updateMode:'approval'},{id:'door_unlocked',label:'Door unlocked',type:'boolean',initialValue:false,updateMode:'automatic'}]],
- ['Clothing & Appearance',[{id:'clothing',label:'Clothing',type:'text',initialValue:'Usual outfit',updateMode:'automatic'}]]
+ ['Health & Injuries',[
+  {id:'health',label:'Physical condition',category:'Vitals',icon:'❤️',description:'Overall physical wellbeing, not hit points. 100 is healthy; 0 is incapacitated.',type:'number',initialValue:100,min:0,max:100,maxDelta:15,unit:'%',updateMode:'approval',instructions:'At 75–99 show fatigue or mild pain if established; 40–74 make exertion difficult; 1–39 show severe functional limits; at 0 incapacitation needs an explicit event.',changeRules:'Only change after explicit harm, illness, treatment or recovery in the story. Ordinary rest never instantly removes injuries.'},
+  {id:'wound',label:'Left shoulder injury',category:'Injuries',icon:'🩹',description:'Progression of a left shoulder wound. Do not create an injury if none occurred.',type:'enum',initialValue:'uninjured',allowedValues:['uninjured','fresh','bandaged','healing','scarred'],transitions:{uninjured:['fresh'],fresh:['bandaged','healing'],bandaged:['healing'],healing:['scarred','uninjured'],scarred:['fresh']},rules:{uninjured:'No injury or impairment.',fresh:'Pain, possible bleeding and limited use of the left arm.',bandaged:'Wound is dressed, but still painful; bandaging is not healing.',healing:'Symptoms improve gradually after established treatment and story time.',scarred:'Wound is healed; preserve its visible scar.'},changeRules:'A bandage changes wound care, not recovery. Only a narrated treatment and time can move to healing or scarred.',updateMode:'automatic'},
+  {id:'wound_details',label:'Injury details',category:'Injuries',icon:'📝',type:'text',initialValue:'No injuries established',updateMode:'approval',description:'Describe affected body part, cause, pain, functional impairment and any treatment already confirmed.',instructions:'Apply established physical restrictions consistently. Do not invent injuries or treatment.'}
+ ]],
+ ['Scars & Appearance',[
+  {id:'scars',label:'Permanent scars',category:'Appearance',icon:'🩹',type:'list',initialValue:[],updateMode:'approval',description:'One entry per scar: body location, appearance, origin and whether visible.',changeRules:'Only add after healing or an explicitly established old scar. Never erase permanent scars without an explicit event.'},
+  {id:'appearance',label:'Current appearance',category:'Appearance',icon:'👤',type:'text',initialValue:'Unchanged',updateMode:'automatic',description:'Stable visible facts: hairstyle, dirt, bruises and other distinctive details.',changeRules:'Update only when outward appearance visibly changes.'}
+ ]],
+ ['Trust & Affection',[
+  {id:'trust',label:'Trust in the player',category:'Relationships',icon:'🤝',type:'number',initialValue:30,min:0,max:100,maxDelta:8,unit:'%',updateMode:'approval',description:'0 hostile distrust; 25 wary; 50 neutral; 75 reliable ally; 100 profound trust.',instructions:'Dialogue and willingness to confide should reflect trust, but avoid treating a percentage as automatic consent.',changeRules:'Increase for proven reliability, decrease for deception or betrayal. Small everyday interactions change at most a few points.'},
+  {id:'relationships',label:'Relationship bonds',category:'Relationships',icon:'💞',type:'relationship',initialValue:{},min:0,max:100,updateMode:'approval',description:'Separate 0–100 trust or closeness values for explicitly known people.'}
+ ]],
+ ['Stress & Mood',[
+  {id:'mood',label:'Current mood',category:'Mind',icon:'🎭',type:'enum',initialValue:'calm',allowedValues:['calm','happy','worried','angry','afraid'],rules:{calm:'Behavior is measured.',happy:'More relaxed and receptive.',worried:'Distracted and watchful.',angry:'Irritable, not automatically violent.',afraid:'Cautious or hesitant, not automatically helpless.'},updateMode:'automatic',changeRules:'Base changes on clearly established actions and circumstances, never on guessed hidden feelings.'},
+  {id:'stress',label:'Stress',category:'Mind',icon:'⚡',type:'number',initialValue:0,min:0,max:100,maxDelta:15,unit:'%',updateMode:'approval',description:'0 relaxed; 25 tense; 50 strained; 75 overwhelmed; 100 near breakdown.',instructions:'Reflect established stress in speech, choices and concentration, not an arbitrary status announcement.'}
+ ]],
+ ['Inventory & Equipment',[
+  {id:'inventory',label:'Carried inventory',category:'Equipment',icon:'🎒',type:'list',initialValue:[],updateMode:'approval',description:'Confirmed possessions only, with quantities if known.',changeRules:'Add when acquired; remove when sold, used, lost or given away. Never fabricate items.'},
+  {id:'equipment',label:'Currently equipped',category:'Equipment',icon:'⚔️',type:'list',initialValue:[],updateMode:'approval',description:'Items currently worn or held, including which hand or body slot if relevant.'}
+ ]],
+ ['Secrets & Knowledge',[
+  {id:'secret_known',label:'Hidden secret learned',category:'Knowledge',icon:'🔒',type:'boolean',initialValue:false,visibility:'hidden',updateMode:'approval',description:'A specific secret has been revealed to this character, not merely mentioned to the reader.'},
+  {id:'known_names',label:'Known people',category:'Knowledge',icon:'📖',type:'list',initialValue:[],updateMode:'approval',description:'People the owner has actually met or learned about in-story.'}
+ ]],
+ ['Location & Time',[
+  {id:'location',label:'Current location',category:'World',icon:'📍',type:'text',initialValue:'Starting location',updateMode:'automatic',description:'Precisely named current scene location. Avoid inventing unexplored places.',changeRules:'Update after explicitly moving to a new location.'},
+  {id:'recovery',label:'Recovery countdown',category:'Time',icon:'⏳',type:'timer',unit:'days',initialValue:{remaining:3,clock:'story'},updateMode:'approval',description:'Story days of medically established healing remaining; never use real-world clock time without opting in.'}
+ ]],
+ ['Quests & Flags',[
+  {id:'quest',label:'Current quest',category:'Quests',icon:'📜',type:'quest',initialValue:{stage:'Not started',status:'inactive'},updateMode:'approval',description:'Tracks explicit narrative objective, stage and completion status.'},
+  {id:'door_unlocked',label:'Door unlocked',category:'World',icon:'🔑',type:'boolean',initialValue:false,updateMode:'automatic',description:'Whether this particular door was opened by a confirmed action.'}
+ ]],
+ ['Clothing & Appearance',[
+  {id:'clothing',label:'Worn clothing',category:'Appearance',icon:'👗',type:'text',initialValue:'Usual outfit',updateMode:'automatic',description:'Current clothes, condition, dirt, damage, accessories and changes that persist across scenes.',changeRules:'Only change after dressing, undressing, soiling or repairing clothes.'}
+ ]]
 ];
 function scopeTemplate(value,owner){if(typeof value==='string'&&value.startsWith('character:self'))return value.replace('character:self',owner);if(Array.isArray(value))return value.map(v=>scopeTemplate(v,owner));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[scopeTemplate(k,owner),scopeTemplate(v,owner)]));return value;}
 module.exports={scopeTemplate,clone,hash,TYPES,keyOf,validateDefinition,validateValue,initialState,signature,stateAt,conditionPass,activeContext,propose,reconcile,TEMPLATE_DATA};

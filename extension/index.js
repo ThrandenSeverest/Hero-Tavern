@@ -40,9 +40,9 @@ const initHeroTavern = async () => {
     const show = name => {
         dismissWelcome();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
-        const isPanel=['assistant','models','hardware','generation','memory','images','storage','creator','adventure','diagnostics','history','trackers','lore','inspector'].includes(name);
+        const isPanel=['assistant','models','hardware','generation','memory','images','image-setup','storage','creator','adventure','diagnostics','history','trackers','lore','inspector'].includes(name);
         workspace.classList.toggle('open',isPanel);
-        document.getElementById('hero-page-title').textContent={assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',adventure:'Ilreon · Adventure mode',images:'Image Studio',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=name==='adventure';adventure.hidden=name!=='adventure';
+        document.getElementById('hero-page-title').textContent={assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',adventure:'Ilreon · Adventure mode',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=name==='adventure';adventure.hidden=name!=='adventure';
         rail.querySelectorAll('.hero-nav').forEach(b=>b.classList.toggle('active',b.dataset.hero===name));
         if(isPanel&&name!=='adventure') frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};

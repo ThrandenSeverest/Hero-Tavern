@@ -366,6 +366,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 }
                 json(200,await assistant.action(req.url,data));return;
              }
+             if(req.url==='/image/model-center/status'){json(200,await imageCenter.status());return;}
              if(req.url==='/image/model-center/select'){json(200,await imageCenter.select(data));return;}
              if(req.url==='/image/model-center/download'){if(imageJob)throw Error('Finish the image first.');json(202,imageCenter.startDownload(data));return;}
              if(req.url==='/image/model-center/cancel'){json(200,imageCenter.cancelDownload());return;}

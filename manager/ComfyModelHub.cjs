@@ -2,6 +2,8 @@
 // Curated local image-model packs; all downloads are user initiated and use official HTTPS files.
 // A pack is a complete recipe, not a single checkpoint. No hidden background installs.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
+const QWEN_QUANTS=[["Q2_K",2.47],["Q3_K_S",2.72],["Q3_K_M",3.17],["Q3_K_XL",3.61],["Q4_K_S",3.91],["Q4_K_M",4.2],["Q5_K_S",4.5],["Q5_K_M",5.39],["Q6_K",6.27],["Q6_K_XL",6.72],["Q8_0",7.64],["F16",14.23]];
+const QWEN_PACKS=QWEN_QUANTS.map(([quant,gb])=>({id:'qwen21-'+quant.toLowerCase().replace(/_/g,''),name:'Qwen-Image-2.1 '+quant+(quant==='Q5_K_M'?' · recommended':''),family:'qwen21',downloadGiB:Number((gb+9.35+0.67).toFixed(2)),license:'Qwen Research License',description:'Instruction-following image generation and reference editing; '+quant+' denoiser '+gb+' GB. Shared 9.35 GB Qwen3-VL INT8 encoder + VAE (~0.67 GB).',recommended:quant==='Q5_K_M'?'RTX 5070 12 GB VRAM / 32 GB RAM; use low-VRAM offload':'Optional quantization; larger quants may exceed 12 GB VRAM',vram:quant==='Q5_K_M'?'12 GB with CPU offload (speed varies)':quant==='F16'?'More than 12 GB; heavy CPU offload':'12 GB with CPU offload; verify available RAM',docs:'https://huggingface.co/unsloth/Qwen-Image-2.1-GGUF',steps:25,cfg:1,width:1024,height:1024,quant,files:[{group:'diffusion_models',name:'qwen-image-2.1-'+quant+'.gguf',repo:'unsloth/Qwen-Image-2.1-GGUF',source:'qwen-image-2.1-'+quant+'.gguf'},{group:'text_encoders',name:'qwen3vl_8b_int8_convrot.safetensors',repo:'Comfy-Org/Qwen-Image-2.1',source:'text_encoders/qwen3vl_8b_int8_convrot.safetensors'},{group:'vae',name:'qwen_image_2.1_vae_bf16.safetensors',repo:'Comfy-Org/Qwen-Image-2.1',source:'vae/qwen_image_2.1_vae_bf16.safetensors'}]}));
 const PACKS=[
  {id:'sdxl',name:'SDXL · art & LoRA',family:'sdxl',downloadGiB:6.94,license:'OpenRAIL++ (Stability AI)',description:'Painted and photographic artwork; compatible checkpoint & LoRA selection.',recommended:'Illustration and classic Stable Diffusion workflows',vram:'8–12 GB',files:[{group:'checkpoints',name:'sd_xl_base_1.0.safetensors',repo:'stabilityai/stable-diffusion-xl-base-1.0',source:'sd_xl_base_1.0.safetensors'}],docs:'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0',steps:28,cfg:6,width:1024,height:1024},
  {id:'flux-klein',name:'FLUX.2 Klein 4B · character edits',family:'flux2',downloadGiB:16.3,license:'Apache-2.0 (verify each upstream file)',description:'Fast multi-component image engine for reference editing and coherent scenes.',recommended:'Character fidelity and references',vram:'~9 GB+ (varies by workflow)',docs:'https://docs.comfy.org/tutorials/flux/flux-2-klein',steps:4,cfg:1,width:1024,height:1024,
@@ -17,6 +19,7 @@ const PACKS=[
    {group:'vae',name:'ae.safetensors',repo:'Comfy-Org/z_image_turbo',source:'split_files/vae/ae.safetensors'}
   ]}
 ];
+PACKS.unshift(...QWEN_PACKS);
 const GROUPS=['checkpoints','diffusion_models','text_encoders','vae','loras','upscale_models'];
 const safe=(p,label)=>{if(typeof p!=='string'||!p||p.length>255||/[/\\\x00-\x1f]/.test(p)||p==='.'||p==='..')throw Error('Invalid '+label);return p};
 // Existing installations may use the upstream FP8 filename or nested ComfyUI folders.
@@ -149,4 +152,4 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
  function knownFiles(id){return pack(id).files.map(x=>({group:x.group,name:x.name}))}
  return {PACKS,pack,snapshot,configure,downloadPack,cancel,select,knownFiles,composeStatus,localStatus,resolvePackFiles};
 }
-module.exports={PACKS,createModelHub,installed,composeStatus,resolvePackFiles};
+module.exports={PACKS,QWEN_PACKS,createModelHub,installed,composeStatus,resolvePackFiles};

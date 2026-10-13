@@ -126,7 +126,7 @@ function createDiskCare(root){
  const runtimeRoot=path.join(root,'Cache','KoboldCpp');
  function runtimeCandidates(){
   const found=[],now=Date.now();
-  for(const role of ['text','image','thinking']){
+  for(const role of ['text','image','thinking','vision']){
    const parent=path.join(runtimeRoot,role);
    try{
     if(!fs.existsSync(parent)||fs.lstatSync(parent).isSymbolicLink()||!fs.statSync(parent).isDirectory())continue;

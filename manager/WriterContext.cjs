@@ -1,22 +1,24 @@
 'use strict';
 // Writer prompts are a fiction-completion task, not a request for an assistant to discuss fiction.
 async function buildWriterContext(w,budget,count){
- const manuscript=String(w.text||'');
- const premise=String(w.prompt||'').trim();
+ const name=String(w.persona?.name||'').trim()||'you',resolve=text=>String(text||'').replace(/\{\{user\}\}/gi,()=>name);
+ const rawManuscript=String(w.text||''),manuscript=resolve(rawManuscript);
+ const premise=resolve(w.prompt).trim();
  const operation=w.operation||'continue';
- const start=w.start??manuscript.length,end=w.end??start;
- const selection=manuscript.slice(start,end),source=manuscript.slice(0,start),suffix=operation==='continue'?'':manuscript.slice(end,end+6000);
- const activation=(manuscript.slice(-12000)+'\n'+premise).toLowerCase();
+ const start=w.start??rawManuscript.length,end=w.end??start;
+ const selection=resolve(rawManuscript.slice(start,end)),source=resolve(rawManuscript.slice(0,start)),suffix=['continue','say','do'].includes(operation)?'':resolve(rawManuscript.slice(end,end+6000));
+ const activation=(manuscript.slice(-12000)+'\n'+premise+'\n'+String(w.instruction||'')).toLowerCase();
  const lore=Array.isArray(w.lore)?w.lore:[];
  const active=lore.filter(e=>e.enabled!==false&&(e.always||(e.keys||[]).some(k=>activation.includes(k.toLowerCase()))));
  if(operation==='continue'&&!manuscript.trim()&&!premise&&!String(w.note||'').trim())throw Error('Write a story prompt or some manuscript prose before generating.');
  const context=[
+  '[User persona]\nName: '+name+(w.persona?.description?'\n'+resolve(w.persona.description):'')+'\nNever output unresolved persona placeholders.',
   premise?'[Story prompt — scenario to dramatize as fiction, NOT text to repeat]\n'+premise:'',
-  w.memory?'[Established story facts]\n'+w.memory:'',
-  ...active.map(e=>'[Lore: '+e.title+']\n'+e.text),
-  w.note?'[Author direction — apply within the prose]\n'+w.note:''
+  w.memory?'[Established story facts]\n'+resolve(w.memory):'',
+  ...active.map(e=>'[Lore: '+e.title+']\n'+resolve(e.text)),
+  w.note?'[Author direction — apply within the prose]\n'+resolve(w.note):''
  ].filter(Boolean).join('\n\n');
- const task=operation==='continue'
+ const task=['say','do'].includes(operation)?'Continue the manuscript, incorporating this '+(operation==='say'?'exact spoken dialogue from '+name+' (preserve its words in dialogue)':'action by '+name+' (show it happening in the scene)')+': '+resolve(w.instruction)+'. Adapt the surrounding narration and reactions to it. Do not ignore or substitute the intent. Output new fiction prose only.':operation==='continue'
   ?(manuscript.trim()?'Continue the manuscript immediately after its last sentence. Output NEW fiction prose only, without repeating or recapping any manuscript text.':'Write the opening scene as fiction prose using the story prompt and author direction. Begin inside the scene, not with a summary or a profile.')
   :operation==='insert'
    ?'Write only the missing fiction prose at the caret, fitting naturally between the preceding and following passages.'
@@ -30,4 +32,24 @@ async function buildWriterContext(w,budget,count){
  const tail=low?source.slice(-low):'',prompt=render(tail);
  return {prompt,diagnostics:{activeLore:active.map(e=>e.title),omittedLore:lore.filter(e=>!active.includes(e)).map(e=>e.title),retainedCharacters:tail.length,omittedCharacters:source.length-tail.length,promptTokens:await count(prompt),budget}};
 }
-module.exports={buildWriterContext};
+// Called only when fixed context exceeds the loaded model's measured token budget.
+async function reduceLongContext(source,{count,budget,complete}){
+ const inputBudget=Math.max(256,budget-500),outputBudget=Math.max(128,Math.min(512,Math.floor(budget/4)));
+ let current=String(source),parts=0;
+ for(let pass=0;pass<8;pass++){
+  if(await count(current)<=Math.floor(budget*.55)){if(!parts)return {text:current,parts};const audited=await complete('Audit and combine these continuity notes into one coherent narrator brief. Preserve established facts, names, chronology, rules and unresolved contradictions; distinguish plans from events, invent nothing. Return only the brief.\n'+current,outputBudget);if(!audited.trim())throw Error('Continuity audit returned no text. Original source preserved.');return {text:audited,parts,audited:true};}
+  const chunks=[];let offset=0;
+  while(offset<current.length){let low=1,high=current.length-offset;
+   while(low<high){const mid=Math.ceil((low+high)/2);if(await count(current.slice(offset,offset+mid))<=inputBudget)low=mid;else high=mid-1;}
+   chunks.push(current.slice(offset,offset+low));offset+=low;
+  }
+  const notes=[];
+  for(let i=0;i<chunks.length;i++){
+   const prompt='Compress this source into continuity notes. Preserve names, relationships, rules, exact established facts, important dialogue/action intent and contradictions. Do not invent or continue the story. Source part '+(i+1)+'/'+chunks.length+':\n'+chunks[i];
+   notes.push(await complete(prompt,outputBudget));parts++;
+  }
+  const next=notes.join('\n');if(!next.trim()||next.length>=current.length)throw Error('Long-context summarization did not reduce the source. Increase the loaded model context; original text is preserved.');current=next;
+ }
+ throw Error('Source remains too large after summarization; original text is preserved.');
+}
+module.exports={buildWriterContext,reduceLongContext};

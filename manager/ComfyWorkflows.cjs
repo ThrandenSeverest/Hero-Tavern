@@ -4,6 +4,7 @@
 const crypto=require('node:crypto');
 const {validateScene,regionsForScene}=require('./SceneComposition.cjs');
 const SAMPLERS={'DPM++ 2M Karras':['dpmpp_2m','karras'],'DPM++ 2S ancestral Karras':['dpmpp_2s_ancestral','karras'],'Euler':['euler','normal'],'Euler a':['euler_ancestral','normal'],'LCM':['lcm','normal']};
+function sampling(p={},fallback=['euler','normal']){const mapped=SAMPLERS[p.sampler_name]||(/^[a-z0-9_]+$/.test(p.sampler_name||'')?[p.sampler_name,fallback[1]]:fallback);return [mapped[0],/^[a-z0-9_]+$/.test(p.scheduler||'')?p.scheduler:mapped[1]];}
 function modelName(value,label='Model'){
  if(typeof value!=='string'||value.length>260||!value||value.startsWith('/')||value.startsWith('\\')||value.includes('\0')||value.split(/[\\/]/).some(part=>part==='..'||part==='.'||!part))throw Error(label+' must be an installed relative model name.');
  return value;
@@ -24,7 +25,9 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
  if(operation==='upscale'){
   const image=node('LoadImage',{image:source});
   let result;
-  if(upscaleModel){modelName(upscaleModel,'Upscaler');result=node('ImageUpscaleWithModel',{upscale_model:node('UpscaleModelLoader',{model_name:upscaleModel}),image});}
+  if(upscaleModel){modelName(upscaleModel,'Upscaler');result=node('ImageUpscaleWithModel',{upscale_model:node('UpscaleModelLoader',{model_name:upscaleModel}),image});
+   if(params?.width&&params?.height){const factor=clamp(Number(upscaleFactor),1,4,'upscale factor');result=node('ImageScale',{image:result,upscale_method:['lanczos','bicubic','bilinear','nearest-exact'].includes(upscaleMethod)?upscaleMethod:'lanczos',width:Math.round(params.width*factor),height:Math.round(params.height*factor),crop:'disabled'});}
+  }
   else result=node('ImageScaleBy',{image,upscale_method:['lanczos','bicubic','bilinear','nearest-exact'].includes(upscaleMethod)?upscaleMethod:'lanczos',scale_by:clamp(Number(upscaleFactor),1,4,'upscale factor')});
   const saved=node('SaveImage',{images:result,filename_prefix:'HeroTavern_Upscaled'});
   return {graph,saveId:saved[0],mode:operation,seed:null,batch:1};
@@ -38,7 +41,7 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
  if(!Number.isInteger(count)||count<1||count>4||(operation!=='txt2img'&&count!==1))throw Error('Choose 1–4 images; image edits are single-image jobs.');
  const seed=p.seed===-1?crypto.randomInt(0,2147483647):p.seed;
  if(!Number.isInteger(seed)||seed<0||seed>2147483647)throw Error('Invalid image seed.');
- const [sampler,scheduler]=SAMPLERS[p.sampler_name]||SAMPLERS['DPM++ 2M Karras'];
+ const [sampler,scheduler]=sampling(p,SAMPLERS['DPM++ 2M Karras']);
  const checkpointNode=node('CheckpointLoaderSimple',{ckpt_name:checkpoint});
  let model=[checkpointNode[0],0],clip=[checkpointNode[0],1],vae=[checkpointNode[0],2];
  if(!Array.isArray(lora)||lora.length>3)throw Error('Limit LoRAs to three per image.');
@@ -47,7 +50,7 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
   const filename=modelName(entry.name,'LoRA');
   if(!/\.(?:safetensors|pt|ckpt)$/i.test(filename))throw Error('Invalid LoRA file extension.');
   const strength=clamp(Number(entry.strength??1),-2,2,'LoRA strength');
-  const layer=node('LoraLoader',{model,clip,lora_name:filename,strength_model:strength,strength_clip:strength});
+  const layer=node('LoraLoader',{model,clip,lora_name:filename,strength_model:strength,strength_clip:clamp(Number(entry.clipStrength??strength),-2,2,'LoRA CLIP strength')});
   model=[layer[0],0];clip=[layer[0],1];
  }
  const negative=node('CLIPTextEncode',{text:p.negative_prompt,clip});
@@ -91,4 +94,4 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
  const saved=node('SaveImage',{images:output,filename_prefix:operation==='inpaint'?'HeroTavern_Edit':operation==='outpaint'?'HeroTavern_Expand':'HeroTavern'});
  return {graph,saveId:saved[0],mode:operation,seed,batch:count};
 }
-module.exports={buildWorkflow,modelName,SAMPLERS};
+module.exports={buildWorkflow,modelName,SAMPLERS,sampling};

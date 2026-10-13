@@ -31,7 +31,7 @@ const initHeroTavern = async () => {
     const header=document.createElement('header');header.id='hero-header';
     header.innerHTML='<strong id="hero-page-title">Your tavern</strong><button id="hero-engine-chip" class="hero-chip">Checking local AI…</button>';
     const workspace=document.createElement('main');workspace.id='hero-workspace';
-    const closePanel=document.createElement('button');closePanel.id='hero-panel-close';closePanel.textContent='Back to chat ×';closePanel.style.cssText='position:absolute;right:18px;top:8px;z-index:2;padding:8px;border:1px solid #64748b;background:#27354a;color:white;border-radius:8px;cursor:pointer';closePanel.onclick=()=>show('chat');workspace.append(closePanel);
+    const closePanel=document.createElement('button');closePanel.id='hero-panel-close';closePanel.textContent='Back to chat ×';closePanel.style.cssText='position:static;flex-shrink:0;padding:8px;border:1px solid #64748b;background:#27354a;color:white;border-radius:8px;cursor:pointer';closePanel.onclick=()=>show('chat');header.append(closePanel);
     const frame=document.createElement('iframe');frame.id='hero-model-frame';frame.title='Hero Tavern models and hardware';frame.src=bridgeOrigin+'/';workspace.append(frame);
     const welcome=document.createElement('section');welcome.id='hero-welcome';
     welcome.innerHTML='<button id="hero-welcome-close" aria-label="Close welcome" style="float:right;padding:10px;border:1px solid #64748b;border-radius:8px;background:#27354a;color:white;cursor:pointer">Close ×</button><div class="hero-eyebrow">Welcome to your tavern</div><h1 class="hero-welcome-title">Every character has a story.<br>Start yours here.</h1><p class="hero-lead">Create a character, bring your world to life, and chat with an AI running on your own computer.</p><div class="hero-cards"><article class="hero-card"><h3>1 · Choose your AI</h3><p>Try Rocinante or Qwen, or load an installed model. Hero Tavern runs and connects the engine for you.</p><button class="hero-action" data-hero="models">Open models</button></article><article class="hero-card"><h3>2 · Meet a character</h3><p>Create someone new or import a SillyTavern character card to begin your conversation.</p><button class="hero-action" data-hero="characters">Characters</button></article><article class="hero-card"><h3>3 · Build your world</h3><p>Add places, lore and memories with SillyTavern’s World Info tools.</p><button class="hero-action" data-hero="world">World info</button></article></div>';
@@ -41,15 +41,15 @@ const initHeroTavern = async () => {
     const show = name => {
         dismissWelcome();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
-        const isPanel=['assistant','models','hardware','generation','memory','images','image-setup','storage','creator','adventure','writer','diagnostics','history','trackers','lore','inspector'].includes(name);
+        const isPanel=['assistant','models','vision','hardware','generation','memory','images','comfy-workflows','image-setup','storage','creator','adventure','writer','diagnostics','history','trackers','lore','inspector'].includes(name);
         workspace.classList.toggle('open',isPanel);
-        document.getElementById('hero-page-title').textContent={assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',writer:'Writer · novels & stories',adventure:'Ilreon · Adventure mode',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=['adventure','writer'].includes(name);adventure.hidden=name!=='adventure';writer.hidden=name!=='writer';
+        document.getElementById('hero-page-title').textContent={vision:'Image analyzer',assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',writer:'Writer · novels & stories',adventure:'Ilreon · Adventure mode','comfy-workflows':'ComfyUI Workflows',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=['adventure','writer'].includes(name);adventure.hidden=name!=='adventure';writer.hidden=name!=='writer';
         rail.querySelectorAll('.hero-nav').forEach(b=>b.classList.toggle('active',b.dataset.hero===name));
         if(isPanel&&!['adventure','writer'].includes(name)) frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};
         if(selectors[name])document.querySelector(selectors[name])?.click();
     };
-    for(const [name,label] of [['chat','Tavern'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['storage','Storage'],['models','Models'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
+    for(const [name,label] of [['chat','Tavern'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['comfy-workflows','ComfyUI Workflows'],['storage','Storage'],['models','Models'],['vision','Image analyzer'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);
@@ -95,13 +95,14 @@ const initHeroTavern = async () => {
         c.eventSource.on(c.eventTypes.GENERATION_STARTED,(type)=>{generationType=type;});
         c.eventSource.on(c.eventTypes.GENERATE_AFTER_DATA,(data,dryRun)=>{
             const current=context?.(),id=chatIdentity();
-            if(generationType==='quiet')data.hero_mode='utility';
+            if(generationType==='quiet'){const imageTask=/image|visual description|stable diffusion|comma.separated|photograph/i.test(data.prompt||'');data.hero_mode=imageTask?'image-prompt':'utility';if(imageTask)data.hero_image_context='Character appearance: '+String(current?.characters?.[current.characterId]?.description||'').slice(0,1200)+'\nCurrent visible scene: '+(current?.chat||[]).slice(-3).map(m=>m.name+': '+m.mes).join('\n').slice(-2800);}
             if(dryRun||!engine?.backendReady||!id||!current||['quiet','impersonate'].includes(generationType)||typeof data.prompt!=='string'||data.api_type!=='koboldcpp')return;
             let messages=current.chat.filter(m=>!m.is_system||m.mes).map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name||'',text:m.mes||''}));
             if(generationType==='swipe'&&messages.at(-1)?.role==='assistant')messages=messages.slice(0,-1);
             data.hero_context={id,messages,generationType};
         });
     }
+    window.addEventListener('message',event=>{if(event.origin!==bridgeOrigin||event.source!==adventure.contentWindow||event.data?.type!=='hero-adventure-party-cards')return;const cards=(context?.()?.characters||[]).map(card=>({name:card.name,avatar:card.avatar,data:{name:card.data?.name||card.name,description:card.data?.description||card.description,personality:card.data?.personality||card.personality,scenario:card.data?.scenario||card.scenario}}));adventure.contentWindow.postMessage({type:'hero-adventure-party-cards-result',cards},bridgeOrigin);});
     window.addEventListener('message',async event=>{
         if(event.origin!==bridgeOrigin||event.source!==frame.contentWindow)return;
         if(event.data?.type==='hero-response'){const item=pending.get(event.data.id);if(item){clearTimeout(item.timer);pending.delete(event.data.id);event.data.error?item.reject(Error(event.data.error)):item.resolve(event.data.value);}return;}

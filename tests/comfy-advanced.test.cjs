@@ -48,6 +48,7 @@ test('Live ComfyUI mock preserves batch PNGs and exact seed in local image galle
     const id=Object.keys(graph).find(k=>graph[k].class_type==='SaveImage');
     value={'a-job':{status:{completed:true},outputs:{[id]:{images:[{filename:'one.png',subfolder:'',type:'output'},{filename:'two.png',subfolder:'',type:'output'}]}}}};break;
    }
+   case '/upload/image':{const match=body.match(/filename="([^"]+)"/);value={name:match?.[1],subfolder:'',type:'input'};break;}
    case '/queue':value={queue_running:[],queue_pending:[]};break;
    case '/view':res.setHeader('Content-Type','image/png');res.end(png);return;
    default:res.statusCode=404;value={error:'unsupported endpoint'};
@@ -76,7 +77,7 @@ test('Live ComfyUI mock preserves batch PNGs and exact seed in local image galle
   const original='1720000000000-aabbccddeeff.png';
   fs.writeFileSync(path.join(root,'Images',original),png);
   const upscaled=await adapter.generate({...params,modelPack:'flux-klein',operation:'upscale',upscaleFactor:2,upscaleMethod:'bicubic'},{sourceName:original,checkpoint:''});
-  assert.match(upscaled.url,/images\\/output\\//);
+  assert.match(upscaled.url,/images\/output\//);
   assert.ok(Object.values(graph).some(node=>node.class_type==='ImageScaleBy'&&node.inputs.upscale_method==='bicubic'));
   assert.ok(!Object.values(graph).some(node=>node.class_type==='Flux2Scheduler'));
 

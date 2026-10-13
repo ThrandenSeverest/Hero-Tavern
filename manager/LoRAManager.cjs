@@ -196,7 +196,7 @@ function createLoRAManager(root,{modelRoot=()=>'',fetchFn=globalThis.fetch}={}){
    if(!item.compatible)throw Error('LoRA "'+item.name+'" belongs to '+(item.family||'unknown')+', not '+(familyForPack(pack,checkpoint)||pack)+'. Assign a compatible family in LoRA Library.');
    const weight=Number(entry.strength??0.8);
    if(!Number.isFinite(weight)||weight< -2||weight>2)throw Error('LoRA weight must be between -2 and 2.');
-   return {name:item.name,strength:weight};
+   const clipStrength=Number(entry.clipStrength??weight);if(!Number.isFinite(clipStrength)||clipStrength< -2||clipStrength>2)throw Error('LoRA CLIP strength must be between -2 and 2.');return {name:item.name,strength:weight,...(entry.clipStrength!==undefined?{clipStrength}:{})};
   });
  }
  return {list,assign,begin,chunk,finish,cancel,browse,getVersion,startDownload,validateSelection};

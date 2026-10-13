@@ -188,5 +188,29 @@
       "repetition_penalty": 1.05
     },
     "Backend": "KoboldCpp"
+  },
+  {
+    "Label": "Vision analyzer: Qwen2.5 Omni 3B Q4_K_M",
+    "Repo": "ggml-org/Qwen2.5-Omni-3B-GGUF",
+    "File": "Qwen2.5-Omni-3B-Q4_K_M.gguf",
+    "Size": 2100000000,
+    "Role": "vision",
+    "License": "Apache-2.0",
+    "Template": "chatml",
+    "Context": 4096,
+    "Default": false,
+    "TestedOnThisPC": false
+  },
+  {
+    "Label": "Vision analyzer: matching Omni multimodal projector",
+    "Repo": "ggml-org/Qwen2.5-Omni-3B-GGUF",
+    "File": "mmproj-Qwen2.5-Omni-3B-Q8_0.gguf",
+    "Size": 2500000000,
+    "Role": "vision",
+    "License": "Apache-2.0",
+    "Template": "chatml",
+    "Context": 4096,
+    "Default": false,
+    "TestedOnThisPC": false
   }
 ]

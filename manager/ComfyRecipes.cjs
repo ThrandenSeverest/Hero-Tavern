@@ -1,12 +1,13 @@
 'use strict';
 // Model-specific ComfyUI graphs. End users choose "FLUX" or "Z-Image"; no JSON or nodes.
-const crypto=require('node:crypto'),{buildWorkflow}=require('./ComfyWorkflows.cjs');
+const crypto=require('node:crypto'),{buildWorkflow,sampling}=require('./ComfyWorkflows.cjs');
 function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFiles={}}={}){
+ const [samplerName,scheduler]=sampling(params,pack.family==='qwen21'?['euler','simple']:['euler','normal']);
  if(pack.family==='qwen21'){
   const mode=params.operation||'txt2img';
   if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
   if(mode!=='txt2img'&&!source)throw Error('Select a gallery image for Qwen editing.');
-  if(mode==='inpaint'&&!mask)throw Error('Paint an area to change before Qwen inpainting.');
+  if(mode==='inpaint'&&!mask)throw Error('Paint a mask area to change before Qwen inpainting.');
   if(params.lora?.length)throw Error('Standard SDXL LoRAs are incompatible with Qwen Image.');
   const nodes={};let k=0;const n=(class_type,inputs)=>{const id=String(++k);nodes[id]={class_type,inputs};return [id,0]};
   const files=Object.fromEntries(pack.files.map(f=>[f.group,resolvedFiles[f.group]||f.name]));
@@ -21,7 +22,7 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   const latent=sourceNode?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
-  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps||25,cfg:params.cfg_scale||1,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
+  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps||25,cfg:params.cfg_scale||1,sampler_name:samplerName,scheduler,denoise:mode==='txt2img'?1:params.denoise??0.7});
   const result=n('VAEDecode',{samples:sample,vae});
   let output=result;
   if(mode==='inpaint'){const masked=n('LoadImageMask',{image:mask,channel:'red'});output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
@@ -61,12 +62,12 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
  if(pack.family==='zimage'){
   const m=n('ModelSamplingAuraFlow',{model,shift:3});
   const latent=n('EmptyLatentImage',{width,height,batch_size:count});
-  sampled=n('KSampler',{model:m,positive,negative,latent_image:latent,seed,steps:pack.steps,cfg:pack.cfg,sampler_name:'euler',scheduler:'normal',denoise:1});
+  sampled=n('KSampler',{model:m,positive,negative,latent_image:latent,seed,steps:params.steps??pack.steps,cfg:params.cfg_scale??pack.cfg,sampler_name:samplerName,scheduler,denoise:1});
  }else if(pack.family==='flux2'){
   const latent=n('EmptyFlux2LatentImage',{width,height,batch_size:count});
-  const noise=n('RandomNoise',{noise_seed:seed}),sampler=n('KSamplerSelect',{sampler_name:'euler'});
-  const guider=n('CFGGuider',{model,positive:positiveCondition,negative,cfg:1});
-  const sigmas=n('Flux2Scheduler',{steps:4,width,height});
+  const noise=n('RandomNoise',{noise_seed:seed}),sampler=n('KSamplerSelect',{sampler_name:samplerName});
+  const guider=n('CFGGuider',{model,positive:positiveCondition,negative,cfg:params.cfg_scale??1});
+  const sigmas=n('Flux2Scheduler',{steps:params.steps??4,width,height});
   sampled=n('SamplerCustomAdvanced',{noise,guider,sampler,sigmas,latent_image:latent});
  }else throw Error('Unsupported image model family.');
  const decoded=n('VAEDecode',{samples:sampled,vae});

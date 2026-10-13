@@ -182,7 +182,7 @@ function makeUI(){
  if(technical){
   const tech=element('details'),h=element('summary','Advanced engine settings, checkpoints, masking tools');tech.append(h,technical);advanced.append(tech);
  }
- const workflows=$('hero-comfy-workflow-library');if(workflows)advanced.append(workflows);
+ const workflows=$('hero-comfy-workflow-library');if(workflows)$('comfy-api-library').append(workflows);
  main.append(advanced);
  const error=element('p','', 'hero-unified-error');error.id='image-model-center-error';main.append(error);
  $('models').append(main);

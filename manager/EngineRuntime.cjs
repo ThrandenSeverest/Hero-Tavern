@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 function runtimeEnvironment(root,role){
- if(!['text','image','thinking'].includes(role))throw Error('Unexpected KoboldCpp worker role.');
+ if(!['text','image','thinking','vision'].includes(role))throw Error('Unexpected KoboldCpp worker role.');
  const temp=path.join(root,'Cache','KoboldCpp',role);
  fs.mkdirSync(temp,{recursive:true});
  if(fs.lstatSync(temp).isSymbolicLink())throw Error('Refusing symlinked runtime temp.');

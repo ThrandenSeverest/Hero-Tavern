@@ -2,7 +2,7 @@
 const fs = require('node:fs'), path = require('node:path');
 const { filterReply, isMetaReply, repetitionIssue } = require('./ReplyFilters.cjs');
 const {profileFor,renderPrompt,modelRequest}=require('./ModelProfiles.cjs');
-const {buildWriterContext}=require('./WriterContext.cjs');
+const {buildWriterContext,reduceLongContext}=require('./WriterContext.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
 const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
@@ -82,7 +82,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
         try {
             let plan='',storyContext=null;
             if(body.hero_context?.sessionId){storyContext=getStoryContext(body.hero_context.sessionId,body.hero_context.messages.slice(-6).map(m=>m.text).join('\n'));}
-            const profile=getModelProfile();lastRun.profile=profile.Template;const timeoutSeconds=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).requestTimeoutSeconds||1200:1200;const trace=e=>{lastRun.requests.push(e);lastRun.requests=lastRun.requests.slice(-100);};stage('tokenizing');const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest((({hero_context,hero_mode,hero_writer,writerSettings,...value})=>value)(request),profile)),signal:controller.signal,timeoutMs:timeoutSeconds*1000,onEvent:trace}));
+            const profile=getModelProfile();lastRun.profile=profile.Template;const timeoutSeconds=fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).requestTimeoutSeconds||1200:1200;const trace=e=>{lastRun.requests.push(e);lastRun.requests=lastRun.requests.slice(-100);};stage('tokenizing');const send=async request=>completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest((({hero_context,hero_mode,hero_writer,hero_image_context,writerSettings,...value})=>value)(request),profile)),signal:controller.signal,timeoutMs:timeoutSeconds*1000,onEvent:trace}));
             const contextSize=getContextSize?getContextSize():fs.existsSync(path.join(root,'backend.json'))?JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8').replace(/^\uFEFF/, '')).contextSize||4096:4096;
             const tokenCache=new Map();const countTokens=async (prompt,format=true)=>{const key=(format?'formatted:':'raw:')+prompt;if(tokenCache.has(key))return tokenCache.get(key);
                 const response=await fetchBackend(backendURL+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:format?renderPrompt(prompt,profile):prompt}),signal:controller.signal,timeoutMs:10000,onEvent:trace});
@@ -97,10 +97,21 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             let replyTokens=['adventure-json','adventure-dm'].includes(mode)?Math.max(4096,settings.maxReplyTokens):mode==='adventure-narrator'?Math.max(3072,settings.maxReplyTokens):mode==='adventure'||mode==='character'||mode==='state'?Math.max(1024,settings.maxReplyTokens):settings.maxReplyTokens;
             const overhead=budgeted?await countTokens(taskInstruction+stateInstruction+directionInstruction+'\n<|im_start|>system\n<|im_end|>\n')+96:0;
             if(mode.startsWith('adventure')){const available=contextSize-overhead-await countTokens(body.prompt)-96;if(available<1024)throw Error('Adventure: контекст не оставляет 1024 токена для завершённого ответа. Увеличьте контекст модели.');replyTokens=Math.min(replyTokens,available);}
+            if(['state','character'].includes(mode)){const available=contextSize-overhead-await countTokens(body.prompt)-96;if(available<256)throw Error('Not enough loaded context for a complete JSON result. Shorten the source or increase model context.');replyTokens=Math.min(available,Math.max(mode==='character'?4096:2048,replyTokens));}
             const budget=contextSize-replyTokens-overhead-(mode==='chat'&&settings.thinkingMode==='separate'?settings.planningTokens+96:0);
             if(budget<128)throw Error('Reply and planning budgets leave no room for history. Lower Generation reply length or increase Hardware context.');
             const sendChecked=async request=>{if(budgeted&&await countTokens(request.prompt)+request.max_tokens>contextSize)throw Error('Prompt exceeds the loaded context. Increase Hardware context or shorten the character card/instructions. Chat history was not silently discarded.');return send(request)};
-            if(mode==='writer'){const built=await buildWriterContext(body.hero_writer,budget,countTokens);body={...body,prompt:built.prompt};lastRun.writerContext=built.diagnostics;}
+            if(mode==='writer'){
+                let built,writer=body.hero_writer;try{built=await buildWriterContext(writer,budget,countTokens)}catch(e){
+                    if(!/exceeds the available context/.test(e.message))throw e;
+                    stage('summarizing');const w=body.hero_writer;
+                    const activation=(String(w.text||'').slice(-12000)+'\n'+String(w.prompt||'')+'\n'+String(w.instruction||'')).toLowerCase(),activeLore=(w.lore||[]).filter(e=>e.enabled!==false&&(e.always||(e.keys||[]).some(k=>activation.includes(k.toLowerCase()))));const source=JSON.stringify({prompt:w.prompt,memory:w.memory,note:w.note,persona:w.persona,lore:activeLore});
+                    const reduced=await reduceLongContext(source,{count:countTokens,budget:Math.max(512,budget-600),complete:async(text,max_tokens)=>filterReply(await sendChecked({prompt:replyPrompt('<|im_start|>user\n'+text+'<|im_end|>\n<|im_start|>assistant\n','Extract faithful continuity facts only. /no_think'),max_tokens,temperature:.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})});
+                    writer={...w,persona:{name:w.persona?.name||'',description:''},prompt:'',memory:reduced.text,note:'Audit the combined continuity notes for consistency. Preserve the current scene and user intent; write only new prose.',lore:[]};built=await buildWriterContext(writer,budget,countTokens);
+                    built.diagnostics.longContext={parts:reduced.parts,originalCharacters:source.length,summaryCharacters:reduced.text.length,originalPreserved:true};
+                }
+                body={...body,hero_writer:writer,prompt:built.prompt};lastRun.writerContext=built.diagnostics;
+            }
             if(body.hero_context){
                 const memory=createMemory({root,countTokens,setDiagnostics,complete:async(prompt,max_tokens)=>{stage('summarizing');return filterReply(await sendChecked({prompt:replyPrompt('<|im_start|>user\n'+prompt+'<|im_end|>\n<|im_start|>assistant\n', 'Return compact continuity facts only. /no_think'),max_tokens,temperature:0.2,stream:false}),{stopAtSpeaker:false,removeModelTokens:true})}});
                 stage('remembering');body={...body,prompt:await memory.prepare(body,budget,{...settings,summaryInputBudget:contextSize-settings.memoryTokens-256})};
@@ -142,6 +153,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const retryRaw=await sendChecked({...request,prompt:retryPrompt,stream:false,max_tokens:retryTokens,temperature:0.45,top_p:0.9,min_p:0,top_k:20});
                 text=filterReply(retryRaw,{...filters,stopMarkers:[]});
                 lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text};
+                if(!text&&mode==='image-prompt'&&body.hero_image_context){text='Illustrate this visible scene with coherent composition, keeping the described people distinct. '+String(body.hero_image_context).replace(/<[^>]+>/g,'').slice(0,5000);lastRun.imagePromptFallback=true;}
                 if(!text)throw Error('Both initial and recovery generations returned only hidden reasoning or empty text. Try a non-thinking model or turn off reasoning in the model settings.');
             }
             const history=body.hero_context?.messages||[...body.prompt.matchAll(/<\|im_start\|>(user|assistant)\n([\s\S]*?)<\|im_end\|>/g)].map(x=>({role:x[1],text:x[2]}));
@@ -179,7 +191,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             let payload='';for await(const chunk of req){payload+=chunk;if(payload.length>2000000)throw new Error('Prompt is too large.')}
             if(endpoint==='/api/extra/abort')abort();
             if(req.method==='POST'&&endpoint==='/v1/completions'){
-                const body=JSON.parse(payload||'{}'),result=await generate(body,controller.signal,{mode:body.hero_mode==='utility'?'utility':'chat'});
+                const body=JSON.parse(payload||'{}'),result=await generate(body,controller.signal,{mode:body.hero_mode==='image-prompt'?'image-prompt':body.hero_mode==='utility'?'utility':'chat'});
                 if(body.stream){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store'});res.end('data: '+JSON.stringify(result)+'\n\ndata: [DONE]\n\n');}
                 else{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));}
             }else{

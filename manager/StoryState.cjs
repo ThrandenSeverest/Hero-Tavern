@@ -1,8 +1,16 @@
 // Versioned state contract. Shared by the service and unit tests; dialogue never contains patches.
 const crypto=require('node:crypto');
 const clone=x=>JSON.parse(JSON.stringify(x)),hash=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const TYPES=['number','boolean','enum','text','list','relationship','timer','quest','injuries'];
+const TYPES=['number','boolean','enum','text','list','relationship','timer','quest','injuries','record'];
 const keyOf=d=>d.owner+':'+d.id;
+function parseModelJSON(raw){
+ const text=String(raw).replace(/<think>[\s\S]*?<\/think>/gi,'');
+ for(let start=0;start<text.length;start++){
+  if(text[start]!=='{')continue;let depth=0,quoted=false,escaped=false;
+  for(let i=start;i<text.length;i++){const c=text[i];if(quoted){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')quoted=false;continue;}if(c==='"'){quoted=true;continue;}if(c==='{')depth++;if(c==='}'&&--depth===0){try{return JSON.parse(text.slice(start,i+1))}catch{break}}}
+ }
+ throw Error('The model returned incomplete or invalid JSON. No tracker values were changed.');
+}
 function validateDefinition(input){
  const d=clone(input);if(!d||!/^[-\w]{1,80}$/.test(d.id)||typeof d.owner!=='string'||!/^(character|player):[-\w]{1,100}$/.test(d.owner)||!TYPES.includes(d.type))throw Error('Tracker needs a unique ID, owner and supported type.');
  d.label=String(d.label||d.id).slice(0,150);
@@ -30,6 +38,7 @@ function validateValue(d,v){
  if(d.type==='relationship'&&(!v||typeof v!=='object'||Array.isArray(v)||Object.values(v).some(x=>!Number.isFinite(x)||x<d.min||x>d.max)))throw Error(d.label+': invalid relationship values.');
  if(d.type==='timer'&&(!v||!Number.isFinite(v.remaining)||v.remaining<0||!['story','wall'].includes(v.clock)))throw Error(d.label+': timer needs remaining duration and story/wall clock.');
  if(d.type==='quest'&&(!v||typeof v.stage!=='string'||!['inactive','active','complete','failed'].includes(v.status)))throw Error(d.label+': quest needs stage and status.');
+ if(d.type==='record'){if(!v||typeof v!=='object'||Array.isArray(v)||JSON.stringify(v).length>24000||Object.keys(v).length>30)throw Error(d.label+': use a structured record (maximum 30 fields / 24000 characters).');const check=(x,depth=0)=>{if(depth>5)throw Error('Tracker record is too deeply nested.');if(x===null||typeof x==='boolean'||typeof x==='string'&&x.length<=6000||Number.isFinite(x))return;if(Array.isArray(x)&&x.length<=100){x.forEach(y=>check(y,depth+1));return}if(x&&typeof x==='object'&&Object.keys(x).length<=30){Object.values(x).forEach(y=>check(y,depth+1));return}throw Error('Invalid tracker record field.');};check(v);}
  if(d.type==='injuries')validateInjuries(v);
  return v;
 }
@@ -74,7 +83,7 @@ function propose(session,messages,patch,{manual=false,approve=false}={}){
   const introduced=d.introducedAt?messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt):-1;if(!manual&&introduced>messages.indexOf(source))throw Error('Tracker starting values were established after this message; no retrospective AI change.');validateValue(d,item.value);if(!manual&&(d.updateMode==='manual'||d.enabled===false))throw Error('This tracker is manual only.');
   const evidence=String(item.evidence||'');if(!manual&&(!evidence||!String(source.mes).includes(evidence)))throw Error('State change needs an exact evidence quote from its source message.');
   if(!manual&&session.events.some(e=>e.key===item.key&&e.sourceMessageId===item.sourceMessageId&&e.status==='confirmed'&&e.authority==='user'))continue;
-  const prior=state[item.key];if(d.type==='injuries'&&!manual)validateInjuryChange(prior,item.value);if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
+  const prior=state[item.key];if(d.type==='record'&&!manual){for(const field of Object.keys(prior))if(!Object.hasOwn(item.value,field))throw Error('Preserve unchanged record fields: '+field);if(Array.isArray(prior.recentMeals)&&prior.recentMeals.slice(-19).some(meal=>!item.value.recentMeals?.some(next=>JSON.stringify(next)===JSON.stringify(meal))))throw Error('Preserve recent established meal history.');}if(d.type==='injuries'&&!manual)validateInjuryChange(prior,item.value);if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
   const major=d.type==='number'&&Math.abs(item.value-prior)>d.maxDelta||d.type==='list'&&JSON.stringify(prior)!==JSON.stringify(item.value)||d.type==='quest'&&['complete','failed'].includes(item.value.status)||d.type==='timer'&&item.value.clock==='wall';
   const status=manual||approve?'confirmed':d.updateMode==='approval'||major||item.ambiguous?'pending':'confirmed';
   const sourceSignature=signature(source),eventId=manual?crypto.randomUUID():hash({key:item.key,sourceMessageId:item.sourceMessageId,sourceSignature,value:item.value});
@@ -96,6 +105,9 @@ const TEMPLATE_DATA=[
   {id:'health',label:'Physical condition',category:'Vitals',icon:'❤️',description:'Overall physical wellbeing, not hit points. 100 is healthy; 0 is incapacitated.',type:'number',initialValue:100,min:0,max:100,maxDelta:15,unit:'%',updateMode:'automatic',instructions:'At 75–99 show fatigue or mild pain if established; 40–74 make exertion difficult; 1–39 show severe functional limits; at 0 incapacitation needs an explicit event.',changeRules:'Only change after explicit harm, illness, treatment or recovery in the story. Ordinary rest never instantly removes injuries.'},
   {id:'injuries',label:'Injuries & recovery',category:'Injuries',icon:'🩹',type:'injuries',initialValue:[],updateMode:'automatic',description:'Persistent records for every established injury: body location, origin, severity, pain, limitations, treatment, healing and scars.',instructions:'Respect each active injury in actions and dialogue. Treated wounds still hurt. Healed injuries retain their history and established scars.',changeRules:'Add only explicit injuries. Keep stable IDs and origin. Update symptoms, pain and treatment when narrated; recovery requires elapsed story time or explicit healing. Mark healed/scarred rather than deleting. Do not copy the overall health percentage into this ledger.'}
 
+ ]],
+ ['Hunger & Meals',[
+  {id:'hunger',label:'Hunger & recent meals',category:'Vitals',icon:'🍲',type:'record',initialValue:{fullness:null,summary:'Hunger and meals not established yet.',lastMealAt:'Unknown',recentMeals:[]},updateMode:'automatic',description:'Fullness plus persistent meal details. Unknown values stay unknown.',instructions:'Use meal history and time since the last established meal to inform hunger, energy and food choices. Keep recentMeals as entries with food, portion, story time and any explicit effects.',changeRules:'Add a meal only when actually eaten, not offered or planned. Keep the last 20 established meals. Do not invent meal times, ingredients, portions or elapsed time. Update fullness only from evidence; preserve all other fields when changing a field.'}
  ]],
  ['Scars & Appearance',[
   {id:'scars',label:'Permanent scars',category:'Appearance',icon:'🩹',type:'list',initialValue:[],updateMode:'approval',description:'One entry per scar: body location, appearance, origin and whether visible.',changeRules:'Only add after healing or an explicitly established old scar. Never erase permanent scars without an explicit event.'},
@@ -130,4 +142,4 @@ const TEMPLATE_DATA=[
  ]]
 ];
 function scopeTemplate(value,owner){if(typeof value==='string'&&value.startsWith('character:self'))return value.replace('character:self',owner);if(Array.isArray(value))return value.map(v=>scopeTemplate(v,owner));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[scopeTemplate(k,owner),scopeTemplate(v,owner)]));return value;}
-module.exports={scopeTemplate,clone,hash,TYPES,keyOf,validateDefinition,validateValue,initialState,signature,stateAt,conditionPass,activeContext,propose,reconcile,validateInjuries,validateInjuryChange,TEMPLATE_DATA};
+module.exports={parseModelJSON,scopeTemplate,clone,hash,TYPES,keyOf,validateDefinition,validateValue,initialState,signature,stateAt,conditionPass,activeContext,propose,reconcile,validateInjuries,validateInjuryChange,TEMPLATE_DATA};

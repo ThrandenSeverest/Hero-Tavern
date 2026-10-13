@@ -34,6 +34,19 @@ function sanitize(graph,{allowCustomNodes=false}={}){
 }
 function apply(graph,params={}){
  const result=JSON.parse(JSON.stringify(graph));
+ if(params.workflowInputs){
+  if(typeof params.workflowInputs!=='object'||Array.isArray(params.workflowInputs))throw Error('Invalid workflow parameters.');
+  for(const [id,inputs] of Object.entries(params.workflowInputs)){
+   if(!result[id]||!inputs||typeof inputs!=='object'||Array.isArray(inputs))throw Error('Unknown workflow node.');
+   for(const [key,value] of Object.entries(inputs)){
+    const previous=result[id].inputs[key];
+    if(previous===undefined||Array.isArray(previous)||typeof previous==='object')throw Error('Only existing literal node inputs can be edited. Use the graph editor for links.');
+    if(typeof value!==typeof previous||typeof value==='number'&&!Number.isFinite(value))throw Error('Workflow input type changed: '+key);
+    result[id].inputs[key]=value;
+   }
+  }
+  sanitize(result,{allowCustomNodes:true});
+ }
  const seed=Number.isInteger(params.seed)&&params.seed>=0?params.seed:crypto.randomInt(0,2147483647);
  const values={
   '{{prompt}}':String(params.prompt||'').slice(0,12000),

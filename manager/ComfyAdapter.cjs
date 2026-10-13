@@ -39,6 +39,23 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   return names.filter(name=>{try{modelName(name);return name.length<=260}catch{return false}});
  }
  const checkpoints=()=>modelList('checkpoints').then(names=>names.filter(n=>/\.safetensors$/i.test(n)));
+ async function nativeHistory(){
+  const history=await (await request('/history?max_items=30',{},10000)).json();
+  return Object.entries(history).filter(([,job])=>job.status?.completed).map(([id,job])=>({id,images:Object.values(job.outputs||{}).flatMap(o=>o.images||[]).filter(i=>i.type==='output')})).filter(j=>j.images.length).reverse();
+ }
+ async function importNative({id}={}){
+  if(typeof id!=='string'||!/^[-\w]{1,128}$/.test(id))throw Error('Select a completed ComfyUI job.');
+  const jobs=await (await request('/history/'+encodeURIComponent(id),{},10000)).json(),job=jobs[id];
+  if(!job?.status?.completed)throw Error('The selected ComfyUI job has not completed.');
+  const outputs=Object.values(job.outputs||{}).flatMap(o=>o.images||[]).filter(i=>i.type==='output').slice(0,20),images=[];
+  for(const remote of outputs){
+   if(typeof remote.filename!=='string'||remote.filename.length>256||remote.filename.includes('..')||/[\\/]/.test(remote.filename))throw Error('Invalid ComfyUI image filename.');
+   const query=new URLSearchParams({filename:remote.filename,subfolder:remote.subfolder||'',type:'output'}),bytes=Buffer.from(await (await request('/view?'+query,{},60000)).arrayBuffer()),size=checkPNG(bytes);
+   const name=Date.now()+'-'+crypto.randomBytes(6).toString('hex')+'.png',dest=path.join(dir,name);fs.writeFileSync(dest,bytes,{flag:'wx'});
+   fs.writeFileSync(dest+'.json',JSON.stringify({engine:'comfyui',mode:'native-workflow',promptId:id,remoteOutput:remote,...size,createdAt:new Date().toISOString()}));images.push({url:'/images/output/'+name,...size});
+  }
+  return {images};
+ }
 
  const NODE_REQUIREMENTS={
   ...Object.fromEntries(require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>[p.id,['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','KSampler','VAEDecode','SaveImage']])),
@@ -64,7 +81,8 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   const groups=['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'];
   const entries=await Promise.allSettled(groups.map(group=>modelList(group)));
   const lists=Object.fromEntries(groups.map((name,i)=>[name,entries[i].status==='fulfilled'?entries[i].value:[]]));
-  return {available:true,checkpoints:lists.checkpoints,loras:lists.loras,upscalers:lists.upscale_models,
+  let samplingOptions={};try{const info=await (await request('/object_info/KSampler',{},7000)).json(),required=info.KSampler?.input?.required;samplingOptions={samplers:required?.sampler_name?.[0]||[],schedulers:required?.scheduler?.[0]||[]};}catch{}
+  return {...samplingOptions,available:true,checkpoints:lists.checkpoints,loras:lists.loras,upscalers:lists.upscale_models,
     packs:models.composeStatus(lists).map(pack=>{
       const disk=models.localStatus().find(item=>item.id===pack.id);
       return {...pack,downloaded:!!disk?.installed,installed:pack.installed,missing:pack.missing};
@@ -243,7 +261,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   }catch(e){lastError=e.message;logEvent({action:'comfy-job-error',error:e.message,promptId:job.id});throw e}
   finally{signal?.removeEventListener('abort',onAbort);try{job.socket?.close()}catch{};if(active===job)active=null}
  }
- return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,workflows,models,diagnosePack,
+ return {available,catalog,checkpoints,modelList,generate,cancel,freeMemory,queueStatus,logEvent,workflows,models,diagnosePack,nativeHistory,importNative,
   snapshot:()=>({healthy,lastCheck,error:lastError,active:active&&{id:active.id,phase:active.phase,progress:active.progress,step:active.step,totalSteps:active.totalSteps,etaMs:active.etaMs,elapsedMs:Date.now()-active.startedAt},completed,url:base,
     devices:(lastStats?.devices||[]).map(x=>({name:x.name,type:x.type,vramFree:x.vram_free,vramTotal:x.vram_total}))})};
 }

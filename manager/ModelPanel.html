@@ -707,8 +707,8 @@ el('hero-inpaint-run').onclick=async()=>{
  const out=el('hero-inpaint-status'),btn=el('hero-inpaint-run');btn.disabled=true;
  try{
   if(!heroCurrentSource||!heroMaskDirty)throw Error('Load an image and paint a non-empty mask first.');
-  if(el('hero-engine').value==='koboldcpp')throw Error('Choose ComfyUI or Auto for inpainting.');
-  await request('/studio/configure',{engine:el('hero-engine').value,comfyCheckpoint:el('hero-comfy-checkpoint').value,releaseGPU:el('studio-release').checked});
+  if(activeStudioModel()==='koboldcpp')throw Error('Choose Qwen, FLUX or SDXL for inpainting.');
+  await request('/studio/configure',{engine:'comfyui',comfyCheckpoint:el('hero-comfy-checkpoint').value,releaseGPU:el('studio-release').checked});
   out.textContent='Sending masked edit to ComfyUI…';
   const result=await request('/studio/generate',{prompt:el('hero-inpaint-prompt').value,sourceName:heroCurrentSource,maskData:heroMaskPixels.toDataURL('image/png'),denoise:Number(el('hero-inpaint-denoise').value),width:heroMaskPixels.width,height:heroMaskPixels.height,steps:Number(el('image-steps').value),cfg_scale:Number(el('image-cfg').value),seed:Number(el('image-seed').value),sampler_name:el('image-sampler').value,negative_prompt:el('image-negative').value,refine:false,modelPack:activeStudioModel().startsWith('qwen21-')||['flux-klein','z-turbo'].includes(activeStudioModel())?activeStudioModel():'sdxl',engine:'comfyui',operation:'inpaint'});
   lastImage=result.url;el('image-result').src=result.url;el('image-result').hidden=false;el('image-download').href=result.url;el('image-download').hidden=false;el('image-to-chat').disabled=false;

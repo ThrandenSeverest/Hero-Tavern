@@ -110,6 +110,12 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  }
  async function installQwenGGUFNode(job){
   if(!job.id.startsWith('qwen21-'))return;
+  // Reuse an externally managed engine that already exposes the GGUF loader.
+  if(await comfy.available()){
+   const report=await comfy.diagnosePack(job.id);
+   if(!report.missingNodes?.includes('UnetLoaderGGUF'))return;
+   if(!runtime.installed())throw Error('External ComfyUI is missing ComfyUI-GGUF (UnetLoaderGGUF). Install the node in that ComfyUI instance and restart it, or choose managed Portable.');
+  }
   const installed=runtime.installed();
   if(!installed?.base||!installed?.python)throw Error('Qwen GGUF requires a managed ComfyUI Portable runtime. Install or configure managed Portable before installing the custom node.');
   const dir=path.join(installed.base,'ComfyUI','custom_nodes','ComfyUI-GGUF');
@@ -125,11 +131,25 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
     if(code!==0)throw Error('Dependency installer exited with '+code+'. Inspect '+log);
    }finally{fs.closeSync(fd)}
   }
-  job.phase='installing ComfyUI-GGUF custom loader';
-  await run('git',['clone','--depth','1','https://github.com/city96/ComfyUI-GGUF.git',dir],path.dirname(dir));
-  if(!fs.existsSync(path.join(dir,'nodes.py')))throw Error('ComfyUI-GGUF clone has no nodes.py; inspect '+log);
-  const requirements=path.join(dir,'requirements.txt');
-  if(fs.existsSync(requirements)){job.phase='installing GGUF Python requirements';await run(installed.python,['-m','pip','install','-r',requirements],dir);}
+  // Windows Portable does not install Git. Download the fixed upstream ZIP with
+  // the OS-provided curl.exe and extract using built-in PowerShell instead.
+  const staging=path.join(root,'Downloads','comfy-gguf-'+require('node:crypto').randomUUID());
+  const archive=path.join(staging,'ComfyUI-GGUF.zip');
+  fs.mkdirSync(staging,{recursive:true});
+  try{
+   job.phase='downloading ComfyUI-GGUF loader (Git not required)';
+   const curl=path.join(process.env.SystemRoot||'C:\\Windows','System32','curl.exe');
+   await run(curl,['--proto','=https','--proto-redir','=https','--location','--fail','--retry','3','--connect-timeout','30','--output',archive,'https://codeload.github.com/city96/ComfyUI-GGUF/zip/refs/heads/main'],staging);
+   job.phase='extracting ComfyUI-GGUF loader';
+   const quote=value=>"'"+value.replace(/'/g,"''")+"'";
+   await run('powershell.exe',['-NoProfile','-NonInteractive','-Command','Expand-Archive -LiteralPath '+quote(archive)+' -DestinationPath '+quote(staging)+' -Force'],staging);
+   const unpacked=path.join(staging,'ComfyUI-GGUF-main');
+   if(!fs.existsSync(path.join(unpacked,'nodes.py')))throw Error('Official GGUF ZIP has no nodes.py; inspect '+log);
+   const requirements=path.join(unpacked,'requirements.txt');
+   if(fs.existsSync(requirements)){job.phase='installing GGUF Python requirements';await run(installed.python,['-s','-m','pip','install','-r',requirements],unpacked);}
+   if(fs.existsSync(dir))throw Error('Custom node directory appeared during installation. No existing files were overwritten.');
+   fs.renameSync(unpacked,dir);
+  }finally{fs.rmSync(staging,{recursive:true,force:true});}
  }
  function setup({id,confirm=false}={}){
   if(confirm!==true)throw Error('Click Install engine + model to download the selected model and runtime.');

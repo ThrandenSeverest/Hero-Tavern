@@ -348,6 +348,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&req.url==='/image/model-center'){json(200,await imageCenter.status());return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}
+         if(req.method==='GET'&&req.url?.startsWith('/comfy/workflow-get?')){const id=new URL(req.url,'http://127.0.0.1').searchParams.get('id');json(200,comfy.workflows.exportWorkflow(id));return;}
          if(req.method==='GET'&&req.url==='/comfy/models'){json(200,{hub:comfy.models.snapshot(),packs:(await comfy.catalog()).packs||[]});return;}
          if(req.method==='GET'&&req.url==='/storage/report'){try{json(200,diskCare.report())}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url.startsWith('/gallery/list')){try{const qs=new URL(req.url,'http://localhost').searchParams;json(200,imageGallery.list({search:qs.get('search')||'',favorites:qs.get('favorites')==='true',limit:Math.min(200,Math.max(1,Number(qs.get('limit'))||100))}))}catch(e){json(400,{error:e.message})}return;}

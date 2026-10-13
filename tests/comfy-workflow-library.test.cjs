@@ -48,3 +48,5 @@ test('Core-node upscaler needs no diffusion checkpoint',()=>{
  const r=buildWorkflow({params:{prompt:'upscale'},source:'image.png',mode:'upscale',upscaleFactor:2});
  assert.ok(Object.values(r.graph).some(n=>n.class_type==='ImageScaleBy'));
 });
+
+test('Native editor workflow preserves widgets, layout and node links',()=>{const root=makeRoot();try{const raw={nodes:[{id:1,type:'CLIPTextEncode',pos:[12,30],widgets_values:['dragon']}],links:[],extra:{ds:{scale:1.25}},version:0.4};const lib=createWorkflowLibrary(root),item=lib.importWorkflow({name:'Imported native',workflow:raw,confirm:true});assert.equal(item.format,'ui');assert.deepEqual(lib.exportWorkflow(item.id).workflow,raw);assert.throws(()=>lib.build(item.id,{}),/native editor/i);}finally{fs.rmSync(root,{recursive:true,force:true})}});

@@ -62,10 +62,17 @@ function createWorkflowLibrary(root){
   if(confirm!==true)throw Error('Confirm importing a reviewed local ComfyUI API workflow.');
   if(typeof name!=='string'||!name.trim()||name.length>90)throw Error('Name this workflow (1–90 characters).');
   const payload=typeof workflow==='string'?JSON.parse(workflow):workflow;
-  const validated=sanitize(payload,{allowCustomNodes});
+  const native=payload&&Array.isArray(payload.nodes)&&Array.isArray(payload.links);
+  const inputGraph=payload?.prompt&&!native?payload.prompt:payload;
+  let validated,format='api';
+  if(native){
+   if(payload.nodes.length<1||payload.nodes.length>500||JSON.stringify(payload).length>2097152)throw Error('Native workflow must have 1–500 nodes and be below 2 MB.');
+   for(const node of payload.nodes)if(!node||!Number.isInteger(node.id)||typeof node.type!=='string'||node.type.length>160||DANGEROUS.test(node.type))throw Error('Invalid or potentially unsafe native workflow node.');
+   validated={graph:null,customNodes:[]};format='ui';
+  }else validated=sanitize(inputGraph,{allowCustomNodes});
   const id=crypto.randomUUID(),file=fileFor(id);
-  fs.writeFileSync(file,JSON.stringify({id,name:name.trim(),graph:validated.graph,createdAt:new Date().toISOString(),customNodes:validated.customNodes},null,2),{flag:'wx'});
-  return {id,name:name.trim(),nodes:Object.keys(validated.graph).length,customNodes:validated.customNodes};
+  fs.writeFileSync(file,JSON.stringify({id,name:name.trim(),format,graph:validated.graph,original:payload,createdAt:new Date().toISOString(),customNodes:validated.customNodes},null,2),{flag:'wx'});
+  return {id,name:name.trim(),format,nodes:native?payload.nodes.length:Object.keys(validated.graph).length,customNodes:validated.customNodes};
  }
  function get(id){
   const file=fileFor(id);if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink())throw Error('Workflow was not found.');
@@ -75,7 +82,7 @@ function createWorkflowLibrary(root){
  function list(){
   const items=[];
   for(const file of fs.readdirSync(dir).filter(n=>/^[a-f0-9-]{36}\.json$/.test(n)).slice(0,150)){
-   try{const item=get(file.slice(0,-5));items.push({id:item.id,name:item.name,nodes:Object.keys(item.graph).length,customNodes:item.customNodes,createdAt:item.createdAt})}catch{}
+   try{const item=get(file.slice(0,-5));items.push({id:item.id,name:item.name,format:item.format||'api',nodes:item.graph?Object.keys(item.graph).length:item.original?.nodes?.length||0,customNodes:item.customNodes,createdAt:item.createdAt})}catch{}
   }
   return items.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
  }
@@ -84,10 +91,11 @@ function createWorkflowLibrary(root){
   const file=fileFor(id);get(id);fs.unlinkSync(file);return {deleted:true,id};
  }
  function build(id,params){
-  const item=get(id),approved=sanitize(item.graph,{allowCustomNodes:!!item.customNodes?.length});
+  const item=get(id);if(item.format==='ui')throw Error('Normal native editor workflows must run in the native ComfyUI editor to preserve widgets and nodes.');const approved=sanitize(item.graph,{allowCustomNodes:!!item.customNodes?.length});
   const compiled=apply(approved.graph,params);
   return {graph:compiled.graph,saveId:approved.outputNode,seed:compiled.seed,batch:1,mode:'custom',workflowId:id,workflowName:item.name};
  }
- return {importWorkflow,list,get,remove,build};
+ function exportWorkflow(id){const item=get(id);return {id:item.id,name:item.name,format:item.format||'api',workflow:item.original||item.graph}}
+ return {importWorkflow,list,get,exportWorkflow,remove,build};
 }
 module.exports={createWorkflowLibrary,sanitize,apply};

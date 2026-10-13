@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),vm=require('node:vm');
 const {createWriterStore}=require('../manager/WriterStore.cjs'),{createWriterAPI}=require('../manager/WriterAPI.cjs'),{buildWriterContext,reduceLongContext}=require('../manager/WriterContext.cjs'),S=require('../manager/StoryState.cjs'),{apply}=require('../manager/ComfyWorkflowLibrary.cjs');
-const html=fs.readFileSync(path.join(__dirname,'../manager/Adventure.html'),'utf8');
+const html=fs.readFileSync(path.join(__dirname,'../manager/Adventure.html'),'utf8').replace(/\r\n/g,'\n');
 test('Writer imports plain text, saves long memory and persona, and roundtrips revisioned exports',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-writer-recovery-'));try{const store=createWriterStore(root),s=store.create({title:'Imported text',text:'The door opened.'}),saved=store.save(s.id,{memory:'Established fact. '.repeat(1000),persona:{name:'Mira',description:'An explorer.'}},1);assert.equal(saved.persona.name,'Mira');const imported=store.create(JSON.parse(JSON.stringify(saved)));assert.equal(imported.memory,saved.memory);assert.deepEqual(imported.persona,saved.persona);assert.equal(imported.history.length,1);assert.equal(store.create().memory,'');assert.equal(store.read(saved.id).text,'The door opened.');}finally{fs.rmSync(root,{recursive:true,force:true})}
 });

@@ -8,7 +8,7 @@ const repo=path.resolve(__dirname,'..'),st=path.join(repo,'.ci/SillyTavern'),roo
 async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}let detail='';try{const html=await(await fetch('http://127.0.0.1:8001/')).text(),token=/const token='([^']+)'/.exec(html)?.[1];detail=JSON.stringify(await(await fetch('http://127.0.0.1:8001/status',{headers:{'X-Hero-Token':token}})).json())}catch{}throw Error('Timed out waiting for UI/engine: '+detail)}
 (async()=>{
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'AssistantPanel.js'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -89,6 +89,10 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   const options=await panel.locator('#image-create-model option').evaluateAll(nodes=>nodes.map(x=>x.value));
   if(!['flux-klein','z-turbo','sdxl','koboldcpp','custom'].every(id=>options.includes(id)))throw Error('Image Studio unified model selector is incomplete');
   await panel.locator('#image-create-model').selectOption('flux-klein');
+  await panel.locator('#image-model-center').waitFor({state:'attached'});
+  if(!await panel.locator('#image-center-global').isVisible())throw Error('Unified Image Model Center did not initialize');
+  if(!await panel.locator('#image-center-chat').isVisible()||!await panel.locator('#image-center-adventure').isVisible())throw Error('Chat/Adventure image model selectors missing');
+  
   if(!await panel.locator('#image-generate').isEnabled())throw Error('FLUX Generate must not depend on legacy KoboldCpp ImageModels checkpoint');
   if(!await panel.locator('#image-installed').isHidden())throw Error('Legacy checkpoint picker belongs only in Models & Setup');
   await panel.locator('#image-create-model').selectOption('koboldcpp');

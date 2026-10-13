@@ -341,7 +341,7 @@ function updateStudioModelStatus(){
  el('hero-comfy-mode').disabled=noEdit;
 }
 async function selectStudioModel(choice,{save=true}={}){
- if(!['sdxl','flux-klein','z-turbo','koboldcpp','custom'].includes(choice))throw Error('Unknown image model.');
+ if(!['sdxl','flux-klein','z-turbo','koboldcpp','custom'].includes(choice)&&!choice.startsWith('qwen21-'))throw Error('Unknown image model.');
  el('image-create-model').value=choice;
  const pack=choice==='koboldcpp'||choice==='custom'?'sdxl':choice;
  const engine=choice==='koboldcpp'?'koboldcpp':'comfyui';

@@ -8,11 +8,12 @@ const IDS=[...QWEN_IDS,'flux-klein','z-turbo','sdxl','koboldcpp','custom'],SCOPE
 const safe=(x)=>IDS.includes(x);
 function createImageModelCenter(root,{studio,comfy,runtime,images}){
  const file=path.join(root,'image-model-choices.json');
- let prefs={global:'qwen21-q5km',chat:null,adventure:null},operation=null,lastDownload=null,setupJob=null,lastSetup=null;
+ let prefs={global:null,chat:null,adventure:null},operation=null,lastDownload=null,setupJob=null,lastSetup=null;
  try{const saved=JSON.parse(fs.readFileSync(file,'utf8'));for(const k of SCOPES)if(safe(saved[k]))prefs[k]=saved[k]}catch{}
  const save=()=>{const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(prefs,null,2));fs.renameSync(temp,file)};
  const initial=()=>{
   if(prefs.global)return prefs.global;
+  if(comfy.models.localStatus().some(p=>p.id==='qwen21-q5km'&&p.installed))return 'qwen21-q5km';
   if(studio.snapshot().settings.engine==='koboldcpp')return 'koboldcpp';
   const hub=comfy.models.snapshot().settings.selected;
   if([...QWEN_IDS,'flux-klein','z-turbo'].includes(hub)&&comfy.models.localStatus().some(p=>p.id===hub&&p.installed))return hub;

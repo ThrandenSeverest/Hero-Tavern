@@ -46,10 +46,30 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const eligible=s.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
    const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
    const pending=v.messages.slice(0,lastFinal+1).filter((m,index)=>!m.is_system&&String(m.mes||'').trim()&&!s.analyzedSources.includes(S.signature(m))&&eligible.some(d=>!d.introducedAt||index>=v.messages.findIndex(x=>x.extra?.heroMessageId===d.introducedAt))).slice(0,2);
-   if(!eligible.length||!pending.length)return v;
-   if(!ready())throw Error('Load the reply model before analyzing tracker changes.');
+   if(!eligible.length)return v;
    const {parseCommands,trackerInstructions,explicitClockChanges}=require('./TrackerDelta.cjs');
+   // After upgrading from an extractor that marked zero-change replies as analyzed,
+   // recover an explicit, still-unset story clock from recent finalized messages.
+   // Never use system/computer timestamps or facts preceding the tracker definition.
+   const clockDefs=eligible.filter(d=>d.type==='clock'&&v.context.state[S.keyOf(d)]==='--:--');
+   const windowStart=Math.max(0,lastFinal-15);
+   const recoverable=clockDefs.filter(d=>!d.introducedAt||v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt)<=lastFinal);
+   const recent=v.messages.slice(windowStart,lastFinal+1).filter(m=>!m.is_system&&String(m.mes||'').trim());
+   const backfill=explicitClockChanges(recoverable,recent,v.context.state).filter(change=>{
+      const d=recoverable.find(x=>S.keyOf(x)===change.key);
+      const start=d?.introducedAt?v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt):0;
+      const source=v.messages.findIndex(m=>m.extra?.heroMessageId===change.sourceMessageId);
+      return source>=Math.max(start,0);
+   });
+   if(!pending.length){
+     if(!backfill.length)return v;
+     const result=store.eventPatch(data.id,backfill,{expectedHead:head});
+     const saved=store.get(data.id);saved.lastAnalysis={at:Date.now(),processed:0,changes:backfill.length,deterministicClockUpdates:backfill.length,backfilled:true,errors:[]};
+     store.saveSession(saved);return store.view(data.id);
+   }
+   if(!ready()&&!backfill.length)throw Error('Load the reply model before analyzing tracker changes.');
    const clockChanges=explicitClockChanges(eligible,pending,v.context.state);
+   for(const fix of backfill)if(!clockChanges.some(x=>x.key===fix.key))clockChanges.push(fix);
    try{
     const p=trackerInstructions(eligible,v.context.state,pending);
     let parsed;

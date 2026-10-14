@@ -53,6 +53,31 @@ const initHeroTavern = async () => {
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);
+    const exitButton=document.createElement('button');
+    exitButton.type='button';exitButton.id='hero-exit-app';exitButton.className='hero-nav';
+    exitButton.textContent='⏻ Exit Hero Tavern';
+    exitButton.style.cssText='margin-top:16px;border:1px solid #9f6060;color:#ffcfca;background:#35262d;';
+    exitButton.title='Safely stop Hero Tavern and its locally managed text/image/voice engines';
+    rail.insertBefore(exitButton,rail.lastElementChild);
+    exitButton.onclick=async()=>{
+        if(!confirm('Exit Hero Tavern? Managed text models, ComfyUI, TTS and both local servers will stop. Saved chats, models and files are preserved.'))return;
+        exitButton.disabled=true;exitButton.textContent='Stopping Hero Tavern…';
+        try{
+            const response=await bridgeRequest('/app/exit',{confirm:true});
+            const notice=document.createElement('section');
+            notice.id='hero-exit-notice';
+            notice.style.cssText='position:fixed;inset:0;z-index:2147483600;background:#141a26;color:#f5dfb4;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font:18px Segoe UI,sans-serif';
+            const info=document.createElement('div');
+            const title=document.createElement('h2');title.textContent='Hero Tavern is closing safely';
+            const detail=document.createElement('p');detail.textContent=response.message||'Stopping managed AI and saving session state. You can close this browser tab after the launcher window closes.';
+            info.append(title,detail);notice.append(info);document.body.append(notice);
+        }catch(e){
+            exitButton.disabled=false;exitButton.textContent='⏻ Exit Hero Tavern';
+            window.toastr?.error(e.message||'Could not request application exit.');
+            alert('Exit request failed: '+e.message+'\nUse the launcher window to stop Hero Tavern.');
+        }
+    };
+
     document.getElementById('hero-welcome-close').onclick=dismissWelcome;
     document.addEventListener('keydown',event=>{if(event.key==='Escape'){dismissWelcome();workspace.classList.remove('open');document.querySelectorAll('.hero-story-dialog').forEach(x=>x.remove());}});
     welcome.querySelectorAll('[data-hero]').forEach(b=>b.onclick=()=>show(b.dataset.hero));

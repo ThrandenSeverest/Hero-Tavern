@@ -22,6 +22,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  const workflows=createWorkflowLibrary(root);
  const models=createModelHub(root,{fetchFn});
  let active=null,lastError='',lastCheck=0,healthy=false,lastStats=null,completed=0;
+ let lastQwenImage=null;
  async function request(route,options={},timeout=4000){
   const signal=AbortSignal.any([options.signal||new AbortController().signal,AbortSignal.timeout(timeout)]);
   const r=await fetchFn(base+route,{...options,signal});
@@ -224,6 +225,12 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(mode==='upscale'&&sourceDimensions){if(params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)>1024)throw Error('For safe AI upscaling on 12 GB VRAM, select a source at most 1024 pixels per side.');if(!params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
    const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,reference,resolvedFiles:resolvedFiles}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2,upscaleMethod:params.upscaleMethod||'lanczos'});
+   const qwenGraph=managed&&chosenPack.family==='qwen21';
+   const qwenText=qwenGraph?Object.values(spec.graph).find(node=>node.class_type==='TextEncodeQwenImage21')?.inputs?.prompt:null;
+   if(qwenGraph&&(typeof qwenText!=='string'||qwenText!==settings.prompt))throw Error('Qwen text encoding was not connected to the current image prompt. Generation stopped; no stale image was used.');
+   const promptFingerprint=qwenGraph?crypto.createHash('sha256').update(qwenText).digest('hex').slice(0,16):null;
+   if(qwenGraph)logEvent({action:'qwen-conditioning-check',promptHash:promptFingerprint,promptLength:qwenText.length,seed:spec.seed,model:chosenPack.id,sampler:'euler',scheduler:'simple',cfg:spec.graph[Object.keys(spec.graph).find(id=>spec.graph[id].class_type==='KSampler')]?.inputs.cfg});
+
    job.phase='queued';listen(job);
    const response=await (await request('/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:spec.graph,client_id:job.clientId}),signal:job.controller.signal},45000)).json();
    if(!response?.prompt_id)throw Error('ComfyUI rejected the workflow: '+JSON.stringify(response?.node_errors||response).slice(0,1500));
@@ -259,13 +266,22 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const query=new URLSearchParams({filename:remote.filename,subfolder:remote.subfolder||'',type:'output'});
     const bytes=Buffer.from(await (await request('/view?'+query.toString(),{signal:job.controller.signal},60000)).arrayBuffer());
     const size=checkPNG(bytes);
+    if(qwenGraph&&images.length===0){
+      const imageHash=crypto.createHash('sha256').update(bytes).digest('hex');
+      const previous=lastQwenImage;
+      if(previous&&previous.imageHash===imageHash&&(previous.promptHash!==promptFingerprint||previous.seed!==spec.seed)){
+        logEvent({action:'qwen-identical-image-error',promptHash:promptFingerprint,previousPromptHash:previous.promptHash,seed:spec.seed,previousSeed:previous.seed,outputHash:imageHash});
+        throw Error('Qwen returned byte-identical image data even though the prompt or seed changed. The result was not saved as a new image. Check the Qwen text encoder, connected model weights and the managed ComfyUI loader; see Logs/image-files.jsonl.');
+      }
+      lastQwenImage={promptHash:promptFingerprint,seed:spec.seed,imageHash};
+    }
     const name=Date.now()+'-'+crypto.randomBytes(6).toString('hex')+'.png';
     const dest=path.join(dir,name);
     fs.writeFileSync(dest,bytes,{flag:'wx'});
     const details={engine:'comfyui',modelPack:chosenPack?.id||null,referenceName:params.referenceName||null,mode:spec.mode,workflowId:spec.workflowId||null,workflowName:spec.workflowName||null,model:custom?(spec.workflowName||'Custom ComfyUI workflow'):managed?chosenPack.name:checkpoint,sourceName:sourceName||null,prompt:params.prompt,negative_prompt:params.negative_prompt,
       width:size.width,height:size.height,steps:params.steps,seed:spec.seed,sampler_name:params.sampler_name,denoise:params.denoise,
       lora:params.lora||[],upscaleModel:params.upscaleModel||'',batch_size:spec.batch,batchIndex:images.length,promptId:job.id,remoteOutput:{filename:remote.filename,subfolder:remote.subfolder||'',type:'output'},
-      createdAt:new Date().toISOString()};
+      promptFingerprint,normalizedSettings:spec.normalizedSettings||null,createdAt:new Date().toISOString()};
     fs.writeFileSync(dest+'.json',JSON.stringify(details,null,2));
     logEvent({action:'comfy-image-saved',path:dest,bytes:bytes.length,promptId:job.id,remoteOutput:details.remoteOutput});
     images.push({url:'/images/output/'+name,width:size.width,height:size.height,seed:spec.seed});

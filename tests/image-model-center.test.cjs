@@ -107,10 +107,30 @@ test('One install action provisions engine, model dependencies, starts and check
  try{assert.throws(()=>center.setup({id:'flux-klein'}),/Click Install/);assert.equal(center.setup({id:'flux-klein',confirm:true}).started,true);assert.throws(()=>center.setup({id:'z-turbo',confirm:true}),/already running/);await new Promise(r=>setTimeout(r,20));assert.deepEqual(calls,['engine','dependencies:flux-klein','start','diagnose','select']);assert.equal(center.choice('global'),'flux-klein');assert.equal((await center.status()).lastSetup.ok,true);}finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 
-test('Separate engine install/start controls live only inside collapsed advanced settings',()=>{
+test('Engine installation and startup are visible without opening Advanced settings',()=>{
  const src=fs.readFileSync(path.join(__dirname,'../manager/ImageModelCenterUI.js'),'utf8');
- assert.match(src,/advanced\.append\(summary,engineActions,note\)/);
+ assert.match(src,/actions\.append\(install,start,restart,/);
+ assert.match(src,/advanced\.append\(summary,note\)/);
+ assert.match(src,/Start engine & check workflow/);
  assert.doesNotMatch(src,/actions\.append\(action\([^\n]+,install,start,restart/);
  assert.match(src,/'Download '\+choiceLabel\(model.id\)/);
  assert.match(src,/No separate engine installation or manual launch is needed/);
+});
+
+test('Explicit readiness check starts an installed managed ComfyUI runtime and checks actual nodes',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-comfy-readiness-')),modelsDir=path.join(root,'ComfyUI','models');
+ let online=false,loads=0;
+ const runtime={installed:()=>({models:modelsDir}),status:()=>({mode:'managed',running:online,error:''}),start:async()=>{loads++;online=true}};
+ const comfy={available:async()=>online,diagnosePack:async id=>({ok:true,connected:true,missingNodes:[],missingFiles:[],packId:id})};
+ const center=createImageModelCenter(root,{runtime,comfy,images:{snapshot:()=>({})},studio:{snapshot:()=>({settings:{engine:'auto',modelPack:'sdxl'}})}});
+ try{const report=await center.diagnose({id:'qwen21-q5km',startManaged:true});assert.equal(report.ok,true);assert.equal(report.startedManaged,true);assert.equal(loads,1);
+  const repeated=await center.diagnose({id:'qwen21-q5km',startManaged:true});assert.equal(repeated.startedManaged,false);assert.equal(loads,1);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+test('External ComfyUI is never started by the managed launcher',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-comfy-external-'));let loads=0;
+ const runtime={installed:()=>({models:root}),status:()=>({mode:'external',running:false}),start:async()=>{loads++}};
+ const comfy={available:async()=>false,diagnosePack:async()=>({ok:false,connected:false,missingNodes:[],missingFiles:[],status:'offline'})};
+ const center=createImageModelCenter(root,{runtime,comfy,images:{snapshot:()=>({})},studio:{snapshot:()=>({settings:{engine:'auto'}})}});
+ try{const report=await center.diagnose({id:'flux-klein',startManaged:true});assert.equal(report.connected,false);assert.deepEqual(report.missingNodes,[]);assert.equal(loads,0);}finally{fs.rmSync(root,{recursive:true,force:true})}
 });

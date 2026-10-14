@@ -43,6 +43,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   // Writer is a dedicated top-level manuscript workspace using the existing engine.
   await page.locator('.hero-nav[data-hero="writer"]').click();
   const writer=page.frameLocator('#hero-writer-frame');
+  await writer.locator('#writer-view-mode').click();
   await writer.locator('#manuscript').waitFor();
   await writer.locator('#manuscript').fill('Лира ждала у двери таверны.');
   await writer.locator('#memory').fill('Лира ранена в левое плечо.');
@@ -57,6 +58,9 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await waitFor(async()=>(await writer.locator('#status').textContent()).includes('Regenerated'),60000);
   const regenerated=await writer.locator('#manuscript').inputValue();
   if(regenerated!==initialPassage||regenerated.split('Fixture generation works.').length!==2)throw Error('Regenerate duplicated the original generation or lost its anchor');
+  await writer.locator('#writer-view-mode').click();
+  await waitFor(async()=>await writer.locator('.writer-passage.generated').count()>=1);
+  if(!await writer.locator('.writer-passage.generated button').filter({hasText:'Regenerate this'}).count())throw Error('Writer generation cards have no independent regenerate action');
   if(!await writer.locator('#history button').count())throw Error('Writer failed to preserve revision history');
   await writer.locator('#fork').click();await waitFor(async()=>(await writer.locator('#title').inputValue()).includes('branch'));
   await page.screenshot({path:path.join(repo,'.ci/hero-writer-qa.png')});

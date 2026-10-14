@@ -73,6 +73,26 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   if(passageLayout.width<Math.min(passageLayout.editor-50,600)||passageLayout.card<passageLayout.width-70)throw Error('Writer cards collapsed into narrow columns: '+JSON.stringify(passageLayout));
   if(passageLayout.visibleHeight<130||passageLayout.scrollHeight>passageLayout.visibleHeight+5)throw Error('Writer text area is vertically clipped: '+JSON.stringify(passageLayout));
 
+  // Re-render after a long manuscript edit and ensure card scroll position survives.
+  await writer.locator('#writer-view-mode').click();
+  await writer.locator('#manuscript').fill(Array.from({length:65},(_,i)=>'Chapter passage '+i+': The characters remember where they stood while the rain fell across the village.').join('\n\n'));
+  await writer.locator('#recap').fill('Previous chapters: Lyra reached the village after the bridge collapsed.');
+  await writer.locator('#save').click();
+  await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved'));
+  await writer.locator('#writer-view-mode').click();
+  const scrollTest=await writer.locator('#writer-segments').evaluate(async el=>{
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const range=el.scrollHeight-el.clientHeight;
+   el.scrollTop=Math.max(0,Math.floor(range*.5));
+   const before=el.scrollTop,view=el.ownerDocument.defaultView;
+   view.renderPassages();
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   return {before,after:el.scrollTop,max:range};
+  });
+  if(scrollTest.max<100||Math.abs(scrollTest.after-scrollTest.before)>35)throw Error('Writer passages jumped after rerender: '+JSON.stringify(scrollTest));
+  const writerRecap=await writer.locator('#recap').inputValue();
+  if(!writerRecap.includes('bridge collapsed'))throw Error('Writer continuity recap was not persisted in the editor');
+
   if(!await writer.locator('#history button').count())throw Error('Writer failed to preserve revision history');
   await writer.locator('#fork').click();await waitFor(async()=>(await writer.locator('#title').inputValue()).includes('branch'));
   await page.screenshot({path:path.join(repo,'.ci/hero-writer-qa.png')});

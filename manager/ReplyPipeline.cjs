@@ -132,7 +132,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
                 stage('writer-planning');
-                const planningContext='<|im_start|>user\n[Novel background]\n'+String(body.hero_writer?.prompt||'').slice(0,2000)+'\\n[Latest manuscript]\n'+String(body.hero_writer?.text||'').slice(-3500)+'\nList three to six next-scene actions, never write the final passage here.<|im_end|>\n<|im_start|>assistant\n';
+                const planningContext='<|im_start|>user\n[Novel background]\n'+String(body.hero_writer?.prompt||'').slice(0,1200)+'\n[Permanent canon]\n'+String(body.hero_writer?.memory||'').slice(0,1200)+'\n[Previous chapters — continuity]\n'+String(body.hero_writer?.recap||'').slice(-1500)+'\n[Next-scene author note]\n'+String(body.hero_writer?.note||'').slice(0,600)+'\n[Latest manuscript]\n'+String(body.hero_writer?.text||'').slice(-2500)+'\nList three to six next-scene actions without repeating events that already happened. Never write the final passage here.<|im_end|>\n<|im_start|>assistant\n';
                 const planningPrompt=replyPrompt(planningContext,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
                 const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(256,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
                 if(planned)plan=planned.slice(0,1800);

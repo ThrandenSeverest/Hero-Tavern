@@ -268,13 +268,18 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
               else await images.action('/images/stop',{});
               await waitUntil(()=>!images.snapshot().running,null,30000);
             }catch(e){backendError='Failed to unload image engine: '+e.message;}
-            onReady?.('restoring-text');
-            if(restoreText){
-              try{await ensureText();}
-              catch(e){backendError='Could not restore text model: '+e.message;}
+            // Repeated model tests must not load a 12 GB text model back into VRAM
+            // between every image. The next normal text request auto-loads it.
+            if(input.modelTest===true){onReady?.('model-test-complete-text-on-demand');}
+            else{
+              onReady?.('restoring-text');
+              if(restoreText){
+                try{await ensureText();}
+                catch(e){backendError='Could not restore text model: '+e.message;}
+              }
             }
           }
-          if(restorePlanner){
+          if(restorePlanner&&input.modelTest!==true){
             try{await thinking.start();}
             catch(e){backendError='Planning model restore failed: '+e.message;}
           }

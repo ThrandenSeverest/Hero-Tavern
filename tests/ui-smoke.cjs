@@ -168,6 +168,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.mouse.move(1400,950);
   await page.screenshot({path:path.join(repo,'.ci/hero-models-qa.png')});
   await page.locator('.hero-nav[data-hero="chat"]').click();await page.screenshot({path:path.join(repo,'.ci/hero-chat-qa.png')});
+  if(await page.locator('#hero-exit-app').count()!==1)throw Error('Safe Exit app action is missing from the app sidebar');
   if(errors.some(e=>/Hero Tavern|hero-|ModelBridge/.test(e)))throw Error(errors.join('\n'));
   console.log('PASS: real SillyTavern UI opens without a model, integrates model controls, starts engine fixture, repairs old API settings, filters streamed reasoning, uses separate planning and docks character panels without clipping dialogue.');
  }finally{

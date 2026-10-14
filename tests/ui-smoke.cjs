@@ -53,6 +53,16 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await panel.locator('#models-open-tts').click();
   await panel.locator('#tts-download').waitFor({state:'visible'});
   if(!await panel.locator('#tts-model-downloads').count())throw Error('TTS download status missing.');
+  // Real bridge + model-specific controls: presets never require a reference WAV.
+  await panel.locator('#tts-engine').selectOption('qwen');
+  await panel.locator('#tts-variant').selectOption('custom-0.6');
+  if(await panel.locator('#tts-ref-text').isVisible()||await panel.locator('#tts-style').isVisible())throw Error('Preset 0.6B exposes unsupported clone/style controls');
+  await panel.locator('#tts-variant').selectOption('design-1.7');
+  if(!await panel.locator('#tts-style').isVisible()||await panel.locator('#tts-speaker').isVisible())throw Error('VoiceDesign has wrong controls');
+  await panel.locator('#tts-style').fill('A warm adult storyteller voice');
+  await panel.locator('#tts-profile-name').fill('QA designed voice');
+  await panel.locator('#tts-profile-save').click();
+  await waitFor(async()=>(await panel.locator('#tts-profile-list option').allTextContents()).some(t=>t.includes('QA designed voice')));
   await page.locator('.hero-nav[data-hero="models"]').click();
 
   await waitFor(async()=>(await panel.locator('#state').textContent()).includes('No model selected'));
@@ -158,6 +168,8 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   if(!fs.existsSync(worldPath))throw Error('Native lore save failed: '+(await panel.locator('#lore-native-status').textContent())+'; error='+await panel.locator('#story-error').textContent()+'; worlds='+JSON.stringify(fs.readdirSync(path.dirname(worldPath))));await panel.locator('#lore-test').fill('vault');await panel.locator('#lore-preview').click();await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-lore-qa.png')});
   await page.locator('.hero-nav[data-hero="chat"]').click();
   await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();const message={name:c.name1,is_user:true,is_system:false,mes:'Continue our conversation and remember my injured shoulder.',send_date:new Date().toISOString()};c.chat.push(message);c.addOneMessage(message);await HeroStory.sync();await c.generate('normal',{automatic_trigger:true});});
+  await page.locator('#chat .hero-speak-message').last().click();
+  await waitFor(async()=>(await page.locator('#chat .hero-voice-output').last().textContent()).includes('Voice failed:'));
   await page.locator('#hero-session-toolbar [data-story="inspector"]').click();await panel.locator('#inspector-refresh').click();await waitFor(async()=>(await panel.locator('#inspector-prompt').textContent()).includes('Confirmed story state'));if((await panel.locator('#inspector-prompt').textContent()).includes('OUTLINE_PRIVATE'))throw Error('Inspector leaked private plan');await page.screenshot({path:path.join(repo,'.ci/hero-inspector-qa.png')});
   await page.locator('.hero-nav[data-hero="generation"]').click();await panel.locator('#thinking-state').evaluate(el=>el.closest('details').open=true);await panel.locator('#thinking-save').click();await panel.locator('#thinking-start').click();await waitFor(async()=>(await panel.locator('#thinking-state').textContent())==='Planning model ready');await panel.locator('#planningSource').selectOption('different');await panel.locator('#save-generation').click();await waitFor(()=>JSON.parse(fs.readFileSync(path.join(root,'generation.json'),'utf8')).planningSource==='different');
   const twoModels=await page.evaluate(async()=>{const {getRequestHeaders}=await import('/script.js');return (await fetch('/api/backends/text-completions/generate',{method:'POST',headers:getRequestHeaders(),body:JSON.stringify({api_server:'http://127.0.0.1:8001/inference',api_type:'koboldcpp',prompt:'Continue the scene.',max_tokens:8,stream:false})})).json()});if(/PRIVATE/.test(JSON.stringify(twoModels)))throw Error('Two-model planning leaked');const plannerStats=await(await fetch('http://127.0.0.1:5003/api/extra/teststats')).json();if(plannerStats.planning<1)throw Error('Second planning child did not generate');await panel.locator('#planningSource').selectOption('same');await panel.locator('#save-generation').click();await panel.locator('#thinking-stop').click();

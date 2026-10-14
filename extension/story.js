@@ -112,6 +112,29 @@ export async function initStory({getContext,frame,show}){
   button.onclick=()=>openLeadingPrompt().catch(notify);characterDrawer.prepend(button);
  }
 
+ const voiceButton=document.createElement('button');voiceButton.textContent='Character Voice';voiceButton.id='hero-character-voice';
+ voiceButton.onclick=()=>openCharacterVoice().catch(notify);(characterDrawer||toolbar).prepend(voiceButton);
+ async function openCharacterVoice(){
+  const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
+  const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};
+  const {box}=dialog('Voice · '+character.name),state=await rpc('/tts/status');
+  const help=document.createElement('p');help.textContent='Create a built-in, designed or cloned voice in Voices, save it to the Voice Library, then assign it here. The assignment stays on this character card when renamed.';
+  const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
+  dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
+  for(const field of [dialogue,narrator])field.append(new Option('Inherit global settings',''),...(state.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));
+  mode.append(new Option('Same voice as character · combine narration and dialogue','same'),new Option('Separate narrator','separate'));
+  dialogue.value=ext.voice?.dialogueProfileId||'';narrator.value=ext.voice?.narratorProfileId||'';mode.value=ext.voice?.narratorMode||'same';
+  const update=()=>{narrator.hidden=mode.value==='same'};mode.onchange=update;update();
+  const label=(text,field)=>{const el=document.createElement('label');el.textContent=text;el.append(field);return el};
+  const text=document.createElement('textarea');text.value='*The door opens.* “Welcome to the tavern.”';
+  const audio=document.createElement('audio');audio.controls=true;
+  const status=document.createElement('p');status.setAttribute('role','status');
+  const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
+  const preview=document.createElement('button');preview.textContent='Preview character + narrator';preview.onclick=async()=>{preview.disabled=true;status.textContent='Generating preview…';try{const result=await rpc('/tts/message',{text:text.value,assignment:assignment()});audio.src=origin+result.url;status.textContent='Ready · '+result.segments+' synthesis segment(s)';await audio.play().catch(()=>{status.textContent='Ready. Press Play.'})}catch(e){status.textContent=e.message}finally{preview.disabled=false}};
+  const save=document.createElement('button');save.textContent='Save character voice';save.onclick=async()=>{try{if(c().characters?.[index]!==character)throw Error('Character selection changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};status.textContent='Saved on character card.'}catch(e){status.textContent='Save failed: '+e.message}};
+  const setup=document.createElement('button');setup.textContent='Open Voice Library / create voice';setup.onclick=()=>{box.parentElement.remove();show('voices')};
+  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),text,preview,audio,save,setup,status);
+ }
  const style=document.createElement('style');style.textContent='#hero-session-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#202939;border-bottom:1px solid #3a4960;flex-shrink:0;font:12px system-ui}#hero-session-name{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#hero-session-toolbar button,.hero-message-menu button{background:#27354a;border:1px solid #455874;color:#dce8f6;border-radius:6px;padding:5px 8px;cursor:pointer}.hero-message-menu{font:11px system-ui;margin:6px 0;display:flex;gap:5px;flex-wrap:wrap}.hero-story-dialog{position:fixed;inset:0;z-index:2500;background:#080c12cc;display:grid;place-items:center}.hero-story-dialog>section{background:#1e2939;color:#e6edf7;border:1px solid #53627b;border-radius:14px;padding:24px;width:min(680px,90vw);max-height:85vh;overflow:auto}.hero-story-dialog button,.hero-story-dialog input,.hero-story-dialog select,.hero-story-dialog textarea{font:inherit;background:#253247;color:#e6edf7;border:1px solid #53627b;border-radius:8px;padding:10px;margin:6px 3px}.hero-story-dialog textarea{width:90%;min-height:100px}.hero-story-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}';document.head.append(style);
  toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else{show(op);sync().catch(notify)}};
  function dialog(title){const bg=document.createElement('div');bg.className='hero-story-dialog';const box=document.createElement('section'),h=document.createElement('h2');h.textContent=title;box.append(h);bg.append(box);document.body.append(bg);const close=document.createElement('button');close.textContent='Cancel';close.onclick=()=>bg.remove();box.append(close);return {bg,box,close};}

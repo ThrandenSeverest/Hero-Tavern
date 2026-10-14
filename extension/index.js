@@ -248,30 +248,31 @@ const initHeroTavern = async () => {
     async function heroVoiceSettings(){const state=await bridgeRequest('/tts/status',{});heroVoiceStatus=state;return state;}
     async function heroSpeakMessage(element,force=false){
       if(heroSpeaking)return;
-      const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled)return;
-      const raw=element.querySelector('.mes_text')?.innerText||'';
-      const cleaned=raw.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();if(!cleaned)return;
-      const id=String(element.getAttribute('mesid')||element.dataset.mesid||'')+'|'+cleaned;
-      if(!force&&id===heroLastSpoken)return;
-      const who=element.querySelector('.name_text')?.textContent?.trim()||context?.()?.name2||'Character';
-      heroSpeaking=true;heroLastSpoken=id;
+      const button=element.querySelector('.hero-speak-message');
+      let output=element.querySelector('.hero-voice-output');if(!output){output=document.createElement('div');output.className='hero-voice-output';button?.after(output);}
+      heroSpeaking=true;
       try{
-       const speech=await bridgeRequest('/tts/split',{text:cleaned,speaker:who,narrator:'Narrator'});
-       for(const segment of speech.segments.slice(0,25)){
-        if(!document.contains(element))break;
-        const voice=segment.kind==='narration'?state.settings.narratorSpeaker:state.settings.speaker;
-        const isNarration=segment.kind==='narration';const ref=isNarration?state.settings.narratorReference:state.settings.dialogueReference;const transcript=isNarration?state.settings.narratorReferenceText:state.settings.referenceText;const result=await bridgeRequest('/tts/speak',{text:segment.text,speaker:voice,reference:ref,referenceText:transcript,style:state.settings.style});
-        const audio=new Audio(bridgeOrigin+result.url);heroAudio=audio;
-        await audio.play();
-        await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});
-       }
-      }catch(e){console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;heroAudio=null;}
+       const state=await heroVoiceSettings();if(!force&&!state.settings.enabled)return;
+       const ctx=context?.(),index=Number(element.getAttribute('mesid')),message=ctx?.chat?.[index];
+       const cleaned=String(message?.mes||element.querySelector('.mes_text')?.innerText||'').replace(/<think>[\s\S]*?(?:<\/think>|$)/gi,'').trim();if(!cleaned)return;
+       const id=(message?.extra?.heroMessageId||String(index))+'|'+cleaned;if(!force&&id===heroLastSpoken)return;
+       const avatar=message?.original_avatar||message?.force_avatar;
+       const character=avatar?ctx.characters?.find(c=>c.avatar===avatar):ctx.characters?.[ctx.characterId];
+       const assignment=(character?.data?.extensions?.hero_tavern||character?.extensions?.hero_tavern)?.voice||{};
+       output.textContent='Preparing voice…';if(button)button.disabled=true;
+       const result=await bridgeRequest('/tts/message',{text:cleaned,assignment,messageId:message?.extra?.heroMessageId||String(index)});
+       if(!document.contains(element))return;
+       const audio=document.createElement('audio');audio.controls=true;audio.src=bridgeOrigin+result.url;heroAudio=audio;output.replaceChildren(audio);
+       const download=document.createElement('a');download.href=audio.src;download.textContent=' Download voice';download.target='_blank';output.append(download);
+       try{await audio.play()}catch{const note=document.createElement('p');note.textContent='Audio is ready. Click Play (browser blocked autoplay).';output.append(note)}
+       heroLastSpoken=id;
+      }catch(e){output.textContent='Voice failed: '+e.message+' — Open Voices for model settings and speech job log.';console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;if(button)button.disabled=false;}
     }
     const heroChat=document.getElementById('chat');
     if(heroChat){
-     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeaking=false;heroSpeakMessage(button.closest('.mes'),true);}});
+     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeakMessage(button.closest('.mes'),true);}});
      const attachVoiceButtons=()=>{
-      for(const message of heroChat.querySelectorAll('.mes:not(.is_user)')){
+      for(const message of heroChat.querySelectorAll('.mes:not(.is_user):not([is_user="true"])')){
        if(message.querySelector('.hero-speak-message'))continue;
        const text=message.querySelector('.mes_text');if(!text)continue;
        const btn=document.createElement('button');btn.className='hero-speak-message';btn.type='button';btn.textContent='▶ Voice';btn.title='Read narration and dialogue with separate voices';btn.style.cssText='margin:5px 0;padding:4px 9px;font-size:12px;border:1px solid #756348;border-radius:6px;background:#252b39;color:#e9d5a3;cursor:pointer';text.after(btn);
@@ -282,7 +283,7 @@ const initHeroTavern = async () => {
      attachVoiceButtons();
      if(c?.eventSource&&c?.eventTypes?.GENERATION_ENDED)c.eventSource.on(c.eventTypes.GENERATION_ENDED,async()=>{
       const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled||!state.settings.autoPlay)return;
-      const last=[...heroChat.querySelectorAll('.mes:not(.is_user)')].at(-1);if(last)heroSpeakMessage(last);
+      const last=[...heroChat.querySelectorAll('.mes:not(.is_user):not([is_user="true"])')].at(-1);if(last)heroSpeakMessage(last);
      });
     }
 

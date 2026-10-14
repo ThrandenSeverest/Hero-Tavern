@@ -79,3 +79,51 @@ test('voice UI keeps one-click stages and backend owns dependency-to-weight tran
  for(const id of ['tts-setup','tts-cancel-install','tts-install-progress','tts-install-phase','tts-install-summary','tts-setup-help','tts-install-log'])assert.ok(panel.includes('id="'+id+'"'));
  assert.match(bridge,/case '\/tts\/setup':result=tts\.setup\(\)/);assert.match(bridge,/case '\/tts\/install-cancel':result=tts\.cancelInstall\(\)/);
 });
+
+test('speech planner merges identical settings and preserves different narrator boundaries',()=>{
+ const {planSpeech}=require('../manager/TTSService.cjs'),v={engine:'qwen',variant:'custom-1.7',speaker:'Ryan'};
+ assert.equal(planSpeech('*Waves.* «Hello.» *Smiles.*',v,v).length,1);
+ assert.equal(planSpeech('*Waves.* «Hello.» *Smiles.*',v,{...v,speaker:'Vivian'}).length,3);
+ const parts=planSpeech('word '.repeat(400),v,v);assert.ok(parts.length>1);assert.ok(parts.every(p=>p.text.length<=600));
+ assert.equal(splitSpeech('<think>unfinished private reasoning').length,0);
+});
+function synthesisHarness(root){
+ const commands=[],tasks=[],children=[];let fail=false;
+ const wav=Buffer.alloc(52);wav.write('RIFF');wav.writeUInt32LE(44,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(24000,24);wav.writeUInt32LE(48000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(8,40);
+ function spawn(command){commands.push(command);const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();child.kill=()=>setImmediate(()=>child.emit('exit',0));child.stdin.write=line=>{const task=JSON.parse(line);tasks.push(task);setImmediate(()=>child.stdout.emit('data',Buffer.from(JSON.stringify(fail?{id:task.id,ok:false,error:'fixture failure'}:{id:task.id,ok:true,audio:wav.toString('base64')})+'\n')))};children.push(child);return child;}
+ for(const engine of ['qwen','flash']){const dir=path.join(root,'TTSRuntime',engine,process.platform==='win32'?'Scripts':'bin');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,process.platform==='win32'?'python.exe':'python'),'fixture');}
+ for(const [engine,variant] of [['flash','flash'],...['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(v=>['qwen',v])]){const dir=path.join(root,'TTSModels',engine,variant);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'.hero-downloaded'),'revision1');}
+ const mod={exports:{}};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../manager/TTSService.cjs'),'utf8'),{module:mod,require:n=>n==='node:child_process'?{spawn}:require(n),process,Buffer,setTimeout,clearTimeout,console});
+ return {service:mod.exports.createTTS(root),commands,tasks,setFail:v=>{fail=v}};
+}
+test('real service routes profiles to exact model paths, combines response audio and preserves global settings',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'tts-route-'));const h=synthesisHarness(root),s=h.service;
+ try{
+  const a=s.saveProfile({name:'Dialogue',voice:{engine:'qwen',variant:'custom-1.7',speaker:'Ryan',style:'Warm'}}).profile;
+  const b=s.saveProfile({name:'Narrator',voice:{engine:'qwen',variant:'design-1.7',style:'A calm adult narrator'}}).profile;
+  const one=await s.speakMessage({text:'*Waves.* "Welcome."',assignment:{dialogueProfileId:a.id,narratorMode:'same'}});
+  assert.equal(h.tasks.length,1);assert.equal(one.segments,1);assert.equal(h.tasks[0].variant,'custom-1.7');assert.equal(h.tasks[0].modelPath,path.join(root,'TTSModels','qwen','custom-1.7'));
+  const mixed=await s.speakMessage({text:'*The door opens.* "Come inside."',assignment:{dialogueProfileId:a.id,narratorProfileId:b.id,narratorMode:'separate'}});
+  assert.equal(mixed.segments,2);assert.equal(fs.readFileSync(s.readAudio(mixed.url)).readUInt32LE(40),16);
+  assert.equal(s.status().settings.engine,'flash');
+  const cached=await s.speakMessage({text:'*Waves.* "Welcome."',assignment:{dialogueProfileId:a.id,narratorMode:'same'}});assert.equal(cached.cached,true);
+  assert.equal(createTTS(root).status().profiles.length,2);
+  s.deleteProfile({id:a.id});await assert.rejects(s.speakMessage({text:'Test',assignment:{dialogueProfileId:a.id}}),/TTS_CHARACTER_ROUTE_FAILED/);
+ }finally{s.stop();fs.rmSync(root,{recursive:true,force:true})}
+});
+test('model-specific preflight distinguishes preset, design, clone and Flash; failed jobs recover and log',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'tts-preflight-')),h=synthesisHarness(root),s=h.service;
+ try{
+  await assert.rejects(s.speak({text:'Hello',engine:'flash'}),/TTS_REFERENCE_REQUIRED/);
+  await assert.rejects(s.speak({text:'Hello',engine:'qwen',variant:'design-1.7',style:''}),/TTS_STYLE_REQUIRED/);
+  fs.writeFileSync(path.join(root,'Voices','sample.wav'),'reference');
+  await assert.rejects(s.speak({text:'Hello',engine:'qwen',variant:'clone-0.6',reference:'sample.wav',referenceText:''}),/TTS_TRANSCRIPT_REQUIRED/);
+  await s.speak({text:'Hello',engine:'qwen',variant:'custom-0.6',reference:'missing.wav',style:'Unsupported'});
+  assert.equal(h.tasks.at(-1).style,'');assert.equal(h.tasks.at(-1).reference,'');
+  h.setFail(true);await assert.rejects(s.speak({text:'Failure',engine:'qwen',variant:'custom-1.7'}),/fixture failure/);assert.equal(s.status().busy,false);
+  h.setFail(false);await s.speak({text:'Recovered',engine:'qwen',variant:'custom-1.7'});
+  await s.speak({text:'Flash',engine:'flash',reference:'sample.wav'});
+  assert.ok(h.commands.some(x=>x.includes(path.join('TTSRuntime','flash'))));
+  assert.ok(s.status().jobLog.some(e=>e.event==='failed'));assert.ok(fs.existsSync(path.join(root,'Logs','tts-jobs.jsonl')));
+ }finally{s.stop();fs.rmSync(root,{recursive:true,force:true})}
+});

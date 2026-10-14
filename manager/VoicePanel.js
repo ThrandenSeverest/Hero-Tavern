@@ -12,7 +12,7 @@ function restoreControls(s){
  $('tts-ref-text').value=s.settings.referenceText||'';
  $('tts-narrator-ref-text').value=s.settings.narratorReferenceText||'';
  $('tts-style').value=s.settings.style||'';
- controlsLoaded=true;
+ controlsLoaded=true;modelControls();
 }
 async function refresh(){
  const s=await api('/tts/status');lastState=s;
@@ -26,10 +26,20 @@ async function refresh(){
   field.replaceChildren(new Option('None',''),...names.map(v=>new Option(v,v)));
   if(names.includes(existing))field.value=existing;
  }
- return s;
+ renderProfiles(s);return s;
+}
+function modelControls(){
+ const flash=$('tts-engine').value==='flash',variant=$('tts-variant').value,clone=!flash&&variant.startsWith('clone'),preset=!flash&&variant.startsWith('custom'),style=!flash&&['custom-1.7','design-1.7'].includes(variant);
+ for(const [id,show] of [['tts-variant',!flash],['tts-language',!flash],['tts-speaker',preset],['tts-narrator',preset],['tts-dialogue-reference',flash||clone],['tts-narrator-reference',flash||clone],['tts-ref-text',clone],['tts-narrator-ref-text',clone],['tts-style',style]])$(id).closest('label').hidden=!show;
+ $('tts-model-help').textContent=flash?'Flash uses a reference WAV; no mood instruction.':clone?'Base clones a WAV and requires its exact transcript.':variant==='design-1.7'?'VoiceDesign creates a voice from your description. No WAV required. Save a profile to reuse the description; identity can vary between generations.':variant==='custom-1.7'?'CustomVoice uses a built-in speaker. No WAV required. Style accepts mood instructions.':'CustomVoice 0.6B uses a built-in speaker. No WAV or mood instruction required.';
+}
+function renderProfiles(s){
+ const select=$('tts-profile-list'),old=select.value;select.replaceChildren(new Option('Choose saved voice',''),...(s.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));select.value=old;
+ $('tts-job-log').textContent=JSON.stringify(s.jobLog||[],null,2);
 }
 function voiceStatus(s){
  lastState=s;
+ $('tts-job-log').textContent=JSON.stringify(s.jobLog||[],null,2);
  const engine=s.settings.engine==='flash'?'Chatterbox Flash':'Qwen3-TTS '+s.settings.variant;
  const deps=s.installing?'IN PROGRESS':s.ready?'READY':s.error?'FAILED':'MISSING';
  const weights=s.downloading?'DOWNLOADING':s.weightsReady?'DOWNLOADED':s.downloadError?'FAILED':'MISSING';
@@ -77,5 +87,14 @@ $('tts-cancel-download').onclick=()=>action(()=>api('/tts/download-cancel',{}));
 $('tts-stop').onclick=()=>action(()=>api('/tts/stop',{}));
 $('tts-import').onclick=()=>action(async()=>{const file=$('tts-voice-file').files[0];if(!file)throw Error('Choose a WAV file');if(file.size>12000000)throw Error('WAV too large');const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file)});return api('/tts/import',{name:$('tts-voice-name').value||file.name.replace(/\.wav$/i,''),base64})});
 $('tts-delete-voice').onclick=()=>action(async()=>{if(!$('tts-voices').value)return;return api('/tts/delete',{name:$('tts-voices').value})});
-$('tts-test').onclick=()=>action(async()=>{const data={text:$('tts-test-text').value,engine:$('tts-engine').value,variant:$('tts-variant').value,language:$('tts-language').value,speaker:$('tts-speaker').value,reference:$('tts-voices').value,referenceText:$('tts-ref-text').value,style:$('tts-style').value};const v=await api('/tts/speak',data);$('tts-audio').src=v.url;$('tts-audio').play().catch(()=>{})});
+$('tts-test').onclick=()=>action(async()=>{const form=settingsFromForm();const v=await api('/tts/speak',{...form,text:$('tts-test-text').value,reference:form.dialogueReference});$('tts-audio').src=v.url;$('tts-feedback').textContent='Voice ready.';await $('tts-audio').play().catch(()=>{$('tts-feedback').textContent='Voice ready. Click Play.'})});
+const extra=document.createElement('div');extra.className='card';extra.innerHTML='<p id="tts-model-help"></p><h3>Voice Library</h3><p>Save a built-in speaker, a designed voice or a clone configuration, then assign it through Characters → Character Voice.</p><label>Profile name<input id="tts-profile-name" placeholder="Mira — warm voice"></label><button id="tts-profile-save">Save current voice as new profile</button><label>Saved profiles<select id="tts-profile-list"></select></label><button id="tts-profile-load">Edit selected voice</button><button id="tts-profile-update">Update selected voice</button><button id="tts-profile-delete">Delete selected profile</button><details><summary>Speech job debug log</summary><pre id="tts-job-log" style="white-space:pre-wrap"></pre></details>';
+$('tts-feedback').after(extra);
+for(const id of ['tts-engine','tts-variant'])$(id).addEventListener('change',modelControls);
+const profileData=()=>{const form=settingsFromForm();return {name:$('tts-profile-name').value,voice:{...form,reference:form.dialogueReference}}};
+$('tts-profile-save').onclick=()=>action(()=>api('/tts/profiles/save',profileData()));
+$('tts-profile-update').onclick=()=>action(async()=>{if(!$('tts-profile-list').value)throw Error('Select a profile');return api('/tts/profiles/save',{...profileData(),id:$('tts-profile-list').value})});
+$('tts-profile-delete').onclick=()=>action(async()=>{if(!$('tts-profile-list').value)return;if(!confirm('Delete this profile? Assigned characters will show a missing voice until reassigned. WAV recordings are kept.'))return;return api('/tts/profiles/delete',{id:$('tts-profile-list').value})});
+$('tts-profile-load').onclick=()=>{const profile=lastState?.profiles?.find(p=>p.id===$('tts-profile-list').value);if(!profile)return;restoreControls({settings:{...lastState.settings,...profile.voice}});$('tts-dialogue-reference').value=profile.voice.reference||'';$('tts-profile-name').value=profile.name;$('tts-feedback').textContent='Editing profile. Preview or Update selected voice; global settings change only on Save voice settings.'};
+modelControls();
 })();

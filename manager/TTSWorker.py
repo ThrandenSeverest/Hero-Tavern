@@ -79,9 +79,18 @@ def generate(data):
         else:
             import soundfile as sf
             language = data.get("language", "Auto")
+            if hasattr(m, "get_supported_languages"):
+                supported = m.get_supported_languages()
+                if supported and language.lower() not in [x.lower() for x in supported]:
+                    raise ValueError("TTS_LANGUAGE_UNSUPPORTED: Choose one of " + ", ".join(supported))
             style = data.get("style", "")
             if variant.startswith("custom"):
-                kwargs = dict(text=text, language=language, speaker=data.get("speaker", "Ryan"))
+                speaker = data.get("speaker", "Ryan")
+                if hasattr(m, "get_supported_speakers"):
+                    supported = m.get_supported_speakers()
+                    if supported and speaker.lower() not in [x.lower() for x in supported]:
+                        raise ValueError("TTS_SPEAKER_UNSUPPORTED: Choose one of " + ", ".join(supported))
+                kwargs = dict(text=text, language=language, speaker=speaker)
                 # Only the 1.7B custom voice variant supports style instructions.
                 if variant == "custom-1.7" and style:
                     kwargs["instruct"] = style
@@ -112,6 +121,20 @@ def generate(data):
             out = io.BytesIO()
             sf.write(out, wavs[0], sample_rate, format="WAV")
             encoded = out.getvalue()
+    # One playback format across models, including mixed narrator/character jobs.
+    import soundfile as sf
+    import numpy as np
+    samples, rate = sf.read(io.BytesIO(encoded), dtype="float32", always_2d=True)
+    samples = samples.mean(axis=1)
+    if not len(samples) or not np.isfinite(samples).all():
+        raise ValueError("TTS_EMPTY_OR_INVALID_WAV: Model returned empty or non-finite audio")
+    if rate != 24000:
+        count = max(1, round(len(samples) * 24000 / rate))
+        samples = np.interp(np.arange(count) * rate / 24000, np.arange(len(samples)), samples)
+    out = io.BytesIO()
+    sf.write(out, samples, 24000, format="WAV", subtype="PCM_16")
+    encoded = out.getvalue()
+    sample_rate = 24000
     return {"audio": base64.b64encode(encoded).decode("ascii"), "sampleRate": int(sample_rate)}
 
 for line in sys.stdin:

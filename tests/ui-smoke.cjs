@@ -34,6 +34,11 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});await page.locator('#hero-welcome-close').click();await page.waitForTimeout(1200);if(!await page.locator('#hero-welcome').isHidden())throw Error('Dismissed welcome returned over controls');
   await page.locator('.hero-nav[data-hero="models"]').click();const panel=page.frameLocator('#hero-model-frame');
   await panel.getByRole('button',{name:'Download Qwen default'}).waitFor();
+  await panel.locator('#models-open-tts').click();
+  await panel.locator('#tts-download').waitFor({state:'visible'});
+  if(!await panel.locator('#tts-model-downloads').count())throw Error('TTS download status missing.');
+  await page.locator('.hero-nav[data-hero="models"]').click();
+
   await waitFor(async()=>(await panel.locator('#state').textContent()).includes('No model selected'));
   const model=path.join(root,'Models','model with spaces.gguf'),bytes=Buffer.alloc(1024*1024);bytes.write('GGUF');bytes.writeUInt32LE(3,4);fs.writeFileSync(model,bytes);
   await waitFor(async()=>await panel.locator('#installed option').count()===1);await panel.locator('#select').click();
@@ -61,6 +66,13 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await writer.locator('#writer-view-mode').click();
   await waitFor(async()=>await writer.locator('.writer-passage.generated').count()>=1);
   if(!await writer.locator('.writer-passage.generated button').filter({hasText:'Regenerate this'}).count())throw Error('Writer generation cards have no independent regenerate action');
+  const passageLayout=await writer.locator('#writer-segments').evaluate(el=>{
+    const box=el.getBoundingClientRect(),card=el.querySelector('.writer-passage'),inside=card?.querySelector('textarea'),c=card?.getBoundingClientRect(),editor=el.parentElement.getBoundingClientRect();
+    return {width:box.width,editor:editor.width,card:c?.width,visibleHeight:inside?.clientHeight,scrollHeight:inside?.scrollHeight};
+  });
+  if(passageLayout.width<Math.min(passageLayout.editor-50,600)||passageLayout.card<passageLayout.width-70)throw Error('Writer cards collapsed into narrow columns: '+JSON.stringify(passageLayout));
+  if(passageLayout.visibleHeight<130||passageLayout.scrollHeight>passageLayout.visibleHeight+5)throw Error('Writer text area is vertically clipped: '+JSON.stringify(passageLayout));
+
   if(!await writer.locator('#history button').count())throw Error('Writer failed to preserve revision history');
   await writer.locator('#fork').click();await waitFor(async()=>(await writer.locator('#title').inputValue()).includes('branch'));
   await page.screenshot({path:path.join(repo,'.ci/hero-writer-qa.png')});

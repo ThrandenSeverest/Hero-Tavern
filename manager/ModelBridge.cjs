@@ -28,6 +28,7 @@ const {createDiskCare}=require('./DiskCare.cjs');
 const {createImageGallery}=require('./ImageGallery.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
 const {createTTS}=require('./TTSService.cjs');
+const {buildCapabilityReport}=require('./CapabilityAudit.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
     const stat = fs.statSync(file);
@@ -379,6 +380,10 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
         if(req.method==='GET'&&req.url.startsWith('/lora/library')){const q=new URL(req.url,'http://127.0.0.1').searchParams;try{json(200,loraManager.list({pack:q.get('pack')||'',checkpoint:q.get('checkpoint')||''}))}catch(e){json(400,{error:e.message})}return;}
         if(req.method==='GET'&&req.url==='/image/model-center'){json(200,await imageCenter.status());return;}
+        if(req.method==='GET'&&req.url==='/capabilities/report'){
+          const sessions=story.list({archived:false}).slice(0,25).map(entry=>{try{const session=story.get(entry.id);return {id:session.id,lastAnalysis:session.lastAnalysis||null,recentFailures:(session.failures||[]).slice(-2)};}catch{return {id:entry.id}}});
+          json(200,buildCapabilityReport({engine:snapshot(),center:await imageCenter.status(),vision:{...vision.snapshot(),installed:fs.readdirSync(models).filter(name=>name.endsWith('.gguf'))},tts:tts.status(),tests:modelTests.history(),trackerSessions:sessions}));return;
+         }
         if(req.method==='GET'&&req.url==='/vision/status'){json(200,{...vision.snapshot(),busy:visionBusy,setup:visionSetup,error:visionSetupError||vision.snapshot().error,installed:fs.readdirSync(models).filter(n=>n.endsWith('.gguf'))});return;}
         if(req.method==='GET'&&req.url==='/comfy/status'){json(200,{...comfy.snapshot(),...await comfy.catalog(),runtime:comfyRuntime.status()});return;}
          if(req.method==='GET'&&req.url==='/comfy/workflows'){json(200,{items:comfy.workflows.list()});return;}

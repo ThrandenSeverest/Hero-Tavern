@@ -389,6 +389,21 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import'||req.url==='/vision/analyze')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            // Shared text works with the selected local model in every mode,
+            // without the separate Assistant workflow's Qwen-only restriction.
+            if(req.url==='/tools/text'){
+                const prompt=String(data.prompt||'').trim();
+                if(!prompt||prompt.length>12000)throw Error('Enter a text request (1–12000 characters).');
+                if(imageJob||textPausedForImages||assistant.snapshot().busy||tuner.snapshot()?.status==='running')throw Error('Finish the active AI task before using shared text tools.');
+                if(!selected())throw Error('Download and select a text model in All AI models first.');
+                await ensureText();
+                const controller=new AbortController();
+                res.on('close',()=>{if(!res.writableEnded)controller.abort()});
+                const result=await pipeline.generate({prompt:'You are a local text assistant. Answer directly without roleplay, private thinking, or a character profile.\n\nRequest: '+prompt+'\n\nAnswer:',stream:false,max_tokens:512},controller.signal);
+                const answer=String(result.choices?.[0]?.text||'').trim();
+                if(!answer)throw Error('Text model returned an empty response. Check model generation settings.');
+                json(200,{answer,model:runningModel||selected(),usage:result.usage||null});return;
+            }
             if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
             if(req.url==='/model-tests/record'){json(200,modelTests.record(data));return;}
             if(req.url==='/model-tests/text'){

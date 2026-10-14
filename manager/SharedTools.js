@@ -15,7 +15,7 @@
  $('selection').onclick=()=>{$('prompt').value=selection||'';};
  const text=t=>{result=t;$('output').textContent=t;};
  async function run(fn){if(running)return;running=true;$('status').textContent='Working…';try{await fn();$('status').textContent='Done.';}catch(e){$('status').textContent=e.message}finally{running=false}}
- $('text').onclick=()=>run(async()=>text((await api('/assistant/message',{prompt:$('prompt').value,mode:'fast',web:false})).answer));
+ $('text').onclick=()=>run(async()=>text((await api('/tools/text',{prompt:$('prompt').value})).answer));
  $('refine').onclick=()=>run(async()=>text((await api('/studio/refine',{prompt:$('prompt').value,preset:'raw'})).prompt));
  $('image').onclick=()=>run(async()=>{const v=await api('/images/generate',{prompt:$('prompt').value,operation:'txt2img',seed:-1});$('preview').src=v.url;$('preview').hidden=false;text(v.refinedPrompt||$('prompt').value)});
  $('speak').onclick=()=>run(async()=>{const v=await api('/tts/speak',{text:$('prompt').value});$('audio').src=v.url;$('audio').hidden=false;await $('audio').play()});

@@ -51,8 +51,22 @@ function createTTS(root){
   // Use an explicit Python executable. pip installation is isolated from KoboldCpp and ComfyUI.
   const python=process.env.HERO_TTS_PYTHON||'python';const engine=settings.engine;installOutput='Creating isolated Python environment…';fault='';
   if(process.platform==='win32'&&!process.env.HERO_TTS_PYTHON){
-   // Portable uv downloads managed Python 3.11; never requires a system Python or Git.
-   const ps="$ErrorActionPreference='Stop'; $dir=$env:HERO_TTS_RUNTIME; New-Item -ItemType Directory -Force $dir | Out-Null; $uv=Join-Path $dir 'uv.exe'; if(-not (Test-Path $uv)){ $zip=Join-Path $dir 'uv.zip'; $unpack=Join-Path $dir 'uv-package'; Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile $zip -UseBasicParsing; Expand-Archive -Path $zip -DestinationPath $unpack -Force; $exe=Get-ChildItem -LiteralPath $unpack -Recurse -Filter uv.exe | Select-Object -First 1; if(-not $exe){throw 'uv.exe missing from official archive'}; Copy-Item $exe.FullName $uv -Force; Remove-Item $zip -Force; Remove-Item $unpack -Recurse -Force }; $env:UV_PYTHON_INSTALL_DIR=Join-Path $dir 'python'; & $uv python install 3.11; if($LASTEXITCODE -ne 0){throw 'Portable Python download failed'}; & $uv venv $env:HERO_TTS_TARGET --python 3.11 --python-preference only-managed; if($LASTEXITCODE -ne 0){throw 'Creating TTS environment failed'}";
+   // Preserve a valid existing environment; move a broken one aside without deleting weights or voices.
+   const ps=[
+    "$ErrorActionPreference='Stop'",
+    "$dir=$env:HERO_TTS_RUNTIME; $target=$env:HERO_TTS_TARGET",
+    "New-Item -ItemType Directory -Force $dir | Out-Null",
+    "$venvPython=Join-Path $target 'Scripts\\python.exe'; $valid=$false",
+    "if(Test-Path -LiteralPath $venvPython){ try { & $venvPython -c 'import sys; assert sys.version_info[:2] == (3, 11)' *> $null; $valid=($LASTEXITCODE -eq 0) } catch { $valid=$false } }",
+    "if($valid){ Write-Output 'Reusing existing TTS Python 3.11 environment.' } else {",
+    " if(Test-Path -LiteralPath $target){ $backup=$target+'.recovery-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmss')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,6); Move-Item -LiteralPath $target -Destination $backup -ErrorAction Stop; Write-Output ('Preserved incomplete TTS environment at '+$backup) }",
+    " $uv=Join-Path $dir 'uv.exe'",
+    " if(-not (Test-Path $uv)){ $zip=Join-Path $dir 'uv.zip'; $unpack=Join-Path $dir 'uv-package'; Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile $zip -UseBasicParsing; Expand-Archive -Path $zip -DestinationPath $unpack -Force; $exe=Get-ChildItem -LiteralPath $unpack -Recurse -Filter uv.exe | Select-Object -First 1; if(-not $exe){throw 'uv.exe missing from official archive'}; Copy-Item $exe.FullName $uv -Force; Remove-Item $zip -Force; Remove-Item $unpack -Recurse -Force }",
+    " $env:UV_PYTHON_INSTALL_DIR=Join-Path $dir 'python'",
+    " & $uv python install 3.11; if($LASTEXITCODE -ne 0){throw 'Portable Python download failed'}",
+    " & $uv venv $target --python 3.11 --python-preference only-managed; if($LASTEXITCODE -ne 0){throw 'Creating TTS environment failed'}",
+    "}"
+   ].join('\n');
    install=spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',ps],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,HERO_TTS_RUNTIME:path.join(root,'TTSRuntime'),HERO_TTS_TARGET:target}});
   }else install=spawn(python,['-m','venv',target],{windowsHide:true,stdio:['ignore','pipe','pipe']});const current=install;
   const log=x=>{installOutput+=(x.toString());installOutput=installOutput.slice(-12000)};current.stdout.on('data',log);current.stderr.on('data',log);

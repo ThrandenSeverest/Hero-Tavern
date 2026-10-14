@@ -31,7 +31,12 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   // The node outputs a Qwen-native 64-channel latent. At default 1024²,
   // always use that rather than a generic four-channel EmptyLatentImage.
   // Explicit alternate aspect ratios use ComfyUI's latent size conversion.
-  const latent=sourceNode||width===1024&&height===1024?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
+  // Qwen-Image 2.1 uses the model-specific latent returned by TextEncodeQwenImage21
+  // (output 2). A generic EmptyLatentImage has SD-style channels and corrupts
+  // or collapses non-1024 images. Resize this native latent instead.
+  let latent=[encoded[0],2];
+  if(width!==1024||height!==1024)latent=n('LatentUpscale',{samples:latent,upscale_method:'bilinear',width,height,crop:'disabled'});
+  if((params.batch_size||1)>1)latent=n('RepeatLatentBatch',{samples:latent,amount:params.batch_size});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
   const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:effectiveCfg,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});

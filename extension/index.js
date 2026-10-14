@@ -6,6 +6,14 @@ const initHeroTavern = async () => {
     await import('./reply-filters.js');
     try { context = (await import('../../extensions.js')).getContext; } catch {}
     document.title = 'Hero Tavern';
+    const toolsButton=document.createElement('button'),toolsFrame=document.createElement('iframe');
+    toolsButton.textContent='AI tools · text / image / voice';toolsButton.style.cssText='position:fixed;right:18px;bottom:18px;z-index:2200;padding:10px;background:#574326;color:white;border:1px solid #b9a277;border-radius:8px';
+    toolsFrame.title='Shared AI tools';toolsFrame.src=bridgeOrigin+'/tools';toolsFrame.hidden=true;toolsFrame.style.cssText='position:fixed;right:12px;bottom:64px;width:min(960px,calc(100vw - 24px));height:80vh;border:1px solid #8293ad;border-radius:12px;z-index:2201;background:#192231';
+    let toolsTarget=null;
+    toolsButton.onpointerdown=()=>{const field=document.activeElement;if(field instanceof HTMLTextAreaElement)toolsTarget=field;};
+    toolsButton.onclick=()=>{toolsFrame.hidden=!toolsFrame.hidden;if(!toolsFrame.hidden){const selected=window.getSelection()?.toString()|| (toolsTarget?toolsTarget.value.slice(toolsTarget.selectionStart,toolsTarget.selectionEnd):'');toolsFrame.contentWindow.postMessage({type:'hero-tools-context',text:selected},bridgeOrigin);}};
+    window.addEventListener('message',e=>{if(e.origin!==bridgeOrigin||e.source!==toolsFrame.contentWindow||e.data?.type!=='hero-tools-insert')return;const field=toolsTarget||document.getElementById('send_textarea');if(field){field.setRangeText(String(e.data.text||''),field.selectionStart,field.selectionEnd,'end');field.dispatchEvent(new Event('input',{bubbles:true}));toolsFrame.hidden=true;}});
+    document.body.append(toolsButton,toolsFrame);
     document.documentElement.classList.add('hero-tavern-app');
     const style = document.createElement('style');
     style.textContent = `
@@ -42,7 +50,7 @@ const initHeroTavern = async () => {
         dismissWelcome();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
         const isPanel=['model-tests','voices','assistant','models','vision','hardware','generation','memory','images','comfy-workflows','image-setup','storage','creator','adventure','writer','diagnostics','history','trackers','lore','inspector'].includes(name);
-        workspace.classList.toggle('open',isPanel);
+        workspace.classList.toggle('open',isPanel);toolsButton.hidden=isPanel;if(isPanel)toolsFrame.hidden=true;
         document.getElementById('hero-page-title').textContent={'model-tests':'Model Testing',voices:'Character voices',vision:'Image analyzer',assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',writer:'Writer · novels & stories',adventure:'Ilreon · Adventure mode','comfy-workflows':'ComfyUI Workflows',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=['adventure','writer'].includes(name);adventure.hidden=name!=='adventure';writer.hidden=name!=='writer';
         rail.querySelectorAll('.hero-nav').forEach(b=>b.classList.toggle('active',b.dataset.hero===name));
         if(isPanel&&!['adventure','writer'].includes(name)) frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);

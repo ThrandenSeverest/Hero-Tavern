@@ -13,6 +13,15 @@ function clamp(n,min,max,name){
  if(typeof n!=='number'||!Number.isFinite(n)||n<min||n>max)throw Error('Invalid '+name+' ('+min+'–'+max+').');
  return n;
 }
+function editMask(node,mask,p={}){
+ let result=node('LoadImageMask',{image:mask,channel:'red'});
+ const grow=Number(p.maskGrow??0),feather=Number(p.maskFeather??0);
+ if(!Number.isInteger(grow)||grow< -64||grow>128||!Number.isInteger(feather)||feather<0||feather>64)throw Error('Mask expansion must be -64–128px and feather 0–64px.');
+ if(p.maskInvert===true)result=node('InvertMask',{mask:result});
+ if(grow)result=node('GrowMask',{mask:result,expand:grow,tapered_corners:true});
+ if(feather){const image=node('MaskToImage',{mask:result});const blurred=node('ImageBlur',{image,blur_radius:feather,sigma:Math.max(0.1,feather/3)});result=node('ImageToMask',{image:blurred,channel:'red'});}
+ return result;
+}
 function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel='',upscaleFactor=2,upscaleMethod='lanczos'}={}){
  const validModes=['txt2img','img2img','inpaint','outpaint','upscale'],operation=mode||(source?(mask?'inpaint':'img2img'):'txt2img');
  if(!validModes.includes(operation))throw Error('Unsupported ComfyUI operation.');
@@ -69,7 +78,7 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
  else{
   sourceNode=node('LoadImage',{image:source});
   if(operation==='inpaint'){
-   maskNode=node('LoadImageMask',{image:mask,channel:'red'});
+   maskNode=editMask(node,mask,p);
    latent=node('VAEEncodeForInpaint',{pixels:sourceNode,vae,mask:maskNode,grow_mask_by:6});
   }else if(operation==='outpaint'){
    const padding=p.outpaint||{},values={};
@@ -94,4 +103,4 @@ function buildWorkflow({checkpoint,params,source,mask,mode,lora=[],upscaleModel=
  const saved=node('SaveImage',{images:output,filename_prefix:operation==='inpaint'?'HeroTavern_Edit':operation==='outpaint'?'HeroTavern_Expand':'HeroTavern'});
  return {graph,saveId:saved[0],mode:operation,seed,batch:count};
 }
-module.exports={buildWorkflow,modelName,SAMPLERS,sampling};
+module.exports={editMask,buildWorkflow,modelName,SAMPLERS,sampling};

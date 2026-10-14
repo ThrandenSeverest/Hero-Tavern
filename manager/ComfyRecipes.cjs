@@ -1,6 +1,6 @@
 'use strict';
 // Model-specific ComfyUI graphs. End users choose "FLUX" or "Z-Image"; no JSON or nodes.
-const crypto=require('node:crypto'),{buildWorkflow,sampling}=require('./ComfyWorkflows.cjs');
+const crypto=require('node:crypto'),{buildWorkflow,sampling,editMask}=require('./ComfyWorkflows.cjs');
 function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFiles={}}={}){
  const [samplerName,scheduler]=sampling(params,pack.family==='qwen21'?['euler','simple']:['euler','normal']);
  if(pack.family==='qwen21'){
@@ -34,15 +34,15 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   // Qwen-Image 2.1 uses the model-specific latent returned by TextEncodeQwenImage21
   // (output 2). A generic EmptyLatentImage has SD-style channels and corrupts
   // or collapses non-1024 images. Resize this native latent instead.
-  let latent=[encoded[0],2];
-  if(width!==1024||height!==1024)latent=n('LatentUpscale',{samples:latent,upscale_method:'bilinear',width,height,crop:'disabled'});
+  let latent=sourceNode?n('VAEEncode',{pixels:sourceNode,vae}):[encoded[0],2];
+  if(!sourceNode&&(width!==1024||height!==1024))latent=n('LatentUpscale',{samples:latent,upscale_method:'bilinear',width,height,crop:'disabled'});
   if((params.batch_size||1)>1)latent=n('RepeatLatentBatch',{samples:latent,amount:params.batch_size});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
   const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:effectiveCfg,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
   const result=n('VAEDecode',{samples:sample,vae});
   let output=result;
-  if(mode==='inpaint'){const masked=n('LoadImageMask',{image:mask,channel:'red'});output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
+  if(mode==='inpaint'){const masked=editMask(n,mask,params);output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
   const saved=n('SaveImage',{images:output,filename_prefix:'HeroTavern_Qwen21'});
   return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg>2?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,sampler:'euler',scheduler:'simple'}:null};
  }
@@ -81,16 +81,17 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   const latent=n('EmptyLatentImage',{width,height,batch_size:count});
   sampled=n('KSampler',{model:m,positive,negative,latent_image:latent,seed,steps:params.steps??pack.steps,cfg:params.cfg_scale??pack.cfg,sampler_name:samplerName,scheduler,denoise:1});
  }else if(pack.family==='flux2'){
-  const latent=n('EmptyFlux2LatentImage',{width,height,batch_size:count});
+  const latent=source?n('VAEEncode',{pixels:n('LoadImage',{image:source}),vae}):n('EmptyFlux2LatentImage',{width,height,batch_size:count});
   const noise=n('RandomNoise',{noise_seed:seed}),sampler=n('KSamplerSelect',{sampler_name:samplerName});
   const guider=n('CFGGuider',{model,positive:positiveCondition,negative,cfg:params.cfg_scale??1});
-  const sigmas=n('Flux2Scheduler',{steps:params.steps??4,width,height});
+  let sigmas=n('Flux2Scheduler',{steps:params.steps??4,width,height});
+  if(source){const denoise=Number(params.denoise??0.65);if(!Number.isFinite(denoise)||denoise<0.05||denoise>1)throw Error('Denoise must be 0.05–1.');const split=n('SplitSigmasDenoise',{sigmas,denoise});sigmas=[split[0],1];}
   sampled=n('SamplerCustomAdvanced',{noise,guider,sampler,sigmas,latent_image:latent});
  }else throw Error('Unsupported image model family.');
  const decoded=n('VAEDecode',{samples:sampled,vae});
  let result=decoded;
  if(pack.family==='flux2'&&mode==='inpaint'){
-  const original=n('LoadImage',{image:source}),area=n('LoadImageMask',{image:mask,channel:'red'});
+  const original=n('LoadImage',{image:source}),area=editMask(n,mask,params);
   result=n('ImageCompositeMasked',{destination:original,source:decoded,mask:area,x:0,y:0,resize_source:false});
  }
  const saved=n('SaveImage',{images:result,filename_prefix:'HeroTavern_'+pack.id.replace(/-/g,'_')});

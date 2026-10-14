@@ -12,7 +12,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
  // This is the disposable cloned UI fixture, never a user's installed profile.
  fs.rmSync(path.join(st,'data'),{recursive:true,force:true});
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'ModelTestsPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'SharedTools.js', 'ModelTestsPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -178,6 +178,21 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.locator('.hero-nav[data-hero="comfy-workflows"]').click();await panel.locator('#comfy-workflows').waitFor({state:'visible'});await panel.locator('#hero-api-workflow-file').waitFor({state:'visible'});
   await page.locator('.hero-nav[data-hero="writer"]').click();await writer.locator('#title').waitFor({state:'visible'});await writer.locator('#memory').fill('Established fact. '.repeat(1000));await writer.locator('[data-context-tab="persona"]').click();await writer.locator('#persona-name').fill('Mira');await writer.locator('#persona-description').fill('A traveller.');await writer.locator('#save').click();await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved'));await writer.locator('#new').click();await waitFor(async()=>(await writer.locator('#memory').inputValue())==='');if((await writer.locator('#error').textContent()).trim())throw Error('Writer new story failed after editing memory/persona');
   await writer.locator('#import').setInputFiles({name:'sample.txt',mimeType:'text/plain',buffer:Buffer.from('Mira approached the gate.')});await waitFor(async()=>(await writer.locator('#manuscript').inputValue())==='Mira approached the gate.');const download=page.waitForEvent('download');await writer.locator('summary').filter({hasText:'Import / Export'}).click();await writer.locator('#export').click();const exported=await download;if(!exported.suggestedFilename().endsWith('.json'))throw Error('Writer export did not create JSON');
+  // Shared tools run inside Writer and insert reviewed output without submitting a story turn.
+  const sharedTools=writer.locator('#hero-shared-tools');
+  await writer.locator('#manuscript').focus();
+  await writer.locator('#manuscript').evaluate(el=>el.setSelectionRange(0,el.value.length));
+  await sharedTools.locator('#launch').click();
+  await sharedTools.locator('#prompt').fill('Describe a quiet tavern.');
+  await sharedTools.locator('#text').click();
+  await waitFor(async()=>(await sharedTools.locator('#status').textContent())==='Done.');
+  if(!(await sharedTools.locator('#output').textContent()).trim())throw Error('Shared text tool returned no result');
+  await sharedTools.locator('#insert').click();
+  if(!(await writer.locator('#manuscript').inputValue()).trim())throw Error('Shared result did not insert');
+  await sharedTools.locator('[data-panel="images"]').click();
+  const nested=sharedTools.frameLocator('#workspace');await nested.locator('#images').waitFor({state:'visible'});
+  if(await nested.locator('#hero-shared-tools').count())throw Error('Shared workspace must not recursively mount another drawer');
+  await sharedTools.locator('#close').click();
   await page.locator('.hero-nav[data-hero="models"]').click();
   await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
   if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');

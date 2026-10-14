@@ -22,3 +22,16 @@ test('consecutive comparison journal keeps its group id',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-suite-'));
  try{const v=createModelTests(root),r=v.record({kind:'text2text',model:'fixture',status:'passed',text:'BLUE LANTERN',suiteId:'compare-1790000000000'});assert.equal(r.suiteId,'compare-1790000000000');assert.equal(v.history()[0].suiteId,r.suiteId);}finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('inpaint painting keeps reusable preview canvas and single-pointer capture',()=>{
+ assert.match(panel,/heroMaskOverlayCtx/);
+ assert.match(panel,/heroMaskRenderQueued=true/);
+ assert.match(panel,/requestAnimationFrame\(\(\)=>/);
+ assert.match(panel,/heroActivePointer=ev.pointerId/);
+ assert.match(panel,/heroMaskDirty=heroMaskHasPaint\(\)/);
+});
+test('image-to-image diagnostics use engine-aborting timeout and Writer has no fixed 1100px cap',()=>{
+ assert.match(runner,/callTest\('\/studio\/generate',input,kind,210000\)/);
+ const writer=fs.readFileSync(path.join(dir,'Writer.html'),'utf8');
+ assert.doesNotMatch(writer,/max-width:1100px/);
+});

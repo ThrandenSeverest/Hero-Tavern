@@ -749,17 +749,33 @@ el('hero-runtime-cancel').onclick=async()=>{try{await request('/comfy/runtime/in
 setInterval(()=>{if(heroHubReady&&(!el('images').hidden||!el('image-setup').hidden)&&!heroHubInstalling)heroHubRefresh()},15000);
 
 const heroMaskCanvas=el('hero-mask-preview'),heroMaskCtx=heroMaskCanvas.getContext('2d',{willReadFrequently:false});
-const heroMaskPixels=document.createElement('canvas'),heroMaskPixelCtx=heroMaskPixels.getContext('2d');
-let heroSourceBitmap=null;let heroMaskHistory=[],heroErase=false;
+const heroMaskPixels=document.createElement('canvas'),heroMaskPixelCtx=heroMaskPixels.getContext('2d',{willReadFrequently:true});
+const heroMaskOverlay=document.createElement('canvas'),heroMaskOverlayCtx=heroMaskOverlay.getContext('2d');
+let heroSourceBitmap=null;let heroMaskHistory=[],heroErase=false,heroMaskRenderQueued=false,heroActivePointer=null;
+// Red preview is composited through the transparent painted mask. Reuse canvases
+// and draw at most once per animation frame instead of allocating on every move.
 function heroMaskRender(){
- if(!heroSourceBitmap)return;
- if(heroMaskCanvas.width!==heroMaskPixels.width||heroMaskCanvas.height!==heroMaskPixels.height){heroMaskCanvas.width=heroMaskPixels.width;heroMaskCanvas.height=heroMaskPixels.height;}
- heroMaskCtx.clearRect(0,0,heroMaskCanvas.width,heroMaskCanvas.height);
- heroMaskCtx.drawImage(heroSourceBitmap,0,0);
- const overlay=document.createElement('canvas');overlay.width=heroMaskPixels.width;overlay.height=heroMaskPixels.height;
- const oc=overlay.getContext('2d');oc.fillStyle='rgba(255,45,70,0.58)';oc.fillRect(0,0,overlay.width,overlay.height);
- oc.globalCompositeOperation='destination-in';oc.drawImage(heroMaskPixels,0,0);
- heroMaskCtx.drawImage(overlay,0,0);
+ if(!heroSourceBitmap||heroMaskRenderQueued)return;
+ heroMaskRenderQueued=true;
+ requestAnimationFrame(()=>{
+  heroMaskRenderQueued=false;if(!heroSourceBitmap)return;
+  if(heroMaskCanvas.width!==heroMaskPixels.width||heroMaskCanvas.height!==heroMaskPixels.height){
+   heroMaskCanvas.width=heroMaskPixels.width;heroMaskCanvas.height=heroMaskPixels.height;
+  }
+  if(heroMaskOverlay.width!==heroMaskPixels.width||heroMaskOverlay.height!==heroMaskPixels.height){
+   heroMaskOverlay.width=heroMaskPixels.width;heroMaskOverlay.height=heroMaskPixels.height;
+  }
+  heroMaskCtx.clearRect(0,0,heroMaskCanvas.width,heroMaskCanvas.height);
+  heroMaskCtx.drawImage(heroSourceBitmap,0,0);
+  heroMaskOverlayCtx.globalCompositeOperation='source-over';
+  heroMaskOverlayCtx.clearRect(0,0,heroMaskOverlay.width,heroMaskOverlay.height);
+  heroMaskOverlayCtx.fillStyle='rgba(255,45,70,0.58)';
+  heroMaskOverlayCtx.fillRect(0,0,heroMaskOverlay.width,heroMaskOverlay.height);
+  heroMaskOverlayCtx.globalCompositeOperation='destination-in';
+  heroMaskOverlayCtx.drawImage(heroMaskPixels,0,0);
+  heroMaskOverlayCtx.globalCompositeOperation='source-over';
+  heroMaskCtx.drawImage(heroMaskOverlay,0,0);
+ });
 }
 async function heroLoadMaskImage(){
  const name=el('hero-inpaint-image').value;if(!name)throw Error('Choose a saved gallery image.');
@@ -788,9 +804,23 @@ function heroBrush(ev){
  else{heroMaskPixelCtx.beginPath();heroMaskPixelCtx.arc(x,y,radius/2,0,Math.PI*2);heroMaskPixelCtx.fill()}
  heroBrush.previous=[x,y];heroMaskDirty=true;heroMaskRender();
 }
-heroMaskCanvas.addEventListener('pointerdown',ev=>{if(!heroSourceBitmap)return;heroMaskHistory.push(heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height));if(heroMaskHistory.length>8)heroMaskHistory.shift();heroPainting=true;heroBrush.previous=null;const b=heroMaskCanvas.getBoundingClientRect();heroShapeStart=[(ev.clientX-b.left)/b.width*heroMaskPixels.width,(ev.clientY-b.top)/b.height*heroMaskPixels.height];heroShapeBefore=heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height);heroMaskCanvas.setPointerCapture(ev.pointerId);heroBrush(ev)});
-heroMaskCanvas.addEventListener('pointermove',heroBrush);
-for(const name of ['pointerup','pointercancel','lostpointercapture'])heroMaskCanvas.addEventListener(name,()=>{heroPainting=false;heroBrush.previous=null;heroShapeStart=null;heroShapeBefore=null});
+heroMaskCanvas.addEventListener('pointerdown',ev=>{
+ if(!heroSourceBitmap||heroActivePointer!==null||(ev.pointerType==='mouse'&&ev.button!==0))return;
+ ev.preventDefault();heroActivePointer=ev.pointerId;
+ const previous=heroMaskPixelCtx.getImageData(0,0,heroMaskPixels.width,heroMaskPixels.height);
+ heroMaskHistory.push(previous);if(heroMaskHistory.length>3)heroMaskHistory.shift();
+ heroPainting=true;heroBrush.previous=null;
+ const b=heroMaskCanvas.getBoundingClientRect();
+ heroShapeStart=[(ev.clientX-b.left)/b.width*heroMaskPixels.width,(ev.clientY-b.top)/b.height*heroMaskPixels.height];
+ heroShapeBefore=previous;
+ heroMaskCanvas.setPointerCapture(ev.pointerId);heroBrush(ev);
+});
+heroMaskCanvas.addEventListener('pointermove',ev=>{if(ev.pointerId===heroActivePointer)heroBrush(ev)});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])heroMaskCanvas.addEventListener(name,ev=>{
+ if(ev.pointerId!==heroActivePointer)return;
+ heroPainting=false;heroActivePointer=null;heroBrush.previous=null;heroShapeStart=null;heroShapeBefore=null;
+ heroMaskDirty=heroMaskHasPaint();heroMaskRender();
+});
 const shapeRow=document.createElement('div');shapeRow.className='actions';for(const [id,label] of [['brush','Brush · freehand'],['rectangle','Rectangle · select area']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{heroShapeMode=id;for(const q of shapeRow.querySelectorAll('button'))q.setAttribute('aria-pressed',String(q===b));};b.setAttribute('aria-pressed',String(id==='brush'));shapeRow.append(b)};el('hero-mask-editor').before(shapeRow);
 el('hero-mask-load').onclick=()=>heroLoadMaskImage().catch(e=>el('hero-inpaint-status').textContent=e.message);
 el('hero-inpaint-import').onclick=async()=>{

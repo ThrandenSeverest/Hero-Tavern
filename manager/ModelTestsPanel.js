@@ -93,7 +93,7 @@
     progress('Editing explicit reference image');
     const prompt=presets.image2image.prompt;
     const input={...base(model),prompt,operation:'img2img',sourceName:source,denoise:0.7,batch_size:1};
-    const r=await api('/studio/generate',input);
+    const r=await callTest('/studio/generate',input,kind,210000);
     const imageName=getFilename(r.url);report={...report,prompt,settings:{...input,seed:r.seed},imageName,model:r.modelPack||model};
    }else if(kind==='image2text'){
     let source=$('model-test-source').value||sourceImage;

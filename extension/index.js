@@ -88,6 +88,7 @@ const initHeroTavern = async () => {
     });
     const chatIdentity=()=>{const c=context?.();return c&&(c.characterId!==undefined||c.groupId)&&c.chatId?String(c.groupId||c.characters?.[c.characterId]?.avatar||'character')+':'+c.chatId:'';};
     const pending=new Map();
+    const c=context?.();
     // Voice playback follows the saved chat message, not raw reasoning or planning output.
     let heroSpeaking=false,heroAudio=null,heroLastSpoken='',heroVoiceStatus=null;
     async function heroVoiceSettings(){const state=await bridgeRequest('/tts/status',{});heroVoiceStatus=state;return state;}
@@ -133,7 +134,6 @@ const initHeroTavern = async () => {
 
     function bridgeRequest(route,data){return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);reject(Error('Local service timed out.'))},600000);pending.set(id,{resolve,reject,timer});frame.contentWindow.postMessage({type:'hero-request',id,route,data},bridgeOrigin)});}
     let generationType='normal';
-    const c=context?.();
     if(c){
         c.eventSource.on(c.eventTypes.GENERATION_STARTED,(type)=>{generationType=type;});
         c.eventSource.on(c.eventTypes.GENERATE_AFTER_DATA,(data,dryRun)=>{

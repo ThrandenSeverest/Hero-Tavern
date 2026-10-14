@@ -69,11 +69,47 @@ export async function initStory({getContext,frame,show}){
   if(e.data?.type==='hero-story-command'){try{const result=await run(e.data.op,e.data.data);frame.contentWindow.postMessage({type:'hero-story-result',requestId:e.data.requestId,result},origin)}catch(error){frame.contentWindow.postMessage({type:'hero-story-result',requestId:e.data.requestId,error:error.message},origin);notify(error)}return;}
   if(e.data?.type==='hero-section-ready'&&['history','trackers','lore','inspector','creator'].includes(e.data.section))try{await sync()}catch(error){notify(error)};
  });
- const toolbar=document.createElement('div');toolbar.id='hero-session-toolbar';toolbar.innerHTML='<span id="hero-session-name">Select a chat</span><button data-story="new">Save & New Chat</button><button data-story="history">History</button><button data-story="trackers">Trackers</button><button data-story="lore">Lore</button><button data-story="inspector">Prompt Inspector</button>';
+ const toolbar=document.createElement('div');toolbar.id='hero-session-toolbar';toolbar.innerHTML='<span id="hero-session-name">Select a chat</span><button data-story="new">Save & New Chat</button><button data-story="history">History</button><button data-story="trackers">Trackers</button><button data-story="lore">Lore</button><button data-story="inspector">Prompt Inspector</button><button id="hero-leading-prompt-button" data-story="leading">Leading Prompt</button>';
  const sheld=document.querySelector('#sheld');if(sheld)sheld.prepend(toolbar);
+ const characterDrawer=document.querySelector('#right-nav-panel');
+ if(characterDrawer&&!document.getElementById('hero-character-leading-prompt')){
+  const button=document.createElement('button');button.id='hero-character-leading-prompt';button.type='button';
+  button.textContent='✎ Leading Prompt';button.title='Permanent theme and behavioral guidance for the selected character';
+  button.style.cssText='position:relative;z-index:1;display:block;margin:6px 0 12px;padding:8px 12px;border:1px solid #997b4e;border-radius:8px;background:#2e3748;color:#f6dfad;cursor:pointer';
+  button.onclick=()=>openLeadingPrompt().catch(notify);characterDrawer.prepend(button);
+ }
+
  const style=document.createElement('style');style.textContent='#hero-session-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#202939;border-bottom:1px solid #3a4960;flex-shrink:0;font:12px system-ui}#hero-session-name{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#hero-session-toolbar button,.hero-message-menu button{background:#27354a;border:1px solid #455874;color:#dce8f6;border-radius:6px;padding:5px 8px;cursor:pointer}.hero-message-menu{font:11px system-ui;margin:6px 0;display:flex;gap:5px;flex-wrap:wrap}.hero-story-dialog{position:fixed;inset:0;z-index:2500;background:#080c12cc;display:grid;place-items:center}.hero-story-dialog>section{background:#1e2939;color:#e6edf7;border:1px solid #53627b;border-radius:14px;padding:24px;width:min(680px,90vw);max-height:85vh;overflow:auto}.hero-story-dialog button,.hero-story-dialog input,.hero-story-dialog select,.hero-story-dialog textarea{font:inherit;background:#253247;color:#e6edf7;border:1px solid #53627b;border-radius:8px;padding:10px;margin:6px 3px}.hero-story-dialog textarea{width:90%;min-height:100px}.hero-story-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}';document.head.append(style);
- toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else{show(op);sync().catch(notify)}};
+ toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else{show(op);sync().catch(notify)}};
  function dialog(title){const bg=document.createElement('div');bg.className='hero-story-dialog';const box=document.createElement('section'),h=document.createElement('h2');h.textContent=title;box.append(h);bg.append(box);document.body.append(bg);const close=document.createElement('button');close.textContent='Cancel';close.onclick=()=>bg.remove();box.append(close);return {bg,box,close};}
+ async function openLeadingPrompt(){
+  if(!selected()||c().groupId){window.toastr?.info('Select a single character to edit their leading prompt.');return;}
+  const character=c().characters?.[c().characterId],ext=character?.data?.extensions?.hero_tavern||character?.extensions?.hero_tavern||{};
+  const {bg,box}=dialog('Character leading prompt · '+(character?.name||'Selected character'));
+  const description=document.createElement('p');description.textContent='Persistent guidance for this character: story theme, pacing, point of view, behavior rules or things the AI should keep in mind. This is added to every chat generation. It does not create a tracker or automatically update state.';
+  const field=document.createElement('textarea');field.id='hero-leading-prompt-field';field.maxLength=4000;field.rows=7;field.placeholder='Example: Keep the story grounded in political intrigue; the character remains suspicious, speaks tersely, and does not control the player’s dialogue.';field.value=String(ext.leadingPrompt||'');
+  const note=document.createElement('small');note.textContent='0–4,000 characters · Saved on the character card · Empty text disables it.';
+  const save=document.createElement('button');save.id='hero-leading-prompt-save';save.textContent='Save leading prompt';
+  const clear=document.createElement('button');clear.id='hero-leading-prompt-clear';clear.textContent='Clear prompt';
+  const status=document.createElement('p');status.setAttribute('role','status');
+  async function savePrompt(value){
+   save.disabled=true;clear.disabled=true;status.textContent='Saving to selected character…';
+   try{
+    const current=c().characters?.[c().characterId];
+    if(!current||current.avatar!==character.avatar)throw Error('Character selection changed. Reopen Leading Prompt.');
+    const currentProfile=current.data?.extensions?.hero_tavern||current.extensions?.hero_tavern||{};
+    const updated={...currentProfile,leadingPrompt:value.slice(0,4000)};
+    await c().writeExtensionField(c().characterId,'hero_tavern',updated);
+    if(current.data){current.data.extensions={...(current.data.extensions||{}),hero_tavern:updated}}
+    if(view?.session?.characterId)await rpc('/story/profile',{characterId:view.session.characterId,profile:updated});
+    status.textContent='Saved for '+(current.name||'this character')+'. It will apply to the next reply.';
+    setTimeout(()=>{if(bg.isConnected)bg.remove()},450);
+   }catch(error){status.textContent='Save failed: '+error.message;save.disabled=false;clear.disabled=false;}
+  }
+  save.onclick=()=>savePrompt(field.value);
+  clear.onclick=()=>{field.value='';savePrompt('')};
+  box.append(description,field,note,save,clear,status);
+ }
  async function newDialog(){const v=await sync();if(!v)throw Error('Select a chat first.');const {bg,box}=dialog('New chat · original story stays saved'),title=document.createElement('input');title.placeholder='Session title';box.append(title);const episode=document.createElement('select');episode.append(new Option('Default opening',''));for(const e of v.characterProfile?.episodes||v.session.episodes||[])episode.append(new Option(e.title,e.id));box.append(episode);const carry=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Review continuity for a new chapter';carry.append(summary);const keys=[];for(const d of v.session.definitions.filter(d=>d.visibility!=='hidden')){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=true;label.append(check,document.createTextNode(d.label));carry.append(label);keys.push({check,key:d.owner+':'+d.id});}const notes=document.createElement('textarea');notes.value=[v.memory.notes,v.memory.summary].filter(Boolean).join('\n');carry.append(notes);box.append(carry);
   for(const [mode,label]of [['fresh','Fresh Start'],['continue','Continue in New Session'],['duplicate','Duplicate Entire Chat']]){const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{try{button.disabled=true;await run('fork',{mode,title:title.value||undefined,episodeId:episode.value,carryKeys:mode==='continue'?keys.filter(x=>x.check.checked).map(x=>x.key):[],carryMemory:mode==='continue'?notes.value:''});bg.remove()}catch(error){button.disabled=false;notify(error)}};box.append(button);}
   for(const mark of v.session.bookmarks){const button=document.createElement('button');button.textContent='Start from '+mark.label;button.onclick=async()=>{try{const index=v.messages.findIndex(m=>m.extra.heroMessageId===mark.messageId);await run('fork',{mode:'branch',atIndex:index,bookmarkId:mark.id,title:title.value||mark.label});bg.remove()}catch(error){notify(error)}};box.append(button);}
@@ -219,7 +255,8 @@ export async function initStory({getContext,frame,show}){
    description:String(cardData.description||'').slice(0,4400),
    personality:String(cardData.personality||'').slice(0,2000),
    scenario:String(cardData.scenario||'').slice(0,1500),
-   mes_example:String(cardData.mes_example||'').slice(0,1000)
+   mes_example:String(cardData.mes_example||'').slice(0,1000),
+   leadingPrompt:String(cardData.extensions?.hero_tavern?.leadingPrompt||char?.extensions?.hero_tavern?.leadingPrompt||'').slice(0,4000)
  };
  if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
  let generating=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});

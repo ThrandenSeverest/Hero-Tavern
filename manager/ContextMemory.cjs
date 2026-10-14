@@ -26,8 +26,16 @@ function createMemory({root,countTokens,complete,setDiagnostics=()=>{}}){
    ['Canonical appearance and background',character.description,3100],
    ['Personality, speech, mannerisms and motivations',character.personality,1700],
    ['Scenario and relationships',character.scenario,1100],
-   ['Dialogue examples',character.mes_example,650]
-  ].map(([label,value,max])=>value?'['+label+']\n'+String(value).slice(0,max):'').filter(Boolean).join('\n');
+   ['Dialogue examples',character.mes_example,650],
+   ['Character leading prompt — persistent scene guidance, not a status or dialogue',character.leadingPrompt,2900]
+  ].map(([label,value,max])=>{
+    if(!value)return '';
+    const text=String(value).slice(0,max);
+    // SillyTavern already puts most character-card fields into the system prompt.
+    // Avoid repeating them verbatim and exhausting context for dialogue history.
+    if(!label.startsWith('Character leading prompt')&&base.includes(String(value).slice(0,Math.min(70,String(value).length))))return '';
+    return '['+label+']\n'+text;
+   }).filter(Boolean).join('\n');
   const characterBlock=fields?'<|im_start|>system\n[Canonical SillyTavern character contract]\n'+fields+
    '\nPortray THIS character, not a generic assistant. Respect their appearance, habits, temperament, motives, abilities and way of speaking. Respond in-scene with concrete reactions; never write the player’s choices, speech or actions. Current confirmed tracker state overrides older contradictory details, but not established identity.<|im_end|>\n':'';
   const render=()=>base+characterBlock+(memory.notes||memory.summary?'<|im_start|>system\n[Continuity memory — past events, not new dialogue]\n'+memory.notes+'\n'+memory.summary+'<|im_end|>\n':'')+chatML(all.slice(start))+tail;

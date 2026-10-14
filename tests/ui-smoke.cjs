@@ -63,6 +63,11 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await panel.locator('#tts-profile-name').fill('QA designed voice');
   await panel.locator('#tts-profile-save').click();
   await waitFor(async()=>(await panel.locator('#tts-profile-list option').allTextContents()).some(t=>t.includes('QA designed voice')));
+  // Central capability checker must run in the real manager iframe, not just unit tests.
+  await panel.locator('[data-tab="model-center"]').click();
+  await panel.locator('#hero-capability-check').click();
+  await waitFor(async()=>{const text=await panel.locator('#hero-capability-results').innerText();return text.includes('Character Chat')&&text.includes('Adventure')&&text.includes('Voice');},30000);
+  await panel.locator('[data-tab="models"]').click();
   await page.locator('.hero-nav[data-hero="models"]').click();
 
   await waitFor(async()=>(await panel.locator('#state').textContent()).includes('No model selected'));

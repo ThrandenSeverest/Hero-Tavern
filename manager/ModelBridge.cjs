@@ -84,7 +84,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const backendURL = 'http://127.0.0.1:' + backendPort;
     let visionBusy=false,visionSetup=null,visionSetupError='';
     let generationState = 'idle', contextDiagnostics = null,imageJob=false,textPausedForImages=false,queuedInference=0,launchConfig=null,launchArgs=[];
-    const {profileFor}=require('./ModelProfiles.cjs');let loadedContext=0;
+    const {profileFor,modelRequest}=require('./ModelProfiles.cjs');let loadedContext=0;
     const story=createStoryStore(root,{tavernPath});
     const diskCare=createDiskCare(root);
     const imageGallery=createImageGallery(root);
@@ -382,6 +382,26 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             const data = JSON.parse(body || '{}');
             if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
             if(req.url==='/model-tests/record'){json(200,modelTests.record(data));return;}
+            if(req.url==='/model-tests/text'){
+                // Benchmark instruction following in an isolated completion, not the chat/character pipeline.
+                // Never feed character card, chat history, Writer templates or global roleplay instructions.
+                if(imageJob||textPausedForImages)throw Error('Finish image generation and restore the text model before the text test.');
+                if(!selected())throw Error('Select a local text model in Models first.');
+                await ensureText();
+                const preset=modelTests.presets().text2text;
+                const profile=profileFor(root,runningModel||selected());
+                const prompt='<|im_start|>system\nYou are performing a strict software output check, NOT a character conversation, roleplay, story, or writing task. Print the exact requested two words and stop. Do not explain or add formatting. /no_think<|im_end|>\n<|im_start|>user\n'+preset.prompt+'<|im_end|>\n<|im_start|>assistant\n';
+                const control=new AbortController();
+                res.on('close',()=>{if(!res.writableEnded)control.abort()});
+                const start=Date.now();
+                const response=await engineFetch(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({prompt,max_tokens:32,temperature:0,top_p:1,top_k:1,rep_pen:1,stop:['<|im_end|>','\n']},profile)),signal:control.signal,timeoutMs:30000});
+                if(!response.ok)throw Error('Text model diagnostic HTTP '+response.status);
+                const result=await response.json();
+                const text=String(result.choices?.[0]?.text||'').trim();
+                json(200,{ok:true,model:runningModel||selected(),template:profile.Template,text,elapsedMs:Date.now()-start,isolated:true});
+                return;
+            }
+
             if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');

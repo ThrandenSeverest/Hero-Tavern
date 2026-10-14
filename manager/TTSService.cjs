@@ -15,11 +15,37 @@ function splitSpeech(raw,{speaker='Character',narrator='Narrator'}={}){
 function createTTS(root){
  const file=path.join(root,'tts-settings.json');let settings={engine:'flash',variant:'custom-0.6',device:'cpu',language:'Auto',speaker:'Ryan',narratorSpeaker:'Ryan',enabled:false,autoPlay:false,dialogueReference:'',narratorReference:'',referenceText:'',narratorReferenceText:'',style:''};
  try{settings={...settings,...JSON.parse(fs.readFileSync(file,'utf8'))}}catch{}
- let child=null,pending=new Map(),sequence=0,install=null,installOutput='',fault='',busy=false;
+ let child=null,pending=new Map(),sequence=0,install=null,installOutput='',fault='',busy=false,downloader=null,downloadOutput='',downloadError='',downloadKind='';
  const voices=path.join(root,'Voices'),cache=path.join(root,'TTSCache');fs.mkdirSync(voices,{recursive:true});fs.mkdirSync(cache,{recursive:true});
  const executable=()=>{const dir=path.join(root,'TTSRuntime',settings.engine);return process.platform==='win32'?path.join(dir,'Scripts','python.exe'):path.join(dir,'bin','python');};
- const status=()=>({settings,ready:fs.existsSync(executable())&&fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed')),running:!!child,busy,installing:!!install,installOutput:installOutput.slice(-5000),error:fault,voices:fs.readdirSync(voices).filter(x=>/^[a-z0-9_-]+\.wav$/i.test(x))});
+ const weightsDir=(engine,variant)=>path.join(root,'TTSModels',engine,engine==='flash'?'flash':variant);
+ const installedWeight=(engine,variant)=>fs.existsSync(path.join(weightsDir(engine,variant),'.hero-downloaded'));
+ const currentKind=()=>settings.engine==='flash'?'flash':settings.variant;
+ const status=()=>({settings,ready:fs.existsSync(executable())&&fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed')),weightsReady:installedWeight(settings.engine,settings.variant),downloadedModels:{flash:installedWeight('flash','flash'),...Object.fromEntries(['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(variant=>[variant,installedWeight('qwen',variant)]))},running:!!child,busy,installing:!!install,installOutput:installOutput.slice(-5000),downloading:!!downloader,downloadKind,downloadOutput:downloadOutput.slice(-6000),downloadError,error:fault,voices:fs.readdirSync(voices).filter(x=>/^[a-z0-9_-]+\.wav$/i.test(x))});
  const stop=()=>{if(child){child.kill();child=null;}for(const p of pending.values())p.reject(Error('Speech engine stopped'));pending.clear();};
+
+ function downloadModel(){
+   if(install||downloader)throw Error('Finish the running voice installation or download first.');
+   if(!status().ready)throw Error('Install selected voice engine dependencies first, then download its model weights.');
+   const engine=settings.engine,variant=settings.variant,kind=currentKind(),target=weightsDir(engine,variant);
+   if(installedWeight(engine,variant))return {alreadyInstalled:true,kind,path:target};
+   fs.mkdirSync(target,{recursive:true});
+   downloadOutput='Starting '+(engine==='flash'?'Chatterbox Flash':'Qwen3-TTS '+variant)+' model download…';
+   downloadError='';downloadKind=kind;
+   downloader=spawn(executable(),['-u',path.join(root,'TTSModelDownload.py'),kind,target],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1',HF_HUB_ENABLE_HF_TRANSFER:'0'}});
+   const current=downloader,log=data=>{downloadOutput=(downloadOutput+data.toString()).slice(-12000)};
+   current.stdout.on('data',log);current.stderr.on('data',log);
+   current.on('error',e=>{downloadError=e.message;if(downloader===current)downloader=null;});
+   current.on('close',code=>{if(downloader!==current)return;downloader=null;if(code!==0||!installedWeight(engine,variant))downloadError=downloadOutput.slice(-1100)||'Model download failed';else downloadOutput+='\nVoice model ready.';});
+   return {started:true,kind,path:target};
+ }
+ function cancelModelDownload(){
+   if(!downloader)return {cancelled:false};const p=downloader;downloader=null;
+   if(process.platform==='win32'&&p.pid)spawn('taskkill.exe',['/PID',String(p.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'}).on('error',()=>{});
+   else p.kill();
+   downloadError='Download interrupted; partial files can be resumed safely.';return {cancelled:true};
+ }
+
  const configure=next=>{if(!next||typeof next!=='object')throw Error('Invalid voice settings');const previous=settings.engine;const updated={...settings};for(const key of ['engine','variant','device','language','speaker','narratorSpeaker','enabled','autoPlay','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(next[key]!==undefined)updated[key]=next[key];if(!['flash','qwen'].includes(updated.engine))throw Error('Choose Flash or Qwen3-TTS');if(!['cpu','cuda'].includes(updated.device))throw Error('Invalid device');if(!['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].includes(updated.variant))throw Error('Invalid Qwen3 variant');for(const key of ['speaker','narratorSpeaker','language','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(typeof updated[key]!=='string'||updated[key].length>1200)throw Error('Invalid voice setting');for(const key of ['enabled','autoPlay'])if(typeof updated[key]!=='boolean')throw Error('Invalid playback setting');settings=updated;fs.writeFileSync(file,JSON.stringify(settings,null,2));if(previous!==settings.engine)stop();return status();};
  const installEngine=()=>{if(install)throw Error('Installation already running');if(child)stop();const target=path.join(root,'TTSRuntime',settings.engine);fs.mkdirSync(path.dirname(target),{recursive:true});
   // Use an explicit Python executable. pip installation is isolated from KoboldCpp and ComfyUI.
@@ -33,7 +59,7 @@ function createTTS(root){
   current.on('error',e=>{fault='Python unavailable: '+e.message;install=null});
   current.on('close',code=>{if(install!==current)return;if(code!==0){fault='Python environment creation failed: '+installOutput;install=null;return;}
    installOutput+='\nInstalling '+engine+' dependencies…';const pip=process.platform==='win32'?path.join(target,'Scripts','python.exe'):path.join(target,'bin','python');
-   const packages=engine==='flash'?['chatterbox-flash']:['qwen-tts','soundfile'];
+   const packages=engine==='flash'?['chatterbox-flash','huggingface_hub']:['qwen-tts','soundfile','huggingface_hub'];
    const args=['-m','pip','install','--upgrade',...packages];install=spawn(pip,args,{windowsHide:true,stdio:['ignore','pipe','pipe']});const pkg=install;pkg.stdout.on('data',log);pkg.stderr.on('data',log);
    pkg.on('error',e=>{fault='Dependency installation failed: '+e.message;install=null});pkg.on('close',c=>{if(install!==pkg)return;if(c){fault='TTS dependency installation failed; check log and compatible PyTorch CUDA wheels.';install=null;return;}
     if(engine==='flash'){
@@ -44,7 +70,7 @@ function createTTS(root){
     fs.writeFileSync(path.join(target,'.installed'),new Date().toISOString());install=null;});
   });return status();
  };
- function start(){if(child)return child;if(!fs.existsSync(executable()))throw Error('Install the selected TTS engine first in Voices settings.');
+ function start(){if(child)return child;if(!fs.existsSync(executable()))throw Error('Install the selected TTS engine first in Voices settings.');if(!installedWeight(settings.engine,settings.variant))throw Error('Download the selected TTS model weights in Voice Models first.');
   const script=path.join(root,'TTSWorker.py');child=spawn(executable(),['-u',script],{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1'}});fault='';
   let buffer='';child.stdout.on('data',d=>{buffer+=d.toString();let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n);buffer=buffer.slice(n+1);try{const item=JSON.parse(line),p=pending.get(item.id);if(!p)continue;pending.delete(item.id);item.ok?p.resolve(item):p.reject(Error(item.error||'Speech synthesis failed'));}catch(e){fault=e.message}}});
   child.stderr.on('data',d=>{const s=d.toString();if(/Traceback|Error:|CUDA out of memory/i.test(s))fault=s.slice(-600)});
@@ -63,6 +89,6 @@ function createTTS(root){
  function importVoice(data){const name=String(data.name||'').toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,60);if(!name)throw Error('Choose a voice name');const buf=Buffer.from(String(data.base64||''),'base64');if(buf.length<1000||buf.length>12000000||buf.toString('ascii',0,4)!=='RIFF'||buf.toString('ascii',8,12)!=='WAVE')throw Error('Import a WAV sample up to 12 MB');fs.writeFileSync(path.join(voices,name+'.wav'),buf);return status();}
  function removeVoice(data){const name=String(data.name||'');if(!/^[a-z0-9_-]+\.wav$/.test(name))throw Error('Invalid voice');fs.rmSync(path.join(voices,name),{force:true});return status();}
  function readAudio(url){if(!/^\/tts\/audio\/[a-f0-9]{32}\.wav$/.test(url))return null;const f=path.join(cache,path.basename(url));return fs.existsSync(f)?f:null;}
- return {splitSpeech,status,configure,installEngine,speak,importVoice,removeVoice,readAudio,stop};
+ return {splitSpeech,status,configure,installEngine,downloadModel,cancelModelDownload,speak,importVoice,removeVoice,readAudio,stop};
 }
 module.exports={createTTS,splitSpeech};

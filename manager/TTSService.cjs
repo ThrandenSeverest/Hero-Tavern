@@ -24,7 +24,11 @@ function createTTS(root){
  const installEngine=()=>{if(install)throw Error('Installation already running');if(child)stop();const target=path.join(root,'TTSRuntime',settings.engine);fs.mkdirSync(path.dirname(target),{recursive:true});
   // Use an explicit Python executable. pip installation is isolated from KoboldCpp and ComfyUI.
   const python=process.env.HERO_TTS_PYTHON||'python';const engine=settings.engine;installOutput='Creating isolated Python environment…';fault='';
-  install=spawn(python,['-m','venv',target],{windowsHide:true,stdio:['ignore','pipe','pipe']});const current=install;
+  if(process.platform==='win32'&&!process.env.HERO_TTS_PYTHON){
+   // Portable uv downloads managed Python 3.11; never requires a system Python or Git.
+   const ps="$ErrorActionPreference='Stop'; $dir=$env:HERO_TTS_RUNTIME; New-Item -ItemType Directory -Force $dir | Out-Null; $uv=Join-Path $dir 'uv.exe'; if(-not (Test-Path $uv)){ $zip=Join-Path $dir 'uv.zip'; $unpack=Join-Path $dir 'uv-package'; Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile $zip -UseBasicParsing; Expand-Archive -Path $zip -DestinationPath $unpack -Force; $exe=Get-ChildItem -LiteralPath $unpack -Recurse -Filter uv.exe | Select-Object -First 1; if(-not $exe){throw 'uv.exe missing from official archive'}; Copy-Item $exe.FullName $uv -Force; Remove-Item $zip -Force; Remove-Item $unpack -Recurse -Force }; $env:UV_PYTHON_INSTALL_DIR=Join-Path $dir 'python'; & $uv python install 3.11; if($LASTEXITCODE -ne 0){throw 'Portable Python download failed'}; & $uv venv $env:HERO_TTS_TARGET --python 3.11 --python-preference only-managed; if($LASTEXITCODE -ne 0){throw 'Creating TTS environment failed'}";
+   install=spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',ps],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,HERO_TTS_RUNTIME:path.join(root,'TTSRuntime'),HERO_TTS_TARGET:target}});
+  }else install=spawn(python,['-m','venv',target],{windowsHide:true,stdio:['ignore','pipe','pipe']});const current=install;
   const log=x=>{installOutput+=(x.toString());installOutput=installOutput.slice(-12000)};current.stdout.on('data',log);current.stderr.on('data',log);
   current.on('error',e=>{fault='Python unavailable: '+e.message;install=null});
   current.on('close',code=>{if(install!==current)return;if(code!==0){fault='Python environment creation failed: '+installOutput;install=null;return;}

@@ -105,7 +105,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     }
     if(parsed.issues.length)diagnostics.errors.push(...parsed.issues.slice(0,8));
     // A completely malformed output is an actual retryable failure, not a clean no-op.
-    if(diagnostics.errors.length&&!updates.length)throw Error('Tracker extraction could not validate any changes: '+diagnostics.errors.slice(0,2).join(' | '));
+    if(diagnostics.errors.length&&!updates.length)throw Error('Tracker extraction could not validate any changes (invalid operations protocol): '+diagnostics.errors.slice(0,2).join(' | '));
     diagnostics.partial=diagnostics.errors.length>0;
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(updates.length){

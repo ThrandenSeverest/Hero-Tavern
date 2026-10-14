@@ -32,6 +32,8 @@ test('model testing presets contain all four operations and keep reports',()=>{
   const a=app.record({kind:'text2text',model:'Mock',prompt:PRESETS.text2text.prompt,text:'BLUE LANTERN',status:'passed',elapsedMs:20});
   const b=app.record({kind:'text2text',model:'Mock',prompt:PRESETS.text2text.prompt,text:'OKAY I UNDERSTAND',status:'passed',elapsedMs:25});
   assert.equal(a.status,'passed');assert.equal(b.status,'warning');assert.equal(app.history().length,2);
+  const skipped=app.record({kind:'image2image',model:'qwen21-q5km',status:'skipped',notes:['Skipped on 12 GB GPU for safety.']});
+  assert.equal(skipped.status,'skipped');assert.ok(skipped.notes[0].includes('12 GB'));
   assert.throws(()=>app.record({kind:'text2image',model:'Mock',imageName:'../../../secret.png',status:'passed'}));
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
@@ -61,4 +63,20 @@ test('Writer saves and regenerates independent generation segments without losin
   assert.ok(observed[2].text.includes(secondText));
   assert.ok(refreshed.story.history.some(x=>x.text===b.story.text));
  }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+
+test('model tests use bounded cancellable requests and standalone roleplay-free text benchmark',()=>{
+ const panel=fs.readFileSync(path.join(__dirname,'../manager/ModelTestsPanel.js'),'utf8');
+ const bridge=fs.readFileSync(path.join(__dirname,'../manager/ModelBridge.cjs'),'utf8');
+ const markup=fs.readFileSync(path.join(__dirname,'../manager/ModelPanel.html'),'utf8');
+ const studio=fs.readFileSync(path.join(__dirname,'../manager/ImageStudio.cjs'),'utf8');
+ assert.match(panel,/model-test-stop/);
+ assert.match(panel,/terminateModelTest/);
+ assert.match(panel,/model-test-include-heavy/);
+ assert.match(panel,/modelTest:true/);
+ assert.match(panel,/\/model-tests\/text/);
+ assert.match(markup,/Include heavy Qwen image editing/);
+ assert.match(bridge,/req.url==='\/model-tests\/text'/);
+ assert.match(bridge,/input.modelTest===true/);
+ assert.match(studio,/testTimeoutMs/);
 });

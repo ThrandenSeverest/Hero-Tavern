@@ -15,6 +15,7 @@ const {createLoRAManager}=require('./LoRAManager.cjs');
 const {createComfyRuntime}=require('./ComfyRuntime.cjs');
 const {createImageModelCenter}=require('./ImageModelCenter.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
+const {requestExit}=require('./AppLifecycle.cjs');
 const {runtimeEnvironment}=require('./EngineRuntime.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
@@ -308,12 +309,16 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
            res.writeHead(202,{'Content-Type':'application/json'});res.end(JSON.stringify({stopping:true}));
            setImmediate(async()=>{
              try{
-               studio.cancel();tuner.cancel();pipeline.abort();tts.stop();
+               studio.cancel();tuner.cancel();pipeline.abort();tts.stop();assistant.cancel();
+               // Stop only the ComfyUI process started by this app; never an external ComfyUI service.
                await comfy.cancel().catch(()=>{});
+               comfy.models.cancel();comfyRuntime.cancelInstall();download?.process?.kill();
+               await comfyRuntime.stop().catch(e=>fs.appendFileSync(path.join(logs,'engine-shutdown.log'),'ComfyUI: '+e.message+'\n'));
                if(images.snapshot().running)await images.action('/images/stop',{});
                if(thinking.snapshot().running)thinking.stop();
+               if(vision.snapshot().running)vision.stop();
                stopBackend('stop');
-               await waitUntil(()=>!backend&&!images.snapshot().running&&!thinking.snapshot().running,null,35000).catch(e=>fs.appendFileSync(path.join(logs,'engine-shutdown.log'),e.message+'\n'));
+               await waitUntil(()=>!backend&&!images.snapshot().running&&!thinking.snapshot().running&&!vision.snapshot().running&&!comfyRuntime.status().running,null,35000).catch(e=>fs.appendFileSync(path.join(logs,'engine-shutdown.log'),e.message+'\n'));
                server.close();
              }catch(e){try{fs.appendFileSync(path.join(logs,'engine-shutdown.log'),'Launcher shutdown: '+e.message+'\n')}catch{};server.close();}
            });return;
@@ -371,6 +376,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
             if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');

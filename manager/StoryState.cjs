@@ -23,7 +23,7 @@ function validateDefinition(input){
  d.alwaysInject=d.alwaysInject!==false;
  if(d.rules!==undefined&&(typeof d.rules!=='object'||Array.isArray(d.rules)||!d.rules))throw Error('Status rules must map statuses to story effects.');
  if(d.transitions!==undefined&&(typeof d.transitions!=='object'||Array.isArray(d.transitions)||!d.transitions))throw Error('Status transitions must map statuses to allowed next values.');
- d.updateMode=d.updateMode||'approval';if(!['automatic','approval','manual'].includes(d.updateMode))throw Error('Invalid tracker update mode.');
+ d.updateMode=d.updateMode||'automatic';if(!['automatic','approval','manual'].includes(d.updateMode))throw Error('Invalid tracker update mode.');
  d.visibility=d.visibility||'player';if(!['player','hidden'].includes(d.visibility))throw Error('Invalid visibility.');d.version=Number(d.version)||1;d.relevantKeywords=Array.isArray(d.relevantKeywords)?d.relevantKeywords.map(String):[];
  if(d.type==='number'||d.type==='relationship'){d.min=Number.isFinite(d.min)?d.min:0;d.max=Number.isFinite(d.max)?d.max:100;if(d.min>d.max)throw Error('Invalid tracker range.');d.maxDelta=Number.isFinite(d.maxDelta)?Math.max(0,d.maxDelta):10;}
  if(d.type==='enum'){if(!Array.isArray(d.allowedValues)||!d.allowedValues.length||d.allowedValues.some(x=>typeof x!=='string'))throw Error('Enum needs allowed statuses.');}
@@ -72,10 +72,13 @@ function conditionPass(condition,state,context={}){
 }
 function activeContext(session,messages,query='',cap=24){
  const state=stateAt(session,messages),text=String(query).toLowerCase(),selected=[],omitted=[];
- for(const d of session.definitions){const key=keyOf(d),relevant=d.enabled!==false&&(d.alwaysInject!==false||d.relevantKeywords.some(x=>text.includes(x.toLowerCase())));if(Object.hasOwn(state,key)&&relevant&&selected.length<cap){selected.push({key,label:d.label,category:d.category,description:d.description,value:state[key],unit:d.unit,rule:[d.rules?.[String(state[key])],d.instructions,d.changeRules].filter(Boolean).join(' | '),hidden:d.visibility==='hidden'});}else omitted.push(key);}
+ for(const d of session.definitions){const key=keyOf(d),relevant=d.enabled!==false&&(d.alwaysInject!==false||d.relevantKeywords.some(x=>text.includes(x.toLowerCase())));if(Object.hasOwn(state,key)&&relevant&&selected.length<cap){selected.push({key,label:d.label,category:d.category,description:d.description,value:state[key],unit:d.unit,rule:[d.rules?.[String(state[key])],d.instructions].filter(Boolean).join(' | ').slice(0,240),hidden:d.visibility==='hidden'});}else omitted.push(key);}
  const ctx={text,location:selected.filter(x=>/location/i.test(x.key)).map(x=>x.value).join(' '),time:selected.filter(x=>/time/i.test(x.key)).map(x=>x.value).join(' ')};
  const lore=(session.lore||[]).map(e=>{const keyword=!e.keywords?.length||e.keywords.some(k=>text.includes(k.toLowerCase()));const active=keyword&&conditionPass(e.condition,state,ctx);return {...e,active,reason:!keyword?'No keyword match':!active?'State condition not met':'Keyword and state condition matched'};});
- return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Confirmed story state — authoritative over conflicting older dialogue or memory; respect naturally, do not recite]\n'+selected.map(x=>x.label+(x.unit?' ('+x.unit+')':'')+': '+JSON.stringify(x.value)+(x.description?' — '+x.description:'')+(x.rule?' | Story and change rules: '+x.rule:'')).join('\n')+'\n'+lore.filter(e=>e.active).map(e=>'[Lore '+e.id+'] '+e.text).join('\n')};
+ const lines=selected.map(x=>x.label+(x.unit?' ('+x.unit+')':'')+': '+JSON.stringify(x.value).slice(0,340)+(x.description?' — '+x.description.slice(0,90):'')+(x.rule?' | Behavior: '+x.rule:''));
+ let remaining=2600;const injected=[];for(const line of lines){if(remaining<80)break;injected.push(line.slice(0,remaining));remaining-=line.length;}
+ const loreBlock=lore.filter(e=>e.active).map(e=>'[Lore '+e.id+'] '+e.text).join('\n').slice(0,2000);
+ return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Confirmed story state — current scene and character; guide behavior naturally, never recite values]\n'+injected.join('\n')+'\n'+loreBlock};
 }
 function propose(session,messages,patch,{manual=false,approve=false}={}){
  if(!Array.isArray(patch)||patch.length>100)throw Error('State analysis must return at most 100 changes.');const state=stateAt(session,messages),events=[];
@@ -85,7 +88,7 @@ function propose(session,messages,patch,{manual=false,approve=false}={}){
   const evidence=String(item.evidence||'');if(!manual&&(!evidence||!String(source.mes).includes(evidence)))throw Error('State change needs an exact evidence quote from its source message.');
   if(!manual&&session.events.some(e=>e.key===item.key&&e.sourceMessageId===item.sourceMessageId&&e.status==='confirmed'&&e.authority==='user'))continue;
   const prior=state[item.key];if(d.type==='record'&&!manual){for(const field of Object.keys(prior))if(!Object.hasOwn(item.value,field))throw Error('Preserve unchanged record fields: '+field);if(Array.isArray(prior.recentMeals)&&prior.recentMeals.slice(-19).some(meal=>!item.value.recentMeals?.some(next=>JSON.stringify(next)===JSON.stringify(meal))))throw Error('Preserve recent established meal history.');}if(d.type==='injuries'&&!manual)validateInjuryChange(prior,item.value);if(!manual&&JSON.stringify(prior)===JSON.stringify(item.value))continue;if(d.type==='enum'&&d.transitions?.[prior]&&!d.transitions[prior].includes(item.value)&&!manual&&!approve)throw Error('This status transition is not allowed.');
-  const major=d.type==='number'&&Math.abs(item.value-prior)>d.maxDelta||d.type==='list'&&JSON.stringify(prior)!==JSON.stringify(item.value)||d.type==='quest'&&['complete','failed'].includes(item.value.status)||d.type==='timer'&&item.value.clock==='wall';
+  const major=d.type==='number'&&Math.abs(item.value-prior)>d.maxDelta||d.type==='quest'&&['complete','failed'].includes(item.value.status)||d.type==='timer'&&item.value.clock==='wall';
   const status=manual||approve?'confirmed':d.updateMode==='approval'||major||item.ambiguous?'pending':'confirmed';
   const sourceSignature=signature(source),eventId=manual?crypto.randomUUID():hash({key:item.key,sourceMessageId:item.sourceMessageId,sourceSignature,value:item.value});
   if(session.events.some(e=>e.eventId===eventId&&e.status!=='invalid')||events.some(e=>e.eventId===eventId))continue;

@@ -12,7 +12,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
  // This is the disposable cloned UI fixture, never a user's installed profile.
  fs.rmSync(path.join(st,'data'),{recursive:true,force:true});
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'ModelTestsPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'SharedTools.js', 'ModelTestsPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -27,16 +27,42 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
  try{
   await waitFor(async()=>(await fetch('http://127.0.0.1:8000/')).ok);
   browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});
-  const errors=[];debugPage=page;debugErrors=errors;page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
+  const errors=[];debugPage=page;debugErrors=errors;page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.status()>=400&&r.url().includes('127.0.0.1:8001'))console.log('Bridge request failed:',r.url(),r.status(),await r.text().catch(()=>''));});page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
   await page.goto('http://127.0.0.1:8000/');await page.locator('#hero-shell').waitFor({timeout:120000});
   await page.locator('#hero-welcome').waitFor({state:'visible'});
   await waitFor(async()=>await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')}));
   await page.screenshot({path:path.join(repo,'.ci/hero-home-qa.png')});await page.locator('#hero-welcome-close').click();await page.waitForTimeout(1200);if(!await page.locator('#hero-welcome').isHidden())throw Error('Dismissed welcome returned over controls');
+  // User appearance settings and native recent-chat navigation are accessible from the Hero sidebar.
+  await page.locator('.hero-nav[data-hero="appearance"]').click();
+  await page.locator('#hero-appearance').waitFor({state:'visible'});
+  await page.locator('#hero-font-size').evaluate(el=>{el.value='21';el.dispatchEvent(new Event('input',{bubbles:true}))});
+  await page.locator('#hero-panel-opacity').evaluate(el=>{el.value='100';el.dispatchEvent(new Event('input',{bubbles:true}))});
+  const appearance=await page.evaluate(()=>({
+   font:document.documentElement.style.getPropertyValue('--hero-content-font'),
+   opacity:document.documentElement.style.getPropertyValue('--hero-pane-opacity'),
+   stored:JSON.parse(localStorage.getItem('hero.tavern.appearance.v2'))
+  }));
+  if(appearance.font!=='21px'||appearance.opacity!=='1'||appearance.stored.font!==21)throw Error('Appearance settings did not persist: '+JSON.stringify(appearance));
+  await page.locator('#hero-appearance-reset').click();
+  await page.locator('.hero-nav[data-hero="recent-chats"]').click();
+  await page.locator('#hero-recent').waitFor({state:'visible'});
+  await waitFor(async()=>(await page.locator('#hero-recent-status').textContent()).includes('saved chats'));
+  await page.locator('.hero-nav[data-hero="chat"]').click();
   await page.locator('.hero-nav[data-hero="models"]').click();const panel=page.frameLocator('#hero-model-frame');
   await panel.getByRole('button',{name:'Download Qwen default'}).waitFor();
   await panel.locator('#models-open-tts').click();
   await panel.locator('#tts-download').waitFor({state:'visible'});
   if(!await panel.locator('#tts-model-downloads').count())throw Error('TTS download status missing.');
+  // Real bridge + model-specific controls: presets never require a reference WAV.
+  await panel.locator('#tts-engine').selectOption('qwen');
+  await panel.locator('#tts-variant').selectOption('custom-0.6');
+  if(await panel.locator('#tts-ref-text').isVisible()||await panel.locator('#tts-style').isVisible())throw Error('Preset 0.6B exposes unsupported clone/style controls');
+  await panel.locator('#tts-variant').selectOption('design-1.7');
+  if(!await panel.locator('#tts-style').isVisible()||await panel.locator('#tts-speaker').isVisible())throw Error('VoiceDesign has wrong controls');
+  await panel.locator('#tts-style').fill('A warm adult storyteller voice');
+  await panel.locator('#tts-profile-name').fill('QA designed voice');
+  await panel.locator('#tts-profile-save').click();
+  await waitFor(async()=>(await panel.locator('#tts-profile-list option').allTextContents()).some(t=>t.includes('QA designed voice')));
   await page.locator('.hero-nav[data-hero="models"]').click();
 
   await waitFor(async()=>(await panel.locator('#state').textContent()).includes('No model selected'));
@@ -73,6 +99,26 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   if(passageLayout.width<Math.min(passageLayout.editor-50,600)||passageLayout.card<passageLayout.width-70)throw Error('Writer cards collapsed into narrow columns: '+JSON.stringify(passageLayout));
   if(passageLayout.visibleHeight<130||passageLayout.scrollHeight>passageLayout.visibleHeight+5)throw Error('Writer text area is vertically clipped: '+JSON.stringify(passageLayout));
 
+  // Re-render after a long manuscript edit and ensure card scroll position survives.
+  await writer.locator('#writer-view-mode').click();
+  await writer.locator('#manuscript').fill(Array.from({length:65},(_,i)=>'Chapter passage '+i+': The characters remember where they stood while the rain fell across the village.').join('\n\n'));
+  await writer.locator('#recap').fill('Previous chapters: Lyra reached the village after the bridge collapsed.');
+  await writer.locator('#save').click();
+  await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved'));
+  await writer.locator('#writer-view-mode').click();
+  const scrollTest=await writer.locator('#writer-segments').evaluate(async el=>{
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const range=el.scrollHeight-el.clientHeight;
+   el.scrollTop=Math.max(0,Math.floor(range*.5));
+   const before=el.scrollTop,view=el.ownerDocument.defaultView;
+   view.renderPassages();
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   return {before,after:el.scrollTop,max:range};
+  });
+  if(scrollTest.max<100||Math.abs(scrollTest.after-scrollTest.before)>35)throw Error('Writer passages jumped after rerender: '+JSON.stringify(scrollTest));
+  const writerRecap=await writer.locator('#recap').inputValue();
+  if(!writerRecap.includes('bridge collapsed'))throw Error('Writer continuity recap was not persisted in the editor');
+
   if(!await writer.locator('#history button').count())throw Error('Writer failed to preserve revision history');
   await writer.locator('#fork').click();await waitFor(async()=>(await writer.locator('#title').inputValue()).includes('branch'));
   await page.screenshot({path:path.join(repo,'.ci/hero-writer-qa.png')});
@@ -98,9 +144,14 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   const clip=await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text')].some(el=>el.scrollWidth>el.clientWidth+2));if(clip)throw Error('Character drawer clips dialogue');
   await page.screenshot({path:path.join(repo,'.ci/hero-characters-qa.png')});
   // Generate through the actual chat event path, not only a manual API request.
+  await page.locator('#hero-character-leading-prompt').click();
+  await page.locator('#hero-leading-prompt-field').fill('Scene theme: slow-burning mystery; remain terse and suspicious.');
+  await page.locator('#hero-leading-prompt-save').click();
+  await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();return c.characters[c.characterId]?.data?.extensions?.hero_tavern?.leadingPrompt?.includes('slow-burning mystery')}));
+  await page.locator('.hero-story-dialog').waitFor({state:'hidden'});
   await page.locator('.hero-nav[data-hero="chat"]').click();
   await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();for(const message of [{name:c.name1,is_user:true,is_system:false,mes:'HISTORY_MARKER: we promised a blue cloak.',send_date:new Date().toISOString()},{name:c.name2,is_user:false,is_system:false,mes:'I will keep that promise.',send_date:new Date().toISOString()},{name:c.name1,is_user:true,is_system:false,mes:'What did we promise?',send_date:new Date().toISOString()}]){c.chat.push(message);c.addOneMessage(message)}await c.generate('normal',{automatic_trigger:true});});
-  const historyStats=await(await fetch('http://127.0.0.1:5001/api/extra/teststats')).json();if(!historyStats.lastPrompt.includes('HISTORY_MARKER')||!historyStats.lastPrompt.includes('What did we promise?'))throw Error('Actual chat generation lost previous turns');
+  const historyStats=await(await fetch('http://127.0.0.1:5001/api/extra/teststats')).json();if(!historyStats.lastPrompt.includes('HISTORY_MARKER')||!historyStats.lastPrompt.includes('What did we promise?'))throw Error('Actual chat generation lost previous turns');if(!historyStats.lastPrompt.includes('slow-burning mystery'))throw Error('Character leading prompt absent from generation');
   // P0/P1 controls operate on the actual native chat and sidecar state.
   await page.locator('.hero-nav[data-hero="trackers"]').click();const modelFrame=page.frames().find(f=>new URL(f.url()).port==='8001'&&new URL(f.url()).pathname==='/');
   await waitFor(async()=>await modelFrame.evaluate(()=>!!window.HeroStoryPanel?.view));
@@ -111,15 +162,20 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   if(stateProof.damaged?.[0]?.status!=='fresh'||stateProof.reset?.length!==0||stateProof.before?.length)throw Error('Native branch/fresh tracker isolation failed: '+JSON.stringify(stateProof));
   await page.locator('.hero-nav[data-hero="trackers"]').click();await panel.locator('#tracker-values article').first().locator('summary').click();await panel.locator('#tracker-values article').first().locator('textarea').last().fill('Protect the established injury.');await page.evaluate(()=>HeroStory.sync());if(await panel.locator('#tracker-values article').first().locator('textarea').last().inputValue()!=='Protect the established injury.')throw Error('Background sync destroyed a behavior draft');await panel.getByRole('button',{name:'Save behavior'}).first().click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions[0].version===2));await panel.locator('#tracker-ai-brief').fill('A courage tracker.');await panel.locator('#tracker-helper').click();await panel.getByRole('button',{name:'Review in editor'}).click();await panel.locator('#tracker-add').click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.id==='courage')));await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-trackers-qa.png')});
   await page.locator('.hero-nav[data-hero="lore"]').click();await panel.locator('#lore-ai-brief').fill('A hidden tavern vault.');await panel.locator('#lore-helper').click();await panel.getByRole('button',{name:'Review in editor'}).click();await panel.locator('#lore-save').click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.lore.some(e=>e.id==='vault')));
-  await panel.locator('#lore-native-name').fill('Hero QA lore');await panel.locator('#lore-native-save').click();await waitFor(()=>fs.existsSync(path.join(st,'data/default-user/worlds/Hero QA lore.json')));await panel.locator('#lore-test').fill('vault');await panel.locator('#lore-preview').click();await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-lore-qa.png')});
+  await panel.locator('#lore-native-name').fill('Hero QA lore');await panel.locator('#lore-native-save').click();
+  const worldPath=path.join(st,'data/default-user/worlds/Hero QA lore.json');
+  await waitFor(async()=>{const status=await panel.locator('#lore-native-status').textContent().catch(()=>null);return fs.existsSync(worldPath)||status?.startsWith('Save failed:')||status?.startsWith('Saved ')},28000);
+  if(!fs.existsSync(worldPath))throw Error('Native lore save failed: '+(await panel.locator('#lore-native-status').textContent())+'; error='+await panel.locator('#story-error').textContent()+'; worlds='+JSON.stringify(fs.readdirSync(path.dirname(worldPath))));await panel.locator('#lore-test').fill('vault');await panel.locator('#lore-preview').click();await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-lore-qa.png')});
   await page.locator('.hero-nav[data-hero="chat"]').click();
   await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();const message={name:c.name1,is_user:true,is_system:false,mes:'Continue our conversation and remember my injured shoulder.',send_date:new Date().toISOString()};c.chat.push(message);c.addOneMessage(message);await HeroStory.sync();await c.generate('normal',{automatic_trigger:true});});
+  await page.locator('#chat .hero-speak-message').last().click();
+  await waitFor(async()=>(await page.locator('#chat .hero-voice-output').last().textContent()).includes('Voice failed:'));
   await page.locator('#hero-session-toolbar [data-story="inspector"]').click();await panel.locator('#inspector-refresh').click();await waitFor(async()=>(await panel.locator('#inspector-prompt').textContent()).includes('Confirmed story state'));if((await panel.locator('#inspector-prompt').textContent()).includes('OUTLINE_PRIVATE'))throw Error('Inspector leaked private plan');await page.screenshot({path:path.join(repo,'.ci/hero-inspector-qa.png')});
   await page.locator('.hero-nav[data-hero="generation"]').click();await panel.locator('#thinking-state').evaluate(el=>el.closest('details').open=true);await panel.locator('#thinking-save').click();await panel.locator('#thinking-start').click();await waitFor(async()=>(await panel.locator('#thinking-state').textContent())==='Planning model ready');await panel.locator('#planningSource').selectOption('different');await panel.locator('#save-generation').click();await waitFor(()=>JSON.parse(fs.readFileSync(path.join(root,'generation.json'),'utf8')).planningSource==='different');
   const twoModels=await page.evaluate(async()=>{const {getRequestHeaders}=await import('/script.js');return (await fetch('/api/backends/text-completions/generate',{method:'POST',headers:getRequestHeaders(),body:JSON.stringify({api_server:'http://127.0.0.1:8001/inference',api_type:'koboldcpp',prompt:'Continue the scene.',max_tokens:8,stream:false})})).json()});if(/PRIVATE/.test(JSON.stringify(twoModels)))throw Error('Two-model planning leaked');const plannerStats=await(await fetch('http://127.0.0.1:5003/api/extra/teststats')).json();if(plannerStats.planning<1)throw Error('Second planning child did not generate');await panel.locator('#planningSource').selectOption('same');await panel.locator('#save-generation').click();await panel.locator('#thinking-stop').click();
   await page.locator('.hero-nav[data-hero="memory"]').click();await waitFor(async()=>(await panel.locator('#memory-chat').textContent()).includes('·'));await panel.locator('#memory-notes').fill('The promised cloak is blue.');await panel.locator('#save-memory').click();await panel.locator('#refresh-memory').click();await waitFor(async()=>(await panel.locator('#memory-notes').inputValue())==='The promised cloak is blue.');await page.screenshot({path:path.join(repo,'.ci/hero-memory-qa.png')});
   await page.locator('.hero-nav[data-hero="creator"]').click();await panel.locator('#creator-level').selectOption('advanced');await panel.locator('#character-json').fill(JSON.stringify({name:'Hero QA Character',description:'A thoughtful guide.',personality:'Patient and curious.',scenario:'At a quiet tavern.',first_mes:'Welcome, traveller.',mes_example:'<START>\nHero QA Character: Tell me your story.'}));await panel.locator('#import-character').click();await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');return getContext().characters.some(c=>c.name==='Hero QA Character')}));
-  await page.locator('.hero-nav[data-hero="creator"]').click();await panel.locator('#creator-level').selectOption('simple');await panel.locator('#creator-name').fill('Hero Simple QA');await panel.locator('#creator-description').fill('An innkeeper with a careful memory.');await panel.locator('#creator-personality').fill('Thoughtful.');await panel.locator('#creator-scenario').fill('A rainy tavern.');await panel.locator('#creator-first_mes').fill('Come inside.');await panel.locator('#episode-save').evaluate(el=>el.closest('details').open=true);await panel.locator('#episode-title').fill('Storm');await panel.locator('#episode-greeting').fill('The storm has closed the road.');await panel.locator('#episode-save').click();await panel.locator('#import-character').click();await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const card=getContext().characters.find(c=>c.name==='Hero Simple QA');return card?.data?.extensions?.hero_tavern?.episodes?.some(e=>e.title==='Storm')}));await page.screenshot({path:path.join(repo,'.ci/hero-creator-qa.png')});
+  await page.locator('.hero-nav[data-hero="creator"]').click();await panel.locator('#creator-level').selectOption('simple');await panel.locator('#creator-name').fill('Hero Simple QA');await panel.locator('#creator-description').fill('An innkeeper with a careful memory.');await panel.locator('#creator-personality').fill('Thoughtful.');await panel.locator('#creator-scenario').fill('A rainy tavern.');await panel.locator('#creator-leading-prompt').fill('Never forget the sealed letters.');await panel.locator('#creator-first_mes').fill('Come inside.');await panel.locator('#episode-save').evaluate(el=>el.closest('details').open=true);await panel.locator('#episode-title').fill('Storm');await panel.locator('#episode-greeting').fill('The storm has closed the road.');await panel.locator('#episode-save').click();await panel.locator('#import-character').click();await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const card=getContext().characters.find(c=>c.name==='Hero Simple QA');return card?.data?.extensions?.hero_tavern?.episodes?.some(e=>e.title==='Storm')&&card?.data?.extensions?.hero_tavern?.leadingPrompt==='Never forget the sealed letters.'}));await page.screenshot({path:path.join(repo,'.ci/hero-creator-qa.png')});
   const imageDir=path.join(root,'ImageModels');fs.mkdirSync(imageDir,{recursive:true});const checkpoint=Buffer.alloc(1024*1024),head=Buffer.from(JSON.stringify({tensor:{dtype:'F32',shape:[1],data_offsets:[0,4]}}));checkpoint.writeBigUInt64LE(BigInt(head.length));head.copy(checkpoint,8);fs.writeFileSync(path.join(imageDir,'QA portrait.safetensors'),checkpoint);
   await page.locator('.hero-nav[data-hero="images"]').click();
   await panel.locator('[data-tab="image-setup"]').click();
@@ -146,7 +202,14 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await panel.locator('#image-prompt').fill('A quiet fantasy tavern.');
   if(!await panel.locator('#image-generate').isEnabled())throw Error('Generate is disabled despite a working legacy image engine.');
   await panel.locator('#image-generate').click();await panel.locator('#image-result').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-images-qa.png')});
-  await page.locator('.hero-nav[data-hero="diagnostics"]').click();await panel.locator('#diagnostic-history').fill('20');await panel.locator('#diagnostic-text').click();await waitFor(async()=>(await panel.locator('#diagnostic-text-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image').click();await waitFor(async()=>(await panel.locator('#diagnostic-image-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image-preview').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-diagnostics-qa.png')});await page.locator('.hero-nav[data-hero="images"]').click();await panel.locator('#image-to-chat').click();await waitFor(async()=>await page.locator('#hero-workspace').isHidden());await waitFor(async()=>await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text img')].some(img=>new URL(img.src).origin===location.origin&&img.complete&&img.naturalWidth>0)));
+  await page.locator('.hero-nav[data-hero="diagnostics"]').click();
+  // Diagnostics must expose the full multimodal flow, not just old result cards.
+  await panel.locator('#diagnostic-open-flow').click();
+  await panel.locator('#model-test-run-diagnostic-flow').waitFor({state:'visible'});
+  if(await panel.locator('#model-test-flow-stages li').count()!==7)throw Error('Full diagnostics flow did not render all seven stages');
+  await page.screenshot({path:path.join(repo,'.ci/hero-diagnostic-flow-qa.png')});
+  await page.locator('.hero-nav[data-hero="diagnostics"]').click();
+  await panel.locator('#diagnostic-history').fill('20');await panel.locator('#diagnostic-text').click();await waitFor(async()=>(await panel.locator('#diagnostic-text-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image').click();await waitFor(async()=>(await panel.locator('#diagnostic-image-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image-preview').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-diagnostics-qa.png')});await page.locator('.hero-nav[data-hero="images"]').click();await panel.locator('#image-to-chat').click();await waitFor(async()=>await page.locator('#hero-workspace').isHidden());await waitFor(async()=>await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text img')].some(img=>new URL(img.src).origin===location.origin&&img.complete&&img.naturalWidth>0)));
   // Direct chat image tool uses optional refinement, persists provenance and resumes the text engine.
   await page.locator('#hero-chat-image').click();const imageDialog=page.locator('.hero-story-dialog');await imageDialog.locator('textarea').fill('A portrait of the innkeeper beside a window.');await imageDialog.locator('input[type="checkbox"]').check();
   await imageDialog.locator('select').first().selectOption('koboldcpp');
@@ -178,6 +241,23 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.locator('.hero-nav[data-hero="comfy-workflows"]').click();await panel.locator('#comfy-workflows').waitFor({state:'visible'});await panel.locator('#hero-api-workflow-file').waitFor({state:'visible'});
   await page.locator('.hero-nav[data-hero="writer"]').click();await writer.locator('#title').waitFor({state:'visible'});await writer.locator('#memory').fill('Established fact. '.repeat(1000));await writer.locator('[data-context-tab="persona"]').click();await writer.locator('#persona-name').fill('Mira');await writer.locator('#persona-description').fill('A traveller.');await writer.locator('#save').click();await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved'));await writer.locator('#new').click();await waitFor(async()=>(await writer.locator('#memory').inputValue())==='');if((await writer.locator('#error').textContent()).trim())throw Error('Writer new story failed after editing memory/persona');
   await writer.locator('#import').setInputFiles({name:'sample.txt',mimeType:'text/plain',buffer:Buffer.from('Mira approached the gate.')});await waitFor(async()=>(await writer.locator('#manuscript').inputValue())==='Mira approached the gate.');const download=page.waitForEvent('download');await writer.locator('summary').filter({hasText:'Import / Export'}).click();await writer.locator('#export').click();const exported=await download;if(!exported.suggestedFilename().endsWith('.json'))throw Error('Writer export did not create JSON');
+  // The drawer uses globally unique IDs even inside its shadow DOM.
+  // Playwright pierces open shadow DOM, so assert the namespaced selector contract here.
+  // Shared tools run inside Writer and insert reviewed output without submitting a story turn.
+  const sharedTools=writer.locator('#hero-shared-tools');
+  await writer.locator('#manuscript').focus();
+  await writer.locator('#manuscript').evaluate(el=>el.setSelectionRange(0,el.value.length));
+  await sharedTools.locator('#hero-tools-launch').click();
+  await sharedTools.locator('#hero-tools-prompt').fill('Describe a quiet tavern.');
+  await sharedTools.locator('#hero-tools-text').click();
+  await waitFor(async()=>(await sharedTools.locator('#hero-tools-status').textContent())==='Done.');
+  if(!(await sharedTools.locator('#hero-tools-output').textContent()).trim())throw Error('Shared text tool returned no result');
+  await sharedTools.locator('#hero-tools-insert').click();
+  if(!(await writer.locator('#manuscript').inputValue()).trim())throw Error('Shared result did not insert');
+  await sharedTools.locator('[data-panel="images"]').click();
+  const nested=sharedTools.frameLocator('#hero-tools-workspace');await nested.locator('#images').waitFor({state:'visible'});
+  if(await nested.locator('#hero-shared-tools').count())throw Error('Shared workspace must not recursively mount another drawer');
+  await sharedTools.locator('#hero-tools-close').click();
   await page.locator('.hero-nav[data-hero="models"]').click();
   await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
   if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');

@@ -15,8 +15,8 @@ function reconcileGenerations(oldText,newText,items){
 }
 const DEFAULTS={maxReplyTokens:768,writerTwoPass:true,temperature:0.85,top_p:0.95,top_k:40,min_p:0.05,repetition_penalty:1.08};
 function validate(input){
- const s=copy(input);for(const k of ['prompt','memory','note','text'])if(s[k]===undefined)s[k]='';if(s.title===undefined)s.title='Untitled story';if(s.lore===undefined)s.lore=[];
- for(const [k,max] of [['title',200],['prompt',200000],['text',1000000],['memory',200000],['note',50000]])if(typeof s[k]!=='string'||s[k].length>max)throw Error('Writer '+k+' must be text, at most '+max+' characters. Your draft is preserved.');
+ const s=copy(input);for(const k of ['prompt','memory','recap','note','text'])if(s[k]===undefined)s[k]='';if(s.title===undefined)s.title='Untitled story';if(s.lore===undefined)s.lore=[];
+ for(const [k,max] of [['title',200],['prompt',200000],['text',1000000],['memory',200000],['recap',50000],['note',50000]])if(typeof s[k]!=='string'||s[k].length>max)throw Error('Writer '+k+' must be text, at most '+max+' characters. Your draft is preserved.');
  s.persona={name:'',description:'',...s.persona};for(const [k,max] of [['name',200],['description',12000]])if(typeof s.persona[k]!=='string'||s.persona[k].length>max)throw Error('Invalid Writer persona '+k);
  s.generations=normalizeGenerations(s.generations,s.text);
  if(!Array.isArray(s.lore)||s.lore.length>300)throw Error('Writer lorebook must have at most 300 entries.');
@@ -29,8 +29,8 @@ function createWriterStore(root){
  const file=id=>{if(typeof id!=='string'||!/^[a-f0-9-]{36}$/.test(id))throw Error('Invalid story ID.');return path.join(dir,id+'.json')};
  const read=id=>JSON.parse(fs.readFileSync(file(id),'utf8'));
  const write=s=>{const f=file(s.id),tmp=f+'.tmp';fs.writeFileSync(tmp,JSON.stringify(s));fs.renameSync(tmp,f);return copy(s)};
- function create(input={}){const now=Date.now();return write({...validate({title:'Untitled story',prompt:'',text:'',memory:'',note:'',lore:[],settings:DEFAULTS,...input}),schemaVersion:1,id:crypto.randomUUID(),version:1,createdAt:now,updatedAt:now,history:Array.isArray(input.history)?input.history.slice(-100).map(r=>({...validate(r),id:crypto.randomUUID(),at:Number(r.at)||now,label:String(r.label||'Imported revision').slice(0,150)})):[]})}
- function save(id,input,expected){const old=read(id);if(expected!==old.version)throw Error('Story changed in another window. Export your current draft before reloading.');const fields=Object.fromEntries(['title','prompt','text','memory','note','lore','settings','persona','generations'].map(k=>[k,k==='generations'?(input.generations===undefined?reconcileGenerations(old.text,input.text??old.text,old.generations||[]):input.generations):input[k]??old[k]])),next=validate(fields);
+ function create(input={}){const now=Date.now();return write({...validate({title:'Untitled story',prompt:'',text:'',memory:'',recap:'',note:'',lore:[],settings:DEFAULTS,...input}),schemaVersion:1,id:crypto.randomUUID(),version:1,createdAt:now,updatedAt:now,history:Array.isArray(input.history)?input.history.slice(-100).map(r=>({...validate(r),id:crypto.randomUUID(),at:Number(r.at)||now,label:String(r.label||'Imported revision').slice(0,150)})):[]})}
+ function save(id,input,expected){const old=read(id);if(expected!==old.version)throw Error('Story changed in another window. Export your current draft before reloading.');const fields=Object.fromEntries(['title','prompt','text','memory','recap','note','lore','settings','persona','generations'].map(k=>[k,k==='generations'?(input.generations===undefined?reconcileGenerations(old.text,input.text??old.text,old.generations||[]):input.generations):input[k]??old[k]])),next=validate(fields);
   if(JSON.stringify(fields)===JSON.stringify(Object.fromEntries(Object.keys(fields).map(k=>[k,old[k]]))))return old;
   const history=[...old.history,{id:crypto.randomUUID(),at:Date.now(),label:String(input.label||'Edit / autosave').slice(0,150),...Object.fromEntries(Object.keys(fields).map(k=>[k,old[k]]))}].slice(-100);
   return write({...old,...next,history,version:old.version+1,updatedAt:Date.now()});}

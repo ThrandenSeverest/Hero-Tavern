@@ -23,7 +23,40 @@ export async function initStory({getContext,frame,show}){
     if(c().groupId)throw Error('Select a single character first.');const base=data.card.spec?data.card.data:data.card,avatar=c().characters[c().characterId]?.avatar;const keys=['name','description','personality','scenario','first_mes','mes_example'];const fields=Object.fromEntries(keys.map(k=>[k,String(base[k]||'')]));if(!fields.name.trim())throw Error('Enter a name.');const response=await fetch('/api/characters/merge-attributes',{method:'POST',headers:c().getRequestHeaders(),body:JSON.stringify({avatar,...fields,data:{...fields,tags:base.tags||[],alternate_greetings:base.alternate_greetings||[],extensions:base.extensions||{}}})});if(!response.ok)throw Error('Native character save failed.');await c().getCharacters();const v=await sync();await rpc('/story/profile',{characterId:v.session.characterId,profile:data.profile});return sync();
    }
    if(op==='lore-save-native'){
-    const v=await sync();if(!data.name?.trim())throw Error('Name the lorebook.');const old=await c().loadWorldInfo(data.name)||{entries:{}};const entries=Object.fromEntries(Object.entries(old.entries||{}).filter(([,e])=>!e.extensions?.hero_tavern));let uid=Math.max(-1,...Object.keys(entries).map(Number))+1;for(const e of v.session.lore){entries[uid]={uid,key:e.keywords||[],keysecondary:[],comment:e.label||'Hero lore',content:e.text,constant:!e.keywords?.length,selective:true,selectiveLogic:0,order:100,position:0,disable:true,extensions:{hero_tavern:{id:e.id,condition:e.condition,visibility:e.visibility}}};uid++;}await c().saveWorldInfo(data.name,{...old,entries,hero_tavern:{schemaVersion:1,entries:v.session.lore}},true);await c().updateWorldInfoList();return {name:data.name};
+    const name=String(data.name||'').trim();
+    if(!name||name.length>120||/[\/\\]/.test(name))throw Error('Choose a lorebook name without slashes (up to 120 characters).');
+    // Use the latest saved Hero lore state, without resaving the native chat.
+    // This operation is also available while background tracker analysis runs.
+    const loc=selected()?location():null;
+    const saved=view?.session?.location;
+    if(!view?.session||!loc||saved?.filename!==loc.filename||saved?.avatar!==loc.avatar||saved?.group!==loc.group)
+     throw Error('Selected chat changed. Open the Lorebook tab again before saving.');
+    const v=view;
+    const headers=c().getRequestHeaders();
+    const fetchWorld=async(route,body,missingOk=false)=>{
+     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+     try{
+      const response=await fetch('/api/worldinfo/'+route,{
+       method:'POST',headers,body:JSON.stringify(body),signal:controller.signal
+      });
+      if(missingOk&&[400,404].includes(response.status))return null;
+      if(!response.ok)throw Error('SillyTavern World Info '+route+' failed (HTTP '+response.status+'): '+(await response.text()).slice(0,350));
+      if(route==='get')return response.json();
+      return true;
+     }finally{clearTimeout(timer)}
+    };
+    const old=await fetchWorld('get',{name},true)||{entries:{}};
+    const entries=Object.fromEntries(Object.entries(old.entries||{}).filter(([,e])=>!e.extensions?.hero_tavern));
+    let uid=Math.max(-1,...Object.keys(entries).map(Number))+1;
+    for(const e of v.session.lore){
+     entries[uid]={uid,key:e.keywords||[],keysecondary:[],comment:e.label||'Hero lore',content:e.text,
+      constant:!e.keywords?.length,selective:true,selectiveLogic:0,order:100,position:0,
+      disable:true,extensions:{hero_tavern:{id:e.id,condition:e.condition,visibility:e.visibility}}};uid++;
+    }
+    await fetchWorld('edit',{name,data:{...old,entries,hero_tavern:{schemaVersion:1,entries:v.session.lore}}});
+    // The file is already saved. Refresh ST's world menu without blocking the save confirmation.
+    Promise.resolve().then(()=>c().updateWorldInfoList()).catch(e=>console.warn('World Info list refresh:',e.message));
+    return {name,entries:Object.keys(entries).length};
    }
    if(op==='lore-load-native'){
     const v=await sync(),book=await c().loadWorldInfo(data.name);if(!book)throw Error('Lorebook not found.');const entries=book.hero_tavern?.entries||Object.values(book.entries||{}).filter(e=>!e.disable).map(e=>({id:'native-'+data.name+'-'+e.uid,label:e.comment||'Lore',text:e.content,keywords:e.constant?[]:e.key||[],visibility:'player'}));return rpc('/story/metadata',{id:v.session.id,lore:[...v.session.lore,...entries.filter(e=>!v.session.lore.some(x=>x.id===e.id))]});
@@ -69,11 +102,70 @@ export async function initStory({getContext,frame,show}){
   if(e.data?.type==='hero-story-command'){try{const result=await run(e.data.op,e.data.data);frame.contentWindow.postMessage({type:'hero-story-result',requestId:e.data.requestId,result},origin)}catch(error){frame.contentWindow.postMessage({type:'hero-story-result',requestId:e.data.requestId,error:error.message},origin);notify(error)}return;}
   if(e.data?.type==='hero-section-ready'&&['history','trackers','lore','inspector','creator'].includes(e.data.section))try{await sync()}catch(error){notify(error)};
  });
- const toolbar=document.createElement('div');toolbar.id='hero-session-toolbar';toolbar.innerHTML='<span id="hero-session-name">Select a chat</span><button data-story="new">Save & New Chat</button><button data-story="history">History</button><button data-story="trackers">Trackers</button><button data-story="lore">Lore</button><button data-story="inspector">Prompt Inspector</button>';
+ const toolbar=document.createElement('div');toolbar.id='hero-session-toolbar';toolbar.innerHTML='<span id="hero-session-name">Select a chat</span><button data-story="new">Save & New Chat</button><button data-story="history">History</button><button data-story="trackers">Trackers</button><button data-story="lore">Lore</button><button data-story="inspector">Prompt Inspector</button><button id="hero-leading-prompt-button" data-story="leading">Leading Prompt</button>';
  const sheld=document.querySelector('#sheld');if(sheld)sheld.prepend(toolbar);
+ const characterDrawer=document.querySelector('#right-nav-panel');
+ if(characterDrawer&&!document.getElementById('hero-character-leading-prompt')){
+  const button=document.createElement('button');button.id='hero-character-leading-prompt';button.type='button';
+  button.textContent='✎ Leading Prompt';button.title='Permanent theme and behavioral guidance for the selected character';
+  button.style.cssText='position:relative;z-index:1;display:block;margin:6px 0 12px;padding:8px 12px;border:1px solid #997b4e;border-radius:8px;background:#2e3748;color:#f6dfad;cursor:pointer';
+  button.onclick=()=>openLeadingPrompt().catch(notify);characterDrawer.prepend(button);
+ }
+
+ const voiceButton=document.createElement('button');voiceButton.textContent='Character Voice';voiceButton.id='hero-character-voice';
+ voiceButton.onclick=()=>openCharacterVoice().catch(notify);(characterDrawer||toolbar).prepend(voiceButton);
+ async function openCharacterVoice(){
+  const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
+  const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};
+  const {box}=dialog('Voice · '+character.name),state=await rpc('/tts/status');
+  const help=document.createElement('p');help.textContent='Create a built-in, designed or cloned voice in Voices, save it to the Voice Library, then assign it here. The assignment stays on this character card when renamed.';
+  const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
+  dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
+  for(const field of [dialogue,narrator])field.append(new Option('Inherit global settings',''),...(state.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));
+  mode.append(new Option('Same voice as character · combine narration and dialogue','same'),new Option('Separate narrator','separate'));
+  dialogue.value=ext.voice?.dialogueProfileId||'';narrator.value=ext.voice?.narratorProfileId||'';mode.value=ext.voice?.narratorMode||'same';
+  const update=()=>{narrator.hidden=mode.value==='same'};mode.onchange=update;update();
+  const label=(text,field)=>{const el=document.createElement('label');el.textContent=text;el.append(field);return el};
+  const text=document.createElement('textarea');text.value='*The door opens.* “Welcome to the tavern.”';
+  const audio=document.createElement('audio');audio.controls=true;
+  const status=document.createElement('p');status.setAttribute('role','status');
+  const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
+  const preview=document.createElement('button');preview.textContent='Preview character + narrator';preview.onclick=async()=>{preview.disabled=true;status.textContent='Generating preview…';try{const result=await rpc('/tts/message',{text:text.value,assignment:assignment()});audio.src=origin+result.url;status.textContent='Ready · '+result.segments+' synthesis segment(s)';await audio.play().catch(()=>{status.textContent='Ready. Press Play.'})}catch(e){status.textContent=e.message}finally{preview.disabled=false}};
+  const save=document.createElement('button');save.textContent='Save character voice';save.onclick=async()=>{try{if(c().characters?.[index]!==character)throw Error('Character selection changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};status.textContent='Saved on character card.'}catch(e){status.textContent='Save failed: '+e.message}};
+  const setup=document.createElement('button');setup.textContent='Open Voice Library / create voice';setup.onclick=()=>{box.parentElement.remove();show('voices')};
+  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),text,preview,audio,save,setup,status);
+ }
  const style=document.createElement('style');style.textContent='#hero-session-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#202939;border-bottom:1px solid #3a4960;flex-shrink:0;font:12px system-ui}#hero-session-name{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#hero-session-toolbar button,.hero-message-menu button{background:#27354a;border:1px solid #455874;color:#dce8f6;border-radius:6px;padding:5px 8px;cursor:pointer}.hero-message-menu{font:11px system-ui;margin:6px 0;display:flex;gap:5px;flex-wrap:wrap}.hero-story-dialog{position:fixed;inset:0;z-index:2500;background:#080c12cc;display:grid;place-items:center}.hero-story-dialog>section{background:#1e2939;color:#e6edf7;border:1px solid #53627b;border-radius:14px;padding:24px;width:min(680px,90vw);max-height:85vh;overflow:auto}.hero-story-dialog button,.hero-story-dialog input,.hero-story-dialog select,.hero-story-dialog textarea{font:inherit;background:#253247;color:#e6edf7;border:1px solid #53627b;border-radius:8px;padding:10px;margin:6px 3px}.hero-story-dialog textarea{width:90%;min-height:100px}.hero-story-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}';document.head.append(style);
- toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else{show(op);sync().catch(notify)}};
+ toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else{show(op);sync().catch(notify)}};
  function dialog(title){const bg=document.createElement('div');bg.className='hero-story-dialog';const box=document.createElement('section'),h=document.createElement('h2');h.textContent=title;box.append(h);bg.append(box);document.body.append(bg);const close=document.createElement('button');close.textContent='Cancel';close.onclick=()=>bg.remove();box.append(close);return {bg,box,close};}
+ async function openLeadingPrompt(){
+  if(c().groupId||!c().characters?.[c().characterId]||Number(c().characterId)<0){window.toastr?.info('Select a single character to edit their leading prompt.');return;}
+  const character=c().characters?.[c().characterId],ext=character?.data?.extensions?.hero_tavern||character?.extensions?.hero_tavern||{};
+  const {bg,box}=dialog('Character leading prompt · '+(character?.name||'Selected character'));
+  const description=document.createElement('p');description.textContent='Persistent guidance for this character: story theme, pacing, point of view, behavior rules or things the AI should keep in mind. This is added to every chat generation. It does not create a tracker or automatically update state.';
+  const field=document.createElement('textarea');field.id='hero-leading-prompt-field';field.maxLength=4000;field.rows=7;field.placeholder='Example: Keep the story grounded in political intrigue; the character remains suspicious, speaks tersely, and does not control the player’s dialogue.';field.value=String(ext.leadingPrompt||'');
+  const note=document.createElement('small');note.textContent='0–4,000 characters · Saved on the character card · Empty text disables it.';
+  const save=document.createElement('button');save.id='hero-leading-prompt-save';save.textContent='Save leading prompt';
+  const clear=document.createElement('button');clear.id='hero-leading-prompt-clear';clear.textContent='Clear prompt';
+  const status=document.createElement('p');status.setAttribute('role','status');
+  async function savePrompt(value){
+   save.disabled=true;clear.disabled=true;status.textContent='Saving to selected character…';
+   try{
+    const current=c().characters?.[c().characterId];
+    if(!current||current.avatar!==character.avatar)throw Error('Character selection changed. Reopen Leading Prompt.');
+    const currentProfile=current.data?.extensions?.hero_tavern||current.extensions?.hero_tavern||{};
+    const updated={...currentProfile,leadingPrompt:value.slice(0,4000)};
+    await c().writeExtensionField(c().characterId,'hero_tavern',updated);
+    if(current.data){current.data.extensions={...(current.data.extensions||{}),hero_tavern:updated}}
+    if(view?.session?.characterId&&view.session.location?.avatar===character.avatar)await rpc('/story/profile',{characterId:view.session.characterId,profile:updated});
+    status.textContent='Saved for '+(current.name||'this character')+'. It will apply to the next reply.';
+    setTimeout(()=>{if(bg.isConnected)bg.remove()},450);
+   }catch(error){status.textContent='Save failed: '+error.message;save.disabled=false;clear.disabled=false;}
+  }
+  save.onclick=()=>savePrompt(field.value);
+  clear.onclick=()=>{field.value='';savePrompt('')};
+  box.append(description,field,note,save,clear,status);
+ }
  async function newDialog(){const v=await sync();if(!v)throw Error('Select a chat first.');const {bg,box}=dialog('New chat · original story stays saved'),title=document.createElement('input');title.placeholder='Session title';box.append(title);const episode=document.createElement('select');episode.append(new Option('Default opening',''));for(const e of v.characterProfile?.episodes||v.session.episodes||[])episode.append(new Option(e.title,e.id));box.append(episode);const carry=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Review continuity for a new chapter';carry.append(summary);const keys=[];for(const d of v.session.definitions.filter(d=>d.visibility!=='hidden')){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=true;label.append(check,document.createTextNode(d.label));carry.append(label);keys.push({check,key:d.owner+':'+d.id});}const notes=document.createElement('textarea');notes.value=[v.memory.notes,v.memory.summary].filter(Boolean).join('\n');carry.append(notes);box.append(carry);
   for(const [mode,label]of [['fresh','Fresh Start'],['continue','Continue in New Session'],['duplicate','Duplicate Entire Chat']]){const button=document.createElement('button');button.textContent=label;button.onclick=async()=>{try{button.disabled=true;await run('fork',{mode,title:title.value||undefined,episodeId:episode.value,carryKeys:mode==='continue'?keys.filter(x=>x.check.checked).map(x=>x.key):[],carryMemory:mode==='continue'?notes.value:''});bg.remove()}catch(error){button.disabled=false;notify(error)}};box.append(button);}
   for(const mark of v.session.bookmarks){const button=document.createElement('button');button.textContent='Start from '+mark.label;button.onclick=async()=>{try{const index=v.messages.findIndex(m=>m.extra.heroMessageId===mark.messageId);await run('fork',{mode:'branch',atIndex:index,bookmarkId:mark.id,title:title.value||mark.label});bg.remove()}catch(error){notify(error)}};box.append(button);}
@@ -109,6 +201,18 @@ export async function initStory({getContext,frame,show}){
   const head=document.createElement('div');head.className='hero-track-head';
   const title=document.createElement('strong');title.textContent='✦ Live story state';head.append(title);
   const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
+  const analysis=view.session.lastAnalysis;
+  if(analysis){const health=document.createElement('span');health.className='hero-track-meta';
+   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns';
+   health.title='Check the Prompt Inspector for the full tracker update history';head.append(health);}
+  const pending=view.session.events.filter(e=>e.status==='pending');
+  if(pending.length){const review=document.createElement('button');review.textContent='Review '+pending.length+' state changes';
+   review.onclick=()=>{show('trackers');sync().catch(notify)};head.append(review);}
+  const refresh=document.createElement('button');refresh.textContent='Update now';
+  refresh.onclick=async()=>{refresh.disabled=true;refresh.textContent='Extracting…';
+   try{const v=await sync();view=await rpc('/story/analyze',{id:v.session.id});publish()}
+   catch(error){notify(error);refresh.disabled=false;refresh.textContent='Retry update'}};
+  head.append(refresh);
   const edit=document.createElement('button');edit.textContent='Manage trackers';edit.onclick=()=>{show('trackers');sync().catch(notify)};head.append(edit);
   const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.setAttribute('aria-expanded',String(trackerStrip.dataset.collapsed!=='true'));collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);
   trackerStrip.append(head);
@@ -125,13 +229,71 @@ export async function initStory({getContext,frame,show}){
    if(d.type==='injuries')for(const injury of value){const p=document.createElement('p');p.textContent=injury.location+' — '+injury.severity+', '+injury.status+'; pain '+injury.pain+'/10. '+['cause','symptoms','limitations','treatment','scar'].map(k=>k+': '+injury[k]).join('; ');details.append(p);}
    for(const detail of [d.description,d.rules?.[String(value)],d.instructions,d.changeRules].filter(Boolean)){const p=document.createElement('p');p.textContent=detail;details.append(p);}
    const actions=document.createElement('div');actions.className='hero-track-actions';const change=document.createElement('button');change.textContent='Edit value';change.onclick=async()=>{
-    try{const raw=prompt('New '+d.label+' (JSON for lists, relationships and quests)',JSON.stringify(value));if(raw===null)return;let next;
+    try{const raw=prompt('New '+d.label+(d.type==='record'||d.type==='injuries'||d.type==='quest'||d.type==='relationship'?' (advanced full state)':''),JSON.stringify(value));if(raw===null)return;let next;
      if(d.type==='number')next=Number(raw);else if(d.type==='boolean')next=raw==='true';else if(['list','relationship','timer','quest','injuries','record'].includes(d.type))next=JSON.parse(raw);else next=raw.replace(/^"|"$/g,'');
      if(d.type==='enum'&&!d.allowedValues.includes(next))throw Error('Allowed: '+d.allowedValues.join(', '));
      const current=await sync(),source=current.messages.at(-1);if(!source)throw Error('Send a message before editing a live state value.');
      const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'Manual state update from chat'}]});view=result;publish();
     }catch(e){notify(e)}
-   };actions.append(change);const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
+   };actions.append(change);
+   // Quick local corrections use typed controls; ordinary edits need no JSON.
+   const pushManual=async next=>{const current=await sync(),source=current.messages.at(-1);
+    if(!source)throw Error('Start a chat first.');
+    const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'User corrected tracker value'}]});view=result;publish();};
+   if(d.type==='number'){
+    for(const [symbol,step] of [['−',-1],['+',1]]){
+     const button=document.createElement('button');button.textContent=symbol;button.title='Change '+d.label+' by '+step;
+     button.onclick=()=>pushManual(Math.max(d.min,Math.min(d.max,value+step))).catch(notify);actions.append(button);
+    }
+   }
+   if(d.type==='boolean'){
+    const button=document.createElement('button');button.textContent='Toggle';button.onclick=()=>pushManual(!value).catch(notify);actions.append(button);
+   }
+   if(d.type==='list'){
+    const add=document.createElement('button');add.textContent='+ Item';add.onclick=async()=>{
+     const item=prompt('New entry for '+d.label);if(item?.trim())await pushManual([...new Set([...value,item.trim()])]);
+    };actions.append(add);
+    const drop=document.createElement('button');drop.textContent='− Item';drop.onclick=async()=>{
+     const item=prompt('Remove an entry from '+d.label+'\n'+value.join(' · '));if(item?.trim())await pushManual(value.filter(x=>x!==item.trim()));
+    };actions.append(drop);
+   }
+   if(d.type==='record'||d.type==='relationship'||d.type==='quest'||d.type==='timer'){
+    const fieldButton=document.createElement('button');fieldButton.textContent='Edit field';
+    fieldButton.onclick=async()=>{
+     const fields=Object.keys(value||{}),field=prompt('Field to change in '+d.label+'\n'+fields.join(' · '),fields[0]||'');
+     if(!field||!fields.includes(field))return;
+     const old=value[field],raw=prompt('New value for '+field+'\n(For lists, use Add or Remove separately)',old===null?'':String(old));
+     if(raw===null)return;
+     let parsed=raw;
+     if(typeof old==='number'){parsed=Number(raw);if(!Number.isFinite(parsed))throw Error('Enter a number');}
+     if(typeof old==='boolean')parsed=raw.toLowerCase()==='true';
+     if(old===null)parsed=/^-?\d+(\.\d+)?$/.test(raw)?Number(raw):raw;
+     if(Array.isArray(old)){const chosen=prompt('Enter a single new entry to append to '+field);if(chosen?.trim())parsed=[...old,chosen.trim()];else return;}
+     await pushManual({...value,[field]:parsed});
+    };actions.append(fieldButton);
+   }
+   if(d.type==='injuries'){
+    const wound=document.createElement('button');wound.textContent='+ Injury';
+    wound.onclick=async()=>{
+     const location=prompt('Injured body part / location');if(!location?.trim())return;
+     const cause=prompt('Confirmed cause of injury');if(!cause?.trim())return;
+     const severity=prompt('Severity: minor / moderate / severe / critical','minor');
+     if(!['minor','moderate','severe','critical'].includes(severity))throw Error('Choose a supported severity');
+     const pain=Number(prompt('Pain from 0 to 10','3'));
+     if(!Number.isFinite(pain)||pain<0||pain>10)throw Error('Pain must be 0–10');
+     const id='manual_'+Date.now().toString(36);
+     const entry={id,location:location.trim(),cause:cause.trim(),severity,status:'fresh',pain,symptoms:'',limitations:'',treatment:'',scar:''};
+     await pushManual([...value,entry]);
+    };actions.append(wound);
+   }
+   const auto=document.createElement('button');auto.textContent=d.updateMode==='automatic'?'Auto: ON':d.updateMode==='manual'?'Auto: OFF':'Approval required';
+   auto.title='Automatic changes use evidence from chat; approval mode records proposals for review';
+   auto.onclick=async()=>{
+    const mode=d.updateMode==='automatic'?'approval':'automatic';
+    const result=await run('definition-edit',{key:d.owner+':'+d.id,updates:{updateMode:mode}});
+    view=result;publish();
+   };actions.append(auto);
+   const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
    const evidence=view.context?.provenance?.filter(e=>e.key===d.owner+':'+d.id).at(-1);if(evidence){const source=document.createElement('small');source.textContent='Last change: '+evidence.reason;details.append(source);}
    details.append(actions);tile.append(details);grid.append(tile);
   }
@@ -139,9 +301,37 @@ export async function initStory({getContext,frame,show}){
  }
  function updateMessageMenus(){for(const node of document.querySelectorAll('#chat .mes')){if(node.querySelector('.hero-message-menu'))continue;const index=Number(node.getAttribute('mesid'));if(!Number.isInteger(index))continue;const menu=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Story actions';menu.className='hero-message-menu';menu.append(summary);for(const [label,action]of [['Bookmark',async()=>{const label=prompt('Bookmark name','Before the next scene');if(label)await run('bookmark',{index,label})}],['Branch Here',()=>run('fork',{mode:'branch',atIndex:index})],['Rollback to Here',()=>rewind(index)],['View State Here',async()=>{const p=await run('preview',{index}),{box}=dialog('State at this message'),pre=document.createElement('pre');const v=await rpc('/story/state-at',{id:view.session.id,index});const visible=new Set(v.definitions.filter(d=>d.visibility!=='hidden').map(d=>d.owner+':'+d.id));pre.textContent=JSON.stringify(Object.fromEntries(Object.entries(v.state).filter(([k])=>visible.has(k))),null,2)+'\nReversals from current state:\n'+p.changes.map(x=>x.key+' → '+JSON.stringify(x.to)).join('\n');box.append(pre)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=e=>{e.preventDefault();Promise.resolve(action()).catch(notify)};menu.append(b);}node.append(menu);}}
  let currentGeneration='normal';c().eventSource.on(c().eventTypes.GENERATION_STARTED,type=>{currentGeneration=type;});
- c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration)||data.api_type!=='koboldcpp')return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
+ c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration))return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};// Keep the complete native transcript even if another extension supplied an
+ // incomplete hero_context object before our interception.
+ data.hero_context.messages=c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes}));
+ data.hero_context.generationType=currentGeneration;
+ const char=c().characters?.[c().characterId],cardData=char?.data||char||{};
+ data.hero_context.character={
+   name:String(cardData.name||char?.name||'').slice(0,180),
+   description:String(cardData.description||'').slice(0,4400),
+   personality:String(cardData.personality||'').slice(0,2000),
+   scenario:String(cardData.scenario||'').slice(0,1500),
+   mes_example:String(cardData.mes_example||'').slice(0,1000),
+   leadingPrompt:String(cardData.extensions?.hero_tavern?.leadingPrompt||char?.extensions?.hero_tavern?.leadingPrompt||'').slice(0,4000)
+ };
+ if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
  let generating=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});
- const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{if(generating){schedule();return;}if(syncing||!selected())return;syncing=true;try{const v=await sync();if(v.session.definitions.some(d=>d.enabled!==false&&d.updateMode!=='manual')){try{view=await rpc('/story/analyze',{id:v.session.id});publish()}catch(e){window.toastr?.info('Tracker state was preserved. '+e.message,'State analysis')}}}catch(e){notify(e)}finally{syncing=false}},500)};
+ const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{
+  if(generating){schedule();return;}
+  if(syncing||!selected())return;
+  syncing=true;
+  try{
+   let v=await sync();
+   if(v.session.definitions.some(d=>d.enabled!==false&&d.updateMode!=='manual')){
+    for(let pass=0;pass<8;pass++){
+     const n=v.session.analyzedSources.length;
+     try{v=await rpc('/story/analyze',{id:v.session.id});view=v;publish();}
+     catch(error){window.toastr?.warning('Tracker update failed; saved state was preserved. '+error.message,'Tracker diagnostics');break;}
+     if(v.session.analyzedSources.length===n||v.session.analyzedSources.length>=v.messages.length)break;
+    }
+   }
+  }catch(error){notify(error)}finally{syncing=false}
+ },500)};
  for(const name of ['CHAT_CHANGED','GENERATION_ENDED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_RECEIVED','MESSAGE_SENT'])if(c().eventTypes[name])c().eventSource.on(c().eventTypes[name],schedule);
  const observer=new MutationObserver(()=>updateMessageMenus());if(document.querySelector('#chat'))observer.observe(document.querySelector('#chat'),{childList:true});
  window.HeroStory={sync,run,get view(){return view},newDialog,rewind};

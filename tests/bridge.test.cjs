@@ -20,6 +20,9 @@ test('Library opens without a selected model and rejects unauthorized control re
         const token = /const token='([a-f0-9]+)'/.exec(page)[1];
         const headers = { 'X-Hero-Token': token, 'Content-Type': 'application/json', Origin: origin };
         const state = await (await fetch(origin + '/status', { headers })).json();
+        const speechState = await fetch(origin + '/tts/status', {method:'POST',headers,body:'{}'});
+        assert.equal(speechState.status,200,'embedded chat status POST must match preview GET');
+        assert.deepEqual((await speechState.json()).settings,(await (await fetch(origin+'/tts/status',{headers})).json()).settings);
         assert.equal(state.selected, '');
         assert.equal(state.backendRunning, false);
         assert.equal(state.catalog.length, JSON.parse(fs.readFileSync(path.join(root,'models.json'),'utf8')).length);

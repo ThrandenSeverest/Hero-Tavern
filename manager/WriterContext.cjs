@@ -7,16 +7,36 @@ async function buildWriterContext(w,budget,count){
  const operation=w.operation||'continue';
  const start=w.start??rawManuscript.length,end=w.end??start;
  const selection=resolve(rawManuscript.slice(start,end)),source=resolve(rawManuscript.slice(0,start)),suffix=['continue','say','do'].includes(operation)?'':resolve(rawManuscript.slice(end,end+6000));
- const activation=(manuscript.slice(-12000)+'\n'+premise+'\n'+String(w.instruction||'')).toLowerCase();
+ const activation=(manuscript.slice(-6500)+'\n'+premise+'\n'+String(w.instruction||'')).toLowerCase();
  const lore=Array.isArray(w.lore)?w.lore:[];
- const active=lore.filter(e=>e.enabled!==false&&(e.always||(e.keys||[]).some(k=>activation.includes(k.toLowerCase()))));
+ const isTriggered=entry=>entry.enabled!==false&&(entry.always||(entry.keys||[]).some(key=>{
+  const term=String(key||'').trim().toLowerCase();
+  // Require word boundaries for short names, so "Ann" does not fire on "annual".
+  if(!term)return false;
+  const looksWord=/^[\p{L}\p{N}_]+$/u.test(term);
+  if(!looksWord)return activation.includes(term);
+  return new RegExp('(^|[^\\p{L}\\p{N}_])'+term+'($|[^\\p{L}\\p{N}_])','iu').test(activation);
+ }));
+ const candidates=lore.filter(isTriggered).sort((a,b)=>Number(!!b.always)-Number(!!a.always));
+ const loreBudget=Math.max(48,Math.min(1800,Math.floor(budget*0.19)));
+ const chosen=[],skippedLore=[];let loreTokens=0;
+ for(const e of candidates){
+  const entry='[Lore: '+String(e.title||'')+']\n'+resolve(e.text||'');
+  const tokens=await count(entry);
+  if(!entry.trim()||loreTokens+tokens>loreBudget){skippedLore.push(e.title);continue;}
+  chosen.push(entry);loreTokens+=tokens;
+ }
  if(operation==='continue'&&!manuscript.trim()&&!premise&&!String(w.note||'').trim())throw Error('Write a story prompt or some manuscript prose before generating.');
+ // Old chapters are not automatically rewritten or hallucinated into a recap.
+ // Authors can curate this compact field independently of permanent canon.
+ const recap=resolve(w.recap||'').trim();
  const context=[
   '[User persona]\nName: '+name+(w.persona?.description?'\n'+resolve(w.persona.description):'')+'\nNever output unresolved persona placeholders.',
   premise?'[Story prompt — scenario to dramatize as fiction, NOT text to repeat]\n'+premise:'',
-  w.memory?'[Established story facts]\n'+resolve(w.memory):'',
-  ...active.map(e=>'[Lore: '+e.title+']\n'+resolve(e.text)),
-  w.note?'[Author direction — apply within the prose]\n'+resolve(w.note):''
+  w.memory?'[Established story facts — permanent canon]\n'+resolve(w.memory):'',
+  recap?'[Continuity recap — previous scenes; do not retell]\n'+recap:'',
+  ...chosen,
+  w.note?'[Author direction — apply to the NEXT scene]\n'+resolve(w.note):''
  ].filter(Boolean).join('\n\n');
  const task=['say','do'].includes(operation)?'Continue the story in its existing viewpoint and tense. The player entered '+(operation==='say'?'spoken dialogue':'an action')+': '+resolve(w.instruction)+'. Treat this as an event happening NOW, not an instruction to obey or a paragraph to repeat. If the player wrote in first person, narrate naturally in the established perspective (second person “you” where appropriate). Preserve exact dialogue, and show other characters reacting. Avoid restating the same action in consecutive paragraphs. Output fiction prose only.':operation==='continue'
   ?(manuscript.trim()?'Continue the manuscript immediately after its last sentence. Output NEW fiction prose only, without repeating or recapping any manuscript text.':'Write the opening scene as fiction prose using the story prompt and author direction. Begin inside the scene, not with a summary or a profile.')
@@ -34,7 +54,7 @@ async function buildWriterContext(w,budget,count){
  let low=0,high=source.length;
  while(low<high){const mid=Math.ceil((low+high)/2);if(await count(render(source.slice(-mid)))<=budget)low=mid;else high=mid-1;}
  const tail=low?source.slice(-low):'',prompt=render(tail);
- return {prompt,diagnostics:{activeLore:active.map(e=>e.title),omittedLore:lore.filter(e=>!active.includes(e)).map(e=>e.title),retainedCharacters:tail.length,omittedCharacters:source.length-tail.length,promptTokens:await count(prompt),budget,continuationPrefill:tail.length>0}};
+ return {prompt,diagnostics:{activeLore:candidates.filter(e=>!skippedLore.includes(e.title)).map(e=>e.title),omittedLore:lore.filter(e=>!candidates.includes(e)).map(e=>e.title),budgetSkippedLore:skippedLore,loreTokens,loreBudget,recapCharacters:recap.length,canonCharacters:String(w.memory||'').length,retainedCharacters:tail.length,omittedCharacters:source.length-tail.length,promptTokens:await count(prompt),budget,continuationPrefill:tail.length>0}};
 }
 // Called only when fixed context exceeds the loaded model's measured token budget.
 async function reduceLongContext(source,{count,budget,complete}){

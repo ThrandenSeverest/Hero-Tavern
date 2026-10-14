@@ -6,6 +6,14 @@ const initHeroTavern = async () => {
     await import('./reply-filters.js');
     try { context = (await import('../../extensions.js')).getContext; } catch {}
     document.title = 'Hero Tavern';
+    const toolsButton=document.createElement('button'),toolsFrame=document.createElement('iframe');
+    toolsButton.textContent='AI tools · text / image / voice';toolsButton.style.cssText='position:fixed;right:18px;bottom:18px;z-index:2200;padding:10px;background:#574326;color:white;border:1px solid #b9a277;border-radius:8px';
+    toolsFrame.title='Shared AI tools';toolsFrame.src=bridgeOrigin+'/tools';toolsFrame.hidden=true;toolsFrame.style.cssText='position:fixed;right:12px;bottom:64px;width:min(960px,calc(100vw - 24px));height:80vh;border:1px solid #8293ad;border-radius:12px;z-index:2201;background:#192231';
+    let toolsTarget=null;
+    toolsButton.onpointerdown=()=>{const field=document.activeElement;if(field instanceof HTMLTextAreaElement)toolsTarget=field;};
+    toolsButton.onclick=()=>{toolsFrame.hidden=!toolsFrame.hidden;if(!toolsFrame.hidden){const selected=window.getSelection()?.toString()|| (toolsTarget?toolsTarget.value.slice(toolsTarget.selectionStart,toolsTarget.selectionEnd):'');toolsFrame.contentWindow.postMessage({type:'hero-tools-context',text:selected},bridgeOrigin);}};
+    window.addEventListener('message',e=>{if(e.origin!==bridgeOrigin||e.source!==toolsFrame.contentWindow||e.data?.type!=='hero-tools-insert')return;const field=toolsTarget||document.getElementById('send_textarea');if(field){field.setRangeText(String(e.data.text||''),field.selectionStart,field.selectionEnd,'end');field.dispatchEvent(new Event('input',{bubbles:true}));toolsFrame.hidden=true;}});
+    document.body.append(toolsButton,toolsFrame);
     document.documentElement.classList.add('hero-tavern-app');
     const style = document.createElement('style');
     style.textContent = `
@@ -23,6 +31,41 @@ const initHeroTavern = async () => {
     .hero-tavern-app #chat .mes_text{overflow-wrap:anywhere;min-width:0}.hero-tavern-app #chat .mes_reasoning,.hero-tavern-app #chat .reasoning_block{display:none!important}
     #hero-workspace{position:fixed;left:var(--hero-rail);right:0;top:var(--hero-top);bottom:0;background:#151b26;z-index:1999;display:none}#hero-workspace.open{display:block}#hero-model-frame{width:100%;height:100%;border:0}
     #hero-welcome{position:fixed;left:calc(var(--hero-rail) + 5%);right:calc(var(--hero-right) + 5%);top:calc(var(--hero-top) + 68px);bottom:80px;z-index:1997;background:#151b26;color:#e4eaf4;padding:36px;box-sizing:border-box;overflow:auto}.hero-eyebrow{color:#d9b771;text-transform:uppercase;letter-spacing:2px;font-size:12px}.hero-welcome-title{font-size:clamp(28px,4vw,48px);line-height:1.15;letter-spacing:-1.5px;max-width:720px;margin:18px 0}.hero-lead{color:#aab8ca;font-size:17px;max-width:650px;line-height:1.6}.hero-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;max-width:1080px;margin-top:32px}.hero-card{background:#202a3a;border:1px solid #3a485f;border-radius:16px;padding:24px}.hero-card h3{margin:0 0 12px;font-size:18px}.hero-card p{color:#a7b6c9;line-height:1.6;font-size:14px;min-height:60px}.hero-action{border:1px solid #c29c55;background:#d7b16b;color:#171b25;border-radius:8px;padding:11px 17px;cursor:pointer;font:600 14px 'Segoe UI',sans-serif}
+
+    /* User-managed UI variables deliberately override the fixed shell defaults. */
+    .hero-tavern-app{--hero-content-font:16px;--hero-shell-font:14px;--hero-pane-opacity:1;--hero-chat-opacity:.94;--hero-pane-blur:0px;--hero-custom-rail:200px;--hero-accent:#e0b96f;--hero-background-display:block}
+    .hero-tavern-app #hero-shell{width:var(--hero-custom-rail)!important;font-size:var(--hero-shell-font)!important}
+    .hero-tavern-app .hero-nav{font-size:var(--hero-shell-font)!important}
+    .hero-tavern-app #hero-header{font-size:var(--hero-shell-font)!important}
+    .hero-tavern-app #chat .mes_text,.hero-tavern-app #chat .mes_reasoning,.hero-tavern-app #send_textarea,.hero-tavern-app #chat .mes .mes_text{font-size:var(--hero-content-font)!important;line-height:1.55!important}
+    .hero-tavern-app #chat .name_text{font-size:calc(var(--hero-content-font) * .95)!important}
+    .hero-tavern-app #chat .mes{background:rgba(27,35,49,var(--hero-pane-opacity))!important;backdrop-filter:blur(var(--hero-pane-blur))!important}
+    .hero-tavern-app #chat{background:rgba(21,27,38,var(--hero-chat-opacity))!important}
+    .hero-tavern-app #send_form,.hero-tavern-app #hero-session-toolbar,.hero-tavern-app #hero-live-trackers{background:rgba(32,41,57,var(--hero-pane-opacity))!important;backdrop-filter:blur(var(--hero-pane-blur))!important}
+    .hero-tavern-app .drawer-content,.hero-tavern-app #right-nav-panel,.hero-tavern-app #left-nav-panel{background:rgba(29,37,51,var(--hero-pane-opacity))!important;backdrop-filter:blur(var(--hero-pane-blur))!important}
+    .hero-tavern-app #chat_background{display:var(--hero-background-display)!important}
+    .hero-tavern-app .hero-nav.active{color:var(--hero-accent)!important}
+    #hero-recent,#hero-appearance{position:fixed;top:var(--hero-top);left:var(--hero-rail);right:0;bottom:0;z-index:1999;overflow:auto;background:#151b26;color:#e6edf7;padding:26px clamp(16px,4vw,65px);box-sizing:border-box;font-family:'Segoe UI',system-ui}
+    #hero-recent[hidden],#hero-appearance[hidden]{display:none!important}
+    #hero-recent h2,#hero-appearance h2{font-size:26px;margin:0 0 9px}
+    #hero-recent .hero-page-lead,#hero-appearance .hero-page-lead{color:#aab8ca;max-width:800px;line-height:1.6}
+    .hero-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;max-width:1050px;margin-top:24px}
+    .hero-config-card,.hero-recent-card{border:1px solid #45546b;border-radius:12px;padding:18px;background:rgba(35,47,64,var(--hero-pane-opacity));color:#e6edf7}
+    .hero-config-card label{display:block;font-weight:600;margin-bottom:12px}
+    .hero-config-card input[type=range]{width:100%;accent-color:var(--hero-accent)}
+    .hero-config-card select,.hero-config-card input[type=color],#hero-recent-search{background:#273449;color:#fff;border:1px solid #60708b;border-radius:7px;padding:9px;font:inherit}
+    .hero-config-card output{float:right;color:#e4c488}
+    .hero-config-card p{font-size:13px;color:#b5c5d9;line-height:1.45}
+    .hero-config-actions,.hero-recent-actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:18px 0}
+    .hero-config-actions button,.hero-recent-actions button,.hero-recent-card button{padding:9px 13px;border:1px solid #7990af;border-radius:8px;background:#2a3c55;color:#f1f5fc;cursor:pointer;font:inherit}
+    #hero-recent-search{width:min(580px,100%);box-sizing:border-box}
+    #hero-recent-list{display:grid;gap:10px;max-width:1200px}
+    .hero-recent-card{display:flex;align-items:center;gap:15px}
+    .hero-recent-card .hero-recent-copy{flex:1;min-width:0}
+    .hero-recent-card strong,.hero-recent-card small{display:block}
+    .hero-recent-card p{margin:7px 0 0;color:#b8c6d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .hero-recent-card small{color:#9fb0c8;margin-top:4px}
+    @media(max-width:900px){#hero-recent,#hero-appearance{padding:15px;left:var(--hero-rail)}}
     @media(max-height:650px){#hero-shell{padding-top:10px;padding-bottom:10px}.hero-nav{padding-top:7px;padding-bottom:7px;margin:0}}\n    @media(max-width:900px){.hero-tavern-app{--hero-rail:76px}.hero-brand{font-size:13px;margin-left:0}.hero-tagline,.hero-rail-foot{display:none}.hero-nav{font-size:11px;padding:12px 3px;text-align:center}#hero-shell{padding:16px 5px}.hero-cards{grid-template-columns:1fr}#hero-header{padding:0 14px}#hero-welcome{padding:18px}}
     `;
     document.head.append(style);
@@ -37,19 +80,105 @@ const initHeroTavern = async () => {
     welcome.innerHTML='<button id="hero-welcome-close" aria-label="Close welcome" style="float:right;padding:10px;border:1px solid #64748b;border-radius:8px;background:#27354a;color:white;cursor:pointer">Close ×</button><div class="hero-eyebrow">Welcome to your tavern</div><h1 class="hero-welcome-title">Every character has a story.<br>Start yours here.</h1><p class="hero-lead">Create a character, bring your world to life, and chat with an AI running on your own computer.</p><div class="hero-cards"><article class="hero-card"><h3>1 · Choose your AI</h3><p>Try Rocinante or Qwen, or load an installed model. Hero Tavern runs and connects the engine for you.</p><button class="hero-action" data-hero="models">Open models</button></article><article class="hero-card"><h3>2 · Meet a character</h3><p>Create someone new or import a SillyTavern character card to begin your conversation.</p><button class="hero-action" data-hero="characters">Characters</button></article><article class="hero-card"><h3>3 · Build your world</h3><p>Add places, lore and memories with SillyTavern’s World Info tools.</p><button class="hero-action" data-hero="world">World info</button></article></div>';
     const adventure=document.createElement('iframe');adventure.id='hero-adventure-frame';adventure.title='Ilreon Adventure mode';adventure.src=bridgeOrigin+'/adventure';adventure.hidden=true;adventure.style.cssText='width:100%;height:100%;border:0';workspace.append(adventure);
     const writer=document.createElement('iframe');writer.id='hero-writer-frame';writer.title='Writer · manuscript editor';writer.src=bridgeOrigin+'/writer';writer.hidden=true;writer.style.cssText='width:100%;height:100%;border:0';workspace.append(writer);
+
+    const recent=document.createElement('section');recent.id='hero-recent';recent.hidden=true;
+    recent.innerHTML='<h2>Recent Chats</h2><p class="hero-page-lead">Native SillyTavern chats, shown without leaving Hero Tavern. Search, open, or continue an existing conversation. Your saved chats are never duplicated by this screen.</p><div class="hero-recent-actions"><input id="hero-recent-search" type="search" placeholder="Search characters, titles, messages" aria-label="Search recent chats"><button id="hero-recent-refresh">Refresh chats</button><label><input id="hero-recent-archived" type="checkbox"> Show archived</label></div><p id="hero-recent-status" role="status"></p><div id="hero-recent-list"></div>';
+    const appearance=document.createElement('section');appearance.id='hero-appearance';appearance.hidden=true;
+    appearance.innerHTML='<h2>Appearance & Layout</h2><p class="hero-page-lead">These controls affect the Tavern UI immediately and are saved locally. They do not modify your chats, characters or SillyTavern themes.</p><div class="hero-config-grid">'+
+      '<div class="hero-config-card"><label for="hero-font-size">Chat and story text <output id="hero-font-label"></output></label><input id="hero-font-size" type="range" min="12" max="28" step="1"><p>Changes chat messages, input field and supported editors.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-ui-size">Navigation text <output id="hero-ui-label"></output></label><input id="hero-ui-size" type="range" min="11" max="22" step="1"><p>Choose a comfortable size for the app’s buttons and navigation.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-panel-opacity">Panel opacity <output id="hero-opacity-label"></output></label><input id="hero-panel-opacity" type="range" min="35" max="100" step="5"><p>100% makes chat bubbles and menus fully opaque, hiding the image behind them.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-chat-opacity">Chat backdrop opacity <output id="hero-chat-opacity-label"></output></label><input id="hero-chat-opacity" type="range" min="0" max="100" step="5"><p>Controls the large chat area behind messages.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-blur">Background blur <output id="hero-blur-label"></output></label><input id="hero-blur" type="range" min="0" max="20" step="1"><p>Optional frosted-glass blur. Use 0 for crisp solid panels.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-rail-width">Sidebar width <output id="hero-rail-label"></output></label><input id="hero-rail-width" type="range" min="160" max="300" step="10"><p>Expand the navigation so labels are easier to read.</p></div>'+
+      '<div class="hero-config-card"><label for="hero-accent">Accent color</label><input id="hero-accent" type="color"><p>Used on the selected navigation item and highlights.</p></div>'+
+      '<div class="hero-config-card"><label><input id="hero-show-background" type="checkbox"> Show chat background image</label><p>Turn this off to use plain, high-contrast panels with no image showing behind them.</p></div>'+
+      '</div><div class="hero-config-actions"><button id="hero-appearance-reset">Restore default appearance</button><button id="hero-appearance-close">Back to Tavern</button></div><p id="hero-appearance-status" role="status">Appearance settings are saved automatically.</p>';
+    document.body.append(recent,appearance);
+    const $hero=id=>document.getElementById(id);
+    const UI_KEY='hero.tavern.appearance.v2';
+    const uiDefaults=()=>({font:16,ui:14,panels:100,chat:95,blur:0,rail:200,accent:'#e0b96f',background:true});
+    const clampUI=(n,min,max,fall)=>Number.isFinite(Number(n))?Math.min(max,Math.max(min,Number(n))):fall;
+    const validateUI=x=>({font:clampUI(x?.font,12,28,16),ui:clampUI(x?.ui,11,22,14),
+      panels:clampUI(x?.panels,35,100,100),chat:clampUI(x?.chat,0,100,95),
+      blur:clampUI(x?.blur,0,20,0),rail:clampUI(x?.rail,160,300,200),
+      accent:/^#[0-9a-f]{6}$/i.test(x?.accent||'')?x.accent:'#e0b96f',
+      background:x?.background!==false});
+    let uiPrefs;
+    try{uiPrefs=validateUI(JSON.parse(localStorage.getItem(UI_KEY)||'null'))}catch{uiPrefs=uiDefaults();}
+    const sendUI=()=>{
+      for(const fr of [frame,adventure,writer])
+        if(fr?.contentWindow)fr.contentWindow.postMessage({type:'hero-ui-settings',settings:uiPrefs},bridgeOrigin);
+    };
+    function applyUI(){
+      const root=document.documentElement,values={
+        '--hero-content-font':uiPrefs.font+'px','--hero-shell-font':uiPrefs.ui+'px',
+        '--hero-pane-opacity':String(uiPrefs.panels/100),'--hero-chat-opacity':String(uiPrefs.chat/100),
+        '--hero-pane-blur':uiPrefs.blur+'px','--hero-custom-rail':(innerWidth<=900?76:uiPrefs.rail)+'px',
+        '--hero-rail':(innerWidth<=900?'76px':uiPrefs.rail+'px'),
+        '--hero-accent':uiPrefs.accent,'--hero-background-display':uiPrefs.background?'block':'none'
+      };
+      for(const [name,value] of Object.entries(values))root.style.setProperty(name,value);
+      for(const [key,id] of [['font','hero-font-size'],['ui','hero-ui-size'],['panels','hero-panel-opacity'],['chat','hero-chat-opacity'],['blur','hero-blur'],['rail','hero-rail-width'],['accent','hero-accent'],['background','hero-show-background']]){
+        const node=$hero(id);if(node){if(key==='background')node.checked=uiPrefs[key];else node.value=uiPrefs[key];}
+      }
+      for(const [id,value] of [['hero-font-label',uiPrefs.font+'px'],['hero-ui-label',uiPrefs.ui+'px'],['hero-opacity-label',uiPrefs.panels+'%'],['hero-chat-opacity-label',uiPrefs.chat+'%'],['hero-blur-label',uiPrefs.blur+'px'],['hero-rail-label',uiPrefs.rail+'px']])$hero(id).textContent=value;
+      try{localStorage.setItem(UI_KEY,JSON.stringify(uiPrefs))}catch{}
+      sendUI();
+    }
+    for(const [key,id] of [['font','hero-font-size'],['ui','hero-ui-size'],['panels','hero-panel-opacity'],['chat','hero-chat-opacity'],['blur','hero-blur'],['rail','hero-rail-width'],['accent','hero-accent'],['background','hero-show-background']]){
+      const field=$hero(id);field.addEventListener('input',()=>{uiPrefs=validateUI({...uiPrefs,[key]:key==='background'?field.checked:key==='accent'?field.value:Number(field.value)});applyUI();});
+    }
+    $hero('hero-appearance-reset').onclick=()=>{uiPrefs=uiDefaults();applyUI();};
+    $hero('hero-appearance-close').onclick=()=>show('chat');
+    for(const fr of [frame,adventure,writer])fr.addEventListener('load',sendUI);
+    const recentState={items:[],loading:false};
+    function drawRecent(){
+      const list=$hero('hero-recent-list');list.replaceChildren();
+      const query=$hero('hero-recent-search').value.toLowerCase().trim();
+      const results=recentState.items.filter(x=>!query||(x.title+' '+x.last+' '+(x.location?.avatar||'')).toLowerCase().includes(query));
+      if(!results.length){const empty=document.createElement('p');empty.textContent=query?'No matching chats. Try another search.':'No saved chats found. Start a chat with a character first.';list.append(empty);return;}
+      for(const chat of results){
+        const row=document.createElement('article');row.className='hero-recent-card';
+        const content=document.createElement('div');content.className='hero-recent-copy';
+        const title=document.createElement('strong');title.textContent=chat.title||chat.location?.avatar||'Unnamed chat';
+        const meta=document.createElement('small');meta.textContent=(chat.location?.avatar?.replace(/\.png$/,'')||chat.location?.group||'Group')+' · '+(chat.count||0)+' messages'+(chat.archived?' · Archived':'');
+        const preview=document.createElement('p');preview.textContent=String(chat.last||'No messages yet').replace(/<[^>]*>/g,'').slice(0,360);
+        content.append(title,meta,preview);
+        const button=document.createElement('button');button.textContent='Open chat';
+        button.onclick=async()=>{button.disabled=true;button.textContent='Opening…';try{await window.HeroStory.run('open',{id:chat.id});}catch(error){button.disabled=false;button.textContent='Retry';$hero('hero-recent-status').textContent='Unable to open chat: '+error.message;}};
+        row.append(content,button);list.append(row);
+      }
+    }
+    async function refreshRecent(){
+      if(recentState.loading)return;
+      if(!window.HeroStory?.run){$hero('hero-recent-status').textContent='Waiting for native chat history to initialize…';setTimeout(()=>{if(!recent.hidden)refreshRecent()},700);return;}
+      recentState.loading=true;$hero('hero-recent-status').textContent='Loading saved chats…';
+      try{const items=await window.HeroStory?.run('list',{archived:$hero('hero-recent-archived').checked});
+        if(!Array.isArray(items))throw Error('Chat history is not ready; retry in a moment.');
+        recentState.items=items;$hero('hero-recent-status').textContent=items.length+' saved chats · most recent first';drawRecent();
+      }catch(error){$hero('hero-recent-status').textContent='Cannot load recent chats: '+error.message;}
+      finally{recentState.loading=false;}
+    }
+    $hero('hero-recent-search').addEventListener('input',drawRecent);
+    $hero('hero-recent-refresh').onclick=refreshRecent;
+    $hero('hero-recent-archived').onchange=refreshRecent;
+    applyUI();
     let welcomeDismissed=false;const dismissWelcome=()=>{welcomeDismissed=true;welcome.hidden=true;};
     const show = name => {
         dismissWelcome();
+        recent.hidden=name!=='recent-chats';appearance.hidden=name!=='appearance';
+        if(name==='recent-chats')refreshRecent();
         if(name==='chat'){const panel=document.getElementById('right-nav-panel');if(panel&&!panel.classList.contains('closedDrawer')&&getComputedStyle(panel).display!=='none')document.querySelector('#rightNavDrawerIcon')?.click();}
-        const isPanel=['model-tests','voices','assistant','models','vision','hardware','generation','memory','images','comfy-workflows','image-setup','storage','creator','adventure','writer','diagnostics','history','trackers','lore','inspector'].includes(name);
-        workspace.classList.toggle('open',isPanel);
-        document.getElementById('hero-page-title').textContent={'model-tests':'Model Testing',voices:'Character voices',vision:'Image analyzer',assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',writer:'Writer · novels & stories',adventure:'Ilreon · Adventure mode','comfy-workflows':'ComfyUI Workflows',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=['adventure','writer'].includes(name);adventure.hidden=name!=='adventure';writer.hidden=name!=='writer';
+        const isPanel=['recent-chats','appearance','model-center','model-tests','voices','assistant','models','vision','hardware','generation','memory','images','comfy-workflows','image-setup','storage','creator','adventure','writer','diagnostics','history','trackers','lore','inspector'].includes(name);
+        workspace.classList.toggle('open',isPanel&&!['recent-chats','appearance'].includes(name));toolsButton.hidden=isPanel;if(isPanel)toolsFrame.hidden=true;
+        document.getElementById('hero-page-title').textContent={'recent-chats':'Recent Chats',appearance:'Appearance & Layout','model-center':'All AI models','model-tests':'Model Testing',voices:'Character voices',vision:'Image analyzer',assistant:'Ассистент · Qwen',diagnostics:'Diagnostics',history:'Saved stories',trackers:'Story trackers',lore:'Lorebook editor',inspector:'Prompt Inspector',writer:'Writer · novels & stories',adventure:'Ilreon · Adventure mode','comfy-workflows':'ComfyUI Workflows',images:'Image Studio', 'image-setup':'Image models & setup',storage:'Storage & cleanup',memory:'Chat memory',creator:'Character studio',generation:'Generation',hardware:'Hardware'}[name]||(isPanel?'Models & local AI':'Your tavern');frame.hidden=['adventure','writer'].includes(name);adventure.hidden=name!=='adventure';writer.hidden=name!=='writer';
         rail.querySelectorAll('.hero-nav').forEach(b=>b.classList.toggle('active',b.dataset.hero===name));
-        if(isPanel&&!['adventure','writer'].includes(name)) frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);
+        if(isPanel&&!['adventure','writer','recent-chats','appearance'].includes(name)) frame.contentWindow?.postMessage({type:'hero-section',section:name},bridgeOrigin);
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};
         if(selectors[name])document.querySelector(selectors[name])?.click();
     };
-    for(const [name,label] of [['chat','Tavern'],['model-tests','Model Testing'],['voices','Voices'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['comfy-workflows','ComfyUI Workflows'],['storage','Storage'],['models','Models'],['vision','Image analyzer'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
+    for(const [name,label] of [['chat','Tavern'],['recent-chats','Recent Chats'],['appearance','Appearance'],['model-center','All AI models'],['model-tests','Model Testing'],['voices','Voices'],['assistant','Ассистент'],['history','Story History'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['comfy-workflows','ComfyUI Workflows'],['storage','Storage'],['models','Models'],['vision','Image analyzer'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);
@@ -119,30 +248,31 @@ const initHeroTavern = async () => {
     async function heroVoiceSettings(){const state=await bridgeRequest('/tts/status',{});heroVoiceStatus=state;return state;}
     async function heroSpeakMessage(element,force=false){
       if(heroSpeaking)return;
-      const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled)return;
-      const raw=element.querySelector('.mes_text')?.innerText||'';
-      const cleaned=raw.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();if(!cleaned)return;
-      const id=String(element.getAttribute('mesid')||element.dataset.mesid||'')+'|'+cleaned;
-      if(!force&&id===heroLastSpoken)return;
-      const who=element.querySelector('.name_text')?.textContent?.trim()||context?.()?.name2||'Character';
-      heroSpeaking=true;heroLastSpoken=id;
+      const button=element.querySelector('.hero-speak-message');
+      let output=element.querySelector('.hero-voice-output');if(!output){output=document.createElement('div');output.className='hero-voice-output';button?.after(output);}
+      heroSpeaking=true;
       try{
-       const speech=await bridgeRequest('/tts/split',{text:cleaned,speaker:who,narrator:'Narrator'});
-       for(const segment of speech.segments.slice(0,25)){
-        if(!document.contains(element))break;
-        const voice=segment.kind==='narration'?state.settings.narratorSpeaker:state.settings.speaker;
-        const isNarration=segment.kind==='narration';const ref=isNarration?state.settings.narratorReference:state.settings.dialogueReference;const transcript=isNarration?state.settings.narratorReferenceText:state.settings.referenceText;const result=await bridgeRequest('/tts/speak',{text:segment.text,speaker:voice,reference:ref,referenceText:transcript,style:state.settings.style});
-        const audio=new Audio(bridgeOrigin+result.url);heroAudio=audio;
-        await audio.play();
-        await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});
-       }
-      }catch(e){console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;heroAudio=null;}
+       const state=await heroVoiceSettings();if(!force&&!state.settings.enabled)return;
+       const ctx=context?.(),index=Number(element.getAttribute('mesid')),message=ctx?.chat?.[index];
+       const cleaned=String(message?.mes||element.querySelector('.mes_text')?.innerText||'').replace(/<think>[\s\S]*?(?:<\/think>|$)/gi,'').trim();if(!cleaned)return;
+       const id=(message?.extra?.heroMessageId||String(index))+'|'+cleaned;if(!force&&id===heroLastSpoken)return;
+       const avatar=message?.original_avatar||message?.force_avatar;
+       const character=avatar?ctx.characters?.find(c=>c.avatar===avatar):ctx.characters?.[ctx.characterId];
+       const assignment=(character?.data?.extensions?.hero_tavern||character?.extensions?.hero_tavern)?.voice||{};
+       output.textContent='Preparing voice…';if(button)button.disabled=true;
+       const result=await bridgeRequest('/tts/message',{text:cleaned,assignment,messageId:message?.extra?.heroMessageId||String(index)});
+       if(!document.contains(element))return;
+       const audio=document.createElement('audio');audio.controls=true;audio.src=bridgeOrigin+result.url;heroAudio=audio;output.replaceChildren(audio);
+       const download=document.createElement('a');download.href=audio.src;download.textContent=' Download voice';download.target='_blank';output.append(download);
+       try{await audio.play()}catch{const note=document.createElement('p');note.textContent='Audio is ready. Click Play (browser blocked autoplay).';output.append(note)}
+       heroLastSpoken=id;
+      }catch(e){output.textContent='Voice failed: '+e.message+' — Open Voices for model settings and speech job log.';console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;if(button)button.disabled=false;}
     }
     const heroChat=document.getElementById('chat');
     if(heroChat){
-     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeaking=false;heroSpeakMessage(button.closest('.mes'),true);}});
+     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeakMessage(button.closest('.mes'),true);}});
      const attachVoiceButtons=()=>{
-      for(const message of heroChat.querySelectorAll('.mes:not(.is_user)')){
+      for(const message of heroChat.querySelectorAll('.mes:not(.is_user):not([is_user="true"])')){
        if(message.querySelector('.hero-speak-message'))continue;
        const text=message.querySelector('.mes_text');if(!text)continue;
        const btn=document.createElement('button');btn.className='hero-speak-message';btn.type='button';btn.textContent='▶ Voice';btn.title='Read narration and dialogue with separate voices';btn.style.cssText='margin:5px 0;padding:4px 9px;font-size:12px;border:1px solid #756348;border-radius:6px;background:#252b39;color:#e9d5a3;cursor:pointer';text.after(btn);
@@ -153,7 +283,7 @@ const initHeroTavern = async () => {
      attachVoiceButtons();
      if(c?.eventSource&&c?.eventTypes?.GENERATION_ENDED)c.eventSource.on(c.eventTypes.GENERATION_ENDED,async()=>{
       const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled||!state.settings.autoPlay)return;
-      const last=[...heroChat.querySelectorAll('.mes:not(.is_user)')].at(-1);if(last)heroSpeakMessage(last);
+      const last=[...heroChat.querySelectorAll('.mes:not(.is_user):not([is_user="true"])')].at(-1);if(last)heroSpeakMessage(last);
      });
     }
 
@@ -207,7 +337,7 @@ const initHeroTavern = async () => {
     };
     const rightPanel=document.getElementById('right-nav-panel');
     if(rightPanel)new MutationObserver(updateDock).observe(rightPanel,{attributes:true,attributeFilter:['class','style']});
-    window.addEventListener('resize',updateDock);updateDock();
+    window.addEventListener('resize',()=>{applyUI();updateDock();});updateDock();
     const cleanMessages = nodes => {
         for(const node of nodes){
             if(!node.closest('.mes[is_user="false"]'))continue;

@@ -352,14 +352,15 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (await pipeline.handle(req,res)) return;
         if(req.url.startsWith('/sdapi/v1/')){await nativeImages(req,res);return;}
         res.setHeader('Cache-Control', 'no-store');
-        res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' "+comfy.snapshot().url+"; frame-ancestors http://127.0.0.1:8000 http://localhost:8000");
+        res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' "+comfy.snapshot().url+"; frame-ancestors 'self' http://127.0.0.1:8000 http://localhost:8000");
         const json = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
         if (req.method === 'GET' && req.url === '/') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
+            res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token).replace('</body>','<script src="/shared-tools.js"></script></body>')); return;
         }
-        const assets={'/lora-library.js':'LoRALibraryUI.js','/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js','/voice-panel.js':'VoicePanel.js','/model-tests-panel.js':'ModelTestsPanel.js'};
-        if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
+        if(req.method==='GET'&&req.url==='/tools'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end('<!doctype html><html><head><meta charset="utf-8"><title>AI tools</title></head><body style="margin:0;background:#192231"><script src="/shared-tools.js"></script></body></html>');return;}
+        const assets={'/shared-tools.js':'SharedTools.js','/lora-library.js':'LoRALibraryUI.js','/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js','/voice-panel.js':'VoicePanel.js','/model-tests-panel.js':'ModelTestsPanel.js'};
+        if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token).replace('</body>',file.endsWith('.html')?'<script src="/shared-tools.js"></script></body>':'</body>'));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if(req.method==='GET'&&req.url.startsWith('/tts/audio/')){const file=tts.readAudio(req.url);if(!file){json(404,{error:'Audio not found'});return;}res.writeHead(200,{'Content-Type':'audio/wav','Access-Control-Allow-Origin':'http://127.0.0.1:8000','Vary':'Origin'});fs.createReadStream(file).pipe(res);return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
@@ -386,8 +387,23 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if (req.method === 'GET' && req.url === '/logs') { json(200, { output: logTail(path.join(logs, 'koboldcpp.log')), error: logTail(path.join(logs, 'koboldcpp-error.log')) }); return; }
         if (req.method !== 'POST' || req.headers.origin !== 'http://' + host) { json(403, { error: 'Invalid request origin.' }); return; }
         try {
-            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import')?39000000:2000000))) throw new Error('Request too large.'); }
+            let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import'||req.url==='/vision/analyze')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            // Shared text works with the selected local model in every mode,
+            // without the separate Assistant workflow's Qwen-only restriction.
+            if(req.url==='/tools/text'){
+                const prompt=String(data.prompt||'').trim();
+                if(!prompt||prompt.length>12000)throw Error('Enter a text request (1–12000 characters).');
+                if(imageJob||textPausedForImages||assistant.snapshot().busy||tuner.snapshot()?.status==='running')throw Error('Finish the active AI task before using shared text tools.');
+                if(!selected())throw Error('Download and select a text model in All AI models first.');
+                await ensureText();
+                const controller=new AbortController();
+                res.on('close',()=>{if(!res.writableEnded)controller.abort()});
+                const result=await pipeline.generate({prompt:'You are a local text assistant. Answer directly without roleplay, private thinking, or a character profile.\n\nRequest: '+prompt+'\n\nAnswer:',stream:false,max_tokens:512},controller.signal);
+                const answer=String(result.choices?.[0]?.text||'').trim();
+                if(!answer)throw Error('Text model returned an empty response. Check model generation settings.');
+                json(200,{answer,model:runningModel||selected(),usage:result.usage||null});return;
+            }
             if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
             if(req.url==='/model-tests/record'){json(200,modelTests.record(data));return;}
             if(req.url==='/model-tests/text'){
@@ -410,7 +426,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 return;
             }
 
-            if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/download':result=tts.downloadModel();break;case '/tts/download-cancel':result=tts.cancelModelDownload();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
+            if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/status':result=tts.status();break;case '/tts/profiles/save':result=tts.saveProfile(data);break;case '/tts/profiles/delete':result=tts.deleteProfile(data);break;case '/tts/message':result=await tts.speakMessage(data);break;case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/setup':result=tts.setup();break;case '/tts/install-cancel':result=tts.cancelInstall();break;case '/tts/download':result=tts.downloadModel();break;case '/tts/download-cancel':result=tts.cancelModelDownload();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}

@@ -222,7 +222,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     logEvent({action:'comfy-upload',source:sourceName,remoteFiles:[source,mask].filter(Boolean),remoteFolder:'ComfyUI input (external; retained)'});
    }
    if(mode==='inpaint'&&!mask)throw Error('The inpaint brush selection cannot be empty.');
-   if(mode==='upscale'&&sourceDimensions){if(params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)>1024)throw Error('For safe AI upscaling on 12 GB VRAM, select a source at most 1024 pixels per side.');if(!params.upscaleModel&&Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
+   if(mode==='upscale'&&sourceDimensions){if(Math.max(sourceDimensions.width,sourceDimensions.height)*(params.upscaleFactor||2)>4096)throw Error('Upscale result would exceed 4096px.');}
    const settings={...params,width:sourceDimensions?.width||params.width,height:sourceDimensions?.height||params.height};
    const spec=custom?workflows.build(params.workflowId,{...settings,sourceImage:source||'',maskImage:mask||''}):managed?recipeGraph(chosenPack,settings,{source,mask,reference,resolvedFiles:resolvedFiles}):buildWorkflow({checkpoint,params:settings,source,mask,mode,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2,upscaleMethod:params.upscaleMethod||'lanczos'});
    const qwenGraph=managed&&chosenPack.family==='qwen21';

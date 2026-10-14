@@ -189,6 +189,12 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0StartHeroTave
 if errorlevel 1 pause
 '@
     Write-AsciiFile (Join-Path $Root 'Start-Chat.cmd') $launchChat
+    $stopChat = @'
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0StopHeroTavern.ps1"
+if errorlevel 1 pause
+'@
+    Write-AsciiFile (Join-Path $Root 'Stop-Chat.cmd') $stopChat
     if (-not (Test-Path (Join-Path $Root 'backend.json'))) {
         '{"mode":"cpu","gpuLayers":0,"contextSize":8192}' | Set-Content (Join-Path $Root 'backend.json')
     }
@@ -207,6 +213,10 @@ if errorlevel 1 pause
     $shortcut.TargetPath = Join-Path $Root 'Start-Chat.cmd'
     $shortcut.WorkingDirectory = $Root
     $shortcut.Save()
+    $stopShortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Stop Hero Tavern.lnk'))
+    $stopShortcut.TargetPath = Join-Path $Root 'Stop-Chat.cmd'
+    $stopShortcut.WorkingDirectory = $Root
+    $stopShortcut.Save()
 
     $help = @'
 HERO TAVERN
@@ -216,6 +226,7 @@ Installation: __ROOT__
 Open Hero Tavern first, then click Models to download Qwen in the chat UI.
 Manage-Models.cmd remains available for advanced/custom downloads.
 Start-Chat.cmd: open SillyTavern immediately; AI loads separately.
+Stop-Chat.cmd: safely stop the recorded Hero Tavern session even when the browser is stuck.
 Hero Tavern desktop shortcut starts the same launcher.
 Use the red Exit Hero Tavern button in the app sidebar to stop all managed servers.
 Alternatively press Enter in the launcher window. Closing the browser tab alone only hides the UI.

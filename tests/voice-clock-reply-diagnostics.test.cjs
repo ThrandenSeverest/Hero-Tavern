@@ -9,7 +9,7 @@ const message=(text,id='t1')=>({name:'Seraphina',mes:text,extra:{heroMessageId:i
 test('A confirmed in-story clock statement updates exactly the HH:mm time with source evidence',()=>{
  const result=explicitClockChanges([clock],[message('The time... fine. It\'s 23:47. Now please, tell me—why does it matter?')],{[S.keyOf(clock)]:'--:--'});
  assert.equal(result.length,1);assert.equal(result[0].value,'23:47');assert.equal(result[0].sourceMessageId,'t1');
- assert.match(result[0].evidence,/23:47/);assert.match(result[0].reason,/story time/);
+ assert.match(result[0].evidence,/23:47/);assert.match(result[0].reason,/clock state/);
  assert.equal(explicitClockChanges([clock],[message('It is 23:47.')],{[S.keyOf(clock)]:'23:47'}).length,0);
 });
 test('Questions, bare timestamps and unestablished story time cannot become clock updates',()=>{

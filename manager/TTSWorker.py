@@ -1,7 +1,7 @@
 """Isolated Hero Tavern TTS inference worker (one JSON object per stdin line).
 Only stdout JSON records are protocol; package logs go to stderr.
 """
-import sys, json, base64, io, gc, traceback
+import sys, json, base64, io, gc, traceback, os
 from contextlib import redirect_stdout
 
 model = None
@@ -21,16 +21,18 @@ def unload():
     except Exception:
         pass
 
-def load(engine, variant, device):
+def load(engine, variant, device, model_path):
     global model, model_key
-    key = (engine, variant, device)
+    key = (engine, variant, device, model_path)
     if key == model_key and model is not None:
         return model
     unload()
+    if not model_path or not os.path.isfile(os.path.join(model_path, ".hero-downloaded")):
+        raise FileNotFoundError("Download the selected TTS model weights from Voice Models first.")
     with redirect_stdout(sys.stderr):
         if engine == "flash":
             from chatterbox_flash import ChatterboxFlashTTS
-            model = ChatterboxFlashTTS.from_pretrained("ResembleAI/chatterbox-flash", device=device)
+            model = ChatterboxFlashTTS.from_pretrained(model_path, device=device)
         elif engine == "qwen":
             import torch
             from qwen_tts import Qwen3TTSModel
@@ -44,7 +46,7 @@ def load(engine, variant, device):
             if variant not in allowed:
                 raise ValueError("Unsupported Qwen3-TTS variant")
             model = Qwen3TTSModel.from_pretrained(
-                allowed[variant],
+                model_path,
                 device_map="cuda:0" if device == "cuda" else "cpu",
                 dtype=torch.bfloat16 if device == "cuda" else torch.float32,
                 attn_implementation="sdpa",
@@ -62,7 +64,7 @@ def generate(data):
     if not text.strip() or len(text) > 600:
         raise ValueError("Speech segment must contain 1–600 characters.")
     with redirect_stdout(sys.stderr):
-        m = load(engine, variant, device)
+        m = load(engine, variant, device, data.get("modelPath"))
         if engine == "flash":
             voice_file = data.get("reference", "")
             if not voice_file:

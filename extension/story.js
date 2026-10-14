@@ -29,6 +29,19 @@ export async function initStory({getContext,frame,show}){
     const v=await sync(),book=await c().loadWorldInfo(data.name);if(!book)throw Error('Lorebook not found.');const entries=book.hero_tavern?.entries||Object.values(book.entries||{}).filter(e=>!e.disable).map(e=>({id:'native-'+data.name+'-'+e.uid,label:e.comment||'Lore',text:e.content,keywords:e.constant?[]:e.key||[],visibility:'player'}));return rpc('/story/metadata',{id:v.session.id,lore:[...v.session.lore,...entries.filter(e=>!v.session.lore.some(x=>x.id===e.id))]});
    }
    if(op==='test-character')return rpc('/story/test-character',data);
+    if(op==='tracker-remove'){
+     const v=await sync();if(!v)throw Error('Select a character chat first.');
+     const tracker=v.session.definitions.find(d=>d.owner+':'+d.id===data.key);if(!tracker)throw Error('Tracker not found.');
+     const result=await rpc('/story/definition-delete',{id:v.session.id,key:data.key});
+     const characterOwner='character:'+v.session.characterId;
+     if(tracker.owner===characterOwner){
+      const profile=v.characterProfile||{};
+      const remaining=(profile.trackers||[]).filter(t=>!(t.id===tracker.id&&(t.owner===tracker.owner||t.owner==='character:self'||!t.owner)));
+      const updated=await rpc('/story/profile',{characterId:v.session.characterId,profile:{...profile,trackers:remaining}});
+      if(!c().groupId)await c().writeExtensionField(c().characterId,'hero_tavern',updated);
+     }
+     view=result;publish();return result;
+    }
    if(op==='helper')return rpc('/story/helper',{...data,context:[c().characters[c().characterId]?.description||'',data.context||''].join('\n')});
    const v=await sync();if(!v)throw Error('Select a character and chat first.');
    if(op==='open'){const target=await rpc('/story/get',{id:data.id});await open(target.session);return target;}

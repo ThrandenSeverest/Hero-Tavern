@@ -113,3 +113,20 @@ test('Extractor failure is retryable and does not mark source messages analyzed'
  assert.equal(session.lastAnalysis.failed,true);
  assert.ok(session.failures.length);
 });
+
+test('Two changes to one record in a single reply persist as one complete merged event',async()=>{
+ const {createStoryAPI}=require('../manager/StoryAPI.cjs');
+ const d=S.validateDefinition({owner:'character:seraphina',id:'meals',label:'Meals',type:'record',initialValue:{summary:'Unknown',recentMeals:[]},updateMode:'automatic'});
+ const m=message('She ate an apple.'),session={id:'s',characterId:'seraphina',definitions:[d],events:[],analyzedSources:[],failures:[]};
+ const messages=[m];
+ const store={view:()=>({session,messages,context:{state:S.stateAt(session,messages)}}),get:()=>session,saveSession:()=>{},eventPatch(_id,updates){session.events.push(...S.propose(session,messages,updates));return this.view();}};
+ const raw=JSON.stringify({operations:[
+  {key:S.keyOf(d),verb:'FIELD',value:'summary=Ate an apple',sourceMessageId:m.extra.heroMessageId,evidence:'She ate an apple.'},
+  {key:S.keyOf(d),verb:'FIELD',value:'recentMeals+=apple',sourceMessageId:m.extra.heroMessageId,evidence:'She ate an apple.'}
+ ]});
+ const api=createStoryAPI(store,{generate:async()=>({choices:[{text:raw}]})});
+ const result=await api.action('/story/analyze',{id:'s'});
+ assert.equal(result.session.events.length,1);
+ assert.deepEqual(result.context.state[S.keyOf(d)],{summary:'Ate an apple',recentMeals:['apple']});
+ assert.equal(result.session.lastAnalysis.changes,1);
+});

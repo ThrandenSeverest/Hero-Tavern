@@ -36,7 +36,7 @@
  const base=()=>{
   const model=$('model-test-model').value;
   const opts=model==='sdxl'?{steps:28,cfg_scale:6,sampler_name:'DPM++ 2M Karras',scheduler:'karras'}:model==='flux-klein'?{steps:4,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:model==='z-turbo'?{steps:9,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:{steps:25,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'};
-  return {prompt:'',modelPack:model,negative_prompt:'',operation:'txt2img',width:768,height:768,seed:-1,preset:'raw',refine:false,releaseGPU:true,batch_size:1,lora:[],sourceName:'',referenceName:'',maskData:'',comfyCheckpoint:$('hero-comfy-checkpoint')?.value||'',...opts};
+  return {modelTest:true,testTimeoutMs:205000,prompt:'',modelPack:model,negative_prompt:'',operation:'txt2img',width:768,height:768,seed:-1,preset:'raw',refine:false,releaseGPU:true,batch_size:1,lora:[],sourceName:'',referenceName:'',maskData:'',comfyCheckpoint:$('hero-comfy-checkpoint')?.value||'',...opts};
  };
  const getFilename=url=>{const name=String(url||'').split('/').pop();if(!/^\d{12,17}-[a-f0-9]{8,24}\.png$/.test(name))throw Error('Select a genuine Hero Tavern gallery PNG before editing or analyzing.');return name};
  async function gallery(){
@@ -70,7 +70,7 @@
  }
  async function run(kind,override){
   if(active&&override?.direct)throw Error('Another model test is in progress.');
-  const started=Date.now(),model=$('model-test-model').value,progress=label=>notify(label+' · '+model);
+  const started=Date.now(),model=$('model-test-model').value,progress=label=>notify(label+' · '+model+' · bounded test (Stop available). Image tests unload text automatically; it reloads at the next chat request.');
   let report={kind,model,status:'passed',prompt:'',settings:{},elapsedMs:0};
   try{
    if(kind==='text2text'){

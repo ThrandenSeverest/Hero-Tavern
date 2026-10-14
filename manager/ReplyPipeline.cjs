@@ -127,6 +127,12 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                     plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']},planningProfile)),signal:controller.signal})),settings).slice(0,6000);
                 }else plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
             }
+            if(mode==='writer'&&body.writerSettings?.writerTwoPass!==false){
+                stage('writer-planning');
+                const planningPrompt=replyPrompt(body.prompt,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
+                const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(256,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
+                if(planned)plan=planned.slice(0,1800);
+            }
             stage(mode==='state'?'analyzing':'responding');
             const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
             let prompt=replyPrompt(body.prompt,extra);

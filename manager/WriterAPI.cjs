@@ -16,6 +16,22 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const result=store.save(s.id,{text:before+prose+after,label:'Accepted '+candidate.operation},s.version);
    return result;
   }
+  if(op==='generate-apply'||op==='regenerate'){
+   if(active)throw Error('Writer is already generating.');const original=store.read(data.id);
+   if(original.version!==data.expectedVersion)throw Error('Draft changed in another window. Save and retry.');
+   const operation=data.operation||'continue';if(!['continue','insert','rewrite','say','do'].includes(operation))throw Error('Unknown Writer operation.');
+   let start=data.start,end=data.end,base=original.text;
+   if(op==='regenerate'){const replacement=data.replacement;if(!replacement||!Number.isInteger(replacement.start)||typeof replacement.text!=='string'||original.text.slice(replacement.start,replacement.start+replacement.text.length)!==replacement.text)throw Error('Generated passage was edited. Use Undo or restore the previous draft before retrying.');base=original.text.slice(0,replacement.start)+original.text.slice(replacement.start+replacement.text.length);start=replacement.start;end=start;}
+   else if(['continue','say','do'].includes(operation))start=end=base.length;
+   if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<start||end>base.length||operation==='rewrite'&&start===end)throw Error('Select a valid manuscript passage.');
+   if(['say','do'].includes(operation)&&!String(data.instruction||'').trim())throw Error('Enter dialogue or an action first.');
+   const controller=new AbortController();active=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
+   try{await ensureText(controller.signal);const result=await pipeline.generate({prompt:'',writerSettings:original.settings,hero_writer:{...original,text:base,operation,start,end,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});let prose=String(result.choices?.[0]?.text||'').replace(/\\{\\{user\\}\\}/gi,()=>original.persona?.name?.trim()||'you');if(!prose.trim())throw Error('The model returned no prose; original draft preserved.');if(operation==='say'&&!prose.includes(String(data.instruction).trim()))prose=(original.persona?.name?.trim()||'You')+': «'+String(data.instruction).trim()+'»\\n\\n'+prose;
+   const before=base.slice(0,start),after=base.slice(end);if(operation!=='rewrite'&&before&&!/\\s$/.test(before)&&! /^[\\s.,;:!?…)}\\]]/.test(prose))prose=' '+prose;if(after&&prose&&/[\\p{L}\\p{N}]$/u.test(prose)&&/^[\\p{L}\\p{N}]/u.test(after))prose+=' ';
+   const saved=store.save(original.id,{text:before+prose+after,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
+   return {story:saved,replacement:{start,text:prose},usage:result.usage,context:result.writerContext};
+   }finally{active=null;signal?.removeEventListener('abort',abort);}
+  }
   if(op==='generate'){
    if(active)throw Error('Writer is already generating.');const s=store.read(data.id);if(s.version!==data.expectedVersion)throw Error('Save the draft before generating.');
    const operation=data.operation||'continue';if(!['continue','insert','rewrite','say','do'].includes(operation))throw Error('Unknown Writer operation.');

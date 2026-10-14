@@ -22,6 +22,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    for(const d of existing)d.enabled=!!data.enabled;store.saveSession(s);return store.view(data.id);
   }
   if(op==='definition-edit')return store.definitionEdit(data.id,data.key,data.updates);
+  if(op==='definition-delete')return store.definitionDelete(data.id,data.key);
   if(op==='definitions')return store.definitions(data.id,data.definitions);
   if(op==='patch')return store.eventPatch(data.id,data.patch,{manual:true,expectedHead:data.expectedHead});
   if(op==='state-at'){const v=store.view(data.id);return {state:S.stateAt(v.session,v.messages,data.index),definitions:v.session.definitions};}

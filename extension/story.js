@@ -100,7 +100,7 @@ export async function initStory({getContext,frame,show}){
  #hero-live-trackers .hero-track-actions{display:flex;gap:5px;flex-wrap:wrap}
  @media(max-width:700px){#hero-live-trackers .hero-track-card{min-width:110px;flex-basis:130px}#hero-live-trackers{padding:7px}}
  `;document.head.append(trackStyle);
- function prettyTracker(d,value){if(d.type==='record')return value?.summary||'Details tracked below';if(d.type==='injuries')return value?.length?value.map(i=>i.location+' · '+i.status+' · pain '+i.pain+'/10'+(i.scar?' · scar: '+i.scar:'')).join(' | '):'No established injuries';if(d.type==='boolean')return value?'Yes':'No';if(d.type==='number')return String(value)+(d.unit||'');if(d.type==='enum')return String(value);if(d.type==='list')return value?.length?value.join(', '):'None';if(d.type==='relationship')return Object.entries(value||{}).map(([k,v])=>k+': '+v).join(' · ')||'No bonds';if(d.type==='timer')return value?.remaining+' '+(d.unit||'units')+' remaining';if(d.type==='quest')return (value?.stage||'Not started')+' · '+(value?.status||'inactive');return String(value??'');}
+ function prettyTracker(d,value){if(d.type==='record')return value?.summary||'Details tracked below';if(d.type==='injuries')return value?.length?value.map(i=>i.location+' · '+i.status+' · pain '+i.pain+'/10'+(i.scar?' · scar: '+i.scar:'')).join(' | '):'No established injuries';if(d.type==='boolean')return value?'Yes':'No';if(d.type==='number')return String(value)+(d.unit?(d.unit==='%'?'':' ')+d.unit:'');if(d.type==='clock')return value==='--:--'?'--:-- · set the story clock':String(value);if(d.type==='enum')return String(value);if(d.type==='list')return value?.length?value.join(', '):'None';if(d.type==='relationship')return Object.entries(value||{}).map(([k,v])=>k+': '+v).join(' · ')||'No bonds';if(d.type==='timer')return value?.remaining+' '+(d.unit||'units')+' remaining';if(d.type==='quest')return (value?.stage||'Not started')+' · '+(value?.status||'inactive');return String(value??'');}
  function renderTrackerStrip(){
   if(!trackerStrip||!view||!selected()){if(trackerStrip)trackerStrip.hidden=true;return;}
   const defs=view.session.definitions.filter(d=>d.enabled!==false&&d.visibility!=='hidden'),state=view.context?.state||{};
@@ -131,7 +131,7 @@ export async function initStory({getContext,frame,show}){
      const current=await sync(),source=current.messages.at(-1);if(!source)throw Error('Send a message before editing a live state value.');
      const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'Manual state update from chat'}]});view=result;publish();
     }catch(e){notify(e)}
-   };actions.append(change);
+   };actions.append(change);const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
    const evidence=view.context?.provenance?.filter(e=>e.key===d.owner+':'+d.id).at(-1);if(evidence){const source=document.createElement('small');source.textContent='Last change: '+evidence.reason;details.append(source);}
    details.append(actions);tile.append(details);grid.append(tile);
   }

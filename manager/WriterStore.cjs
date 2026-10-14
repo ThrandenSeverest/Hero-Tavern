@@ -4,7 +4,7 @@ const copy=x=>JSON.parse(JSON.stringify(x));
 // Every AI continuation is a distinct editable passage in the novel manuscript.
 function normalizeGenerations(generations,text){
  if(!Array.isArray(generations))return [];
- return generations.slice(-500).filter(g=>g&&typeof g.id==='string'&&/^[0-9a-f-]{36}$/.test(g.id)&&Number.isInteger(g.start)&&Number.isInteger(g.end)&&g.start>=0&&g.end>g.start&&g.end<=text.length&&typeof g.text==='string'&&text.slice(g.start,g.end)===g.text).map(g=>({id:g.id,start:g.start,end:g.end,text:g.text,operation:['continue','insert','rewrite','say','do'].includes(g.operation)?g.operation:'continue',at:Number(g.at)||Date.now()})).sort((a,b)=>a.start-b.start);
+ return generations.slice(-500).filter(g=>g&&typeof g.id==='string'&&/^[0-9a-f-]{36}$/.test(g.id)&&Number.isInteger(g.start)&&Number.isInteger(g.end)&&g.start>=0&&g.end>g.start&&g.end<=text.length&&typeof g.text==='string'&&text.slice(g.start,g.end)===g.text).map(g=>({id:g.id,start:g.start,end:g.end,text:g.text,operation:['continue','insert','rewrite','say','do'].includes(g.operation)?g.operation:'continue',instruction:String(g.instruction||'').slice(0,2000),at:Number(g.at)||Date.now()})).sort((a,b)=>a.start-b.start);
 }
 function reconcileGenerations(oldText,newText,items){
  if(oldText===newText)return normalizeGenerations(items,newText);

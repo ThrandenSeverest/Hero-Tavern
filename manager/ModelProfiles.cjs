@@ -8,7 +8,7 @@ function renderPrompt(prompt,profile={}){const template=profile.Template||'chatm
  if(turns[0]?.role==='assistant')turns.unshift({role:'user',text:'Begin the established scene.'});if(!turns.length)turns.push({role:'user',text:'Continue the scene.'});
  let result='<s>';if(template==='mistral-v7'&&system)result+='[SYSTEM_PROMPT]'+system+'[/SYSTEM_PROMPT]';const lastUser=turns.findLastIndex(m=>m.role==='user');for(let i=0;i<turns.length;i++){const m=turns[i];result+=m.role==='user'?'[INST]'+(template==='mistral-v3'&&i===lastUser&&system?system+'\n\n':'')+m.text+'[/INST]':m.text+(i===turns.length-1&&parsed.at(-1)?.role==='assistant'&&parsed.at(-1)?.text===''?'':'</s>');}return result;}
 function modelRequest(request,profile){
- const {writerContinuation,...payload}=request;
+ const {writerContinuation,disableNativeThinking,...payload}=request;
  const template=profile?.Template||'chatml';
  let prompt;
  if(writerContinuation&&template!=='chatml'){
@@ -20,6 +20,8 @@ function modelRequest(request,profile){
   const body=request.prompt.slice(at+marker.length),preamble=request.prompt.slice(0,at+marker.length);
   prompt=renderPrompt(preamble,profile).replace(/<\/s>\s*$/,'')+body;
  }else prompt=renderPrompt(request.prompt,profile);
+ // Match Qwen3's published enable_thinking=false chat-template suffix only at an empty assistant boundary.
+ if(template==='chatml'&&profile?.Family==='Qwen3'&&disableNativeThinking&&/<\|im_start\|>assistant\s*$/.test(prompt))prompt+='<think>\n\n</think>\n\n';
  if(template==='chatml')return {...payload,prompt};
  return {...payload,prompt,stop:[...new Set([...(request.stop||[]).filter(s=>!s.includes('im_end')&&!s.includes('im_start')), '</s>','[INST]'])]};
 }

@@ -61,3 +61,12 @@ test('Image generation uses original prompt if optional LLM refiner is broken',a
   assert.equal(result.refined,false);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Qwen3 final output uses the native non-thinking suffix and recovery clears pathological stop strings',async()=>{
+ const {createPipeline}=require('../manager/ReplyPipeline.cjs'),root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-qwen-native-')),calls=[];
+ try{const pipeline=createPipeline({root,backendURL:'http://fixture',getContextSize:()=>8192,getModelProfile:()=>({Template:'chatml',Family:'Qwen3'}),fetchBackend:async(url,{body})=>{const request=JSON.parse(body);if(url.includes('tokencount'))return Response.json({value:120});calls.push(request);return Response.json({choices:[{text:calls.length===1?'':'{"operations":[]}'}]})}});
+ const r=await pipeline.generate({prompt:'<|im_start|>user\nExtract tracker updates.<|im_end|>\n<|im_start|>assistant\n',max_tokens:600,temperature:0.1,stop:['<think>','</think>']},null,{mode:'utility'});
+ assert.match(calls[0].prompt,/<think>\n\n<\/think>\n\n$/);assert.equal(calls[0].max_tokens,600);assert.equal(calls[0].temperature,0.1);assert.deepEqual(calls[1].stop,['<|im_end|>']);assert.equal(r.choices[0].text,'{"operations":[]}');
+ const {modelRequest}=require('../manager/ModelProfiles.cjs');assert.doesNotMatch(modelRequest({prompt:'<|im_start|>assistant\n',disableNativeThinking:true},{Template:'chatml',Family:'Other'}).prompt,/<think>/);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

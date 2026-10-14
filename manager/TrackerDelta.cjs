@@ -5,17 +5,33 @@ const {keyOf,validateValue}=require('./StoryState.cjs');
 const copy=x=>JSON.parse(JSON.stringify(x));
 const num=x=>{const n=Number(String(x).trim());if(!Number.isFinite(n))throw Error('Expected a finite number');return n;};
 function scalar(x){
- const v=String(x).trim();if(v==='true')return true;if(v==='false')return false;
+ const v=String(x).trim();if(/^[\[{"]/.test(v)){try{return JSON.parse(v)}catch{}}if(v==='true')return true;if(v==='false')return false;
  if(v==='null')return null;if(/^-?(?:\d+|\d*\.\d+)$/.test(v))return Number(v);
  return v;
 }
 function parseCommands(raw,definitions,messages,state){
+ const clean=String(raw||'').replace(/<think>[\s\S]*?(?:<\/think>|$)/gi,'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
+ let rows,recognized=0;
+ if(clean.startsWith('{')){
+  try{
+   const packet=JSON.parse(clean);if(!Array.isArray(packet.operations)||packet.operations.length>100)throw Error('Expected operations array (maximum 100)');
+   rows=packet.operations.map(op=>{
+    if(!op||typeof op!=='object')throw Error('Operation must be an object');
+    const key=op.key??op.trackerId,verb=String(op.verb??op.op??'').toUpperCase(),id=op.sourceMessageId??op.evidence?.messageId,evidence=typeof op.evidence==='string'?op.evidence:op.evidence?.quote;
+    if(typeof key!=='string'||typeof id!=='string'||typeof evidence!=='string'||!Object.hasOwn(op,'value'))throw Error('Operation needs key, verb, value, sourceMessageId and evidence');
+    if(op.path&&op.path!=='/value')throw Error('Use FIELD for a single record field or SET at /value');
+    return ['UPDATE',key,verb,typeof op.value==='string'?op.value:JSON.stringify(op.value),id,evidence];
+   });recognized=rows.length||1;
+  }catch(e){return {changes:[],issues:['Invalid operations JSON: '+e.message],recognized:0};}
+ }else rows=clean.split(/\r?\n/).slice(0,100);
+
  const output=[],issues=[],known=new Map(definitions.map(d=>[keyOf(d),d])),byId=new Map(messages.map(m=>[m.extra?.heroMessageId,m]));
  const working=copy(state);
- for(const row of String(raw||'').replace(/<think>[\s\S]*?<\/think>/gi,'').split(/\r?\n/).slice(0,100)){
-  if(!/^UPDATE\s*::\s*/i.test(row.trim()))continue;
+ for(const row of rows){
+  if(!Array.isArray(row)&&!/^UPDATE\s*::\s*/i.test(row.trim()))continue;
+  recognized++;
   try{
-   const parts=row.trim().split(/\s+::\s+/);
+   const parts=Array.isArray(row)?row:row.trim().split(/\s+::\s+/);
    if(parts.length<6)throw Error('Provide key, verb, value, message ID and evidence');
    const [,key,verbRaw,payload,id,...rest]=parts,verb=verbRaw.toUpperCase(),evidence=rest.join(' :: ');
    const d=known.get(key),message=byId.get(id);
@@ -28,8 +44,9 @@ function parseCommands(raw,definitions,messages,state){
     const delta=num(payload);if(delta<=0)throw Error('Change must be positive');
     value=Math.max(d.min,Math.min(d.max,value+(verb==='INCREASE'?delta:-delta)));
    }else if(verb==='SET'){
-    if(!['number','boolean','enum','text','clock'].includes(d.type))throw Error('SET unsupported for this type; use FIELD or ADD');
+    if(!['number','boolean','enum','text','clock','record','quest','timer','relationship'].includes(d.type))throw Error('SET unsupported for this type; use FIELD or ADD');
     value=scalar(payload);
+    if(d.type==='record'){const shape=(old,next)=>{if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Record SET needs an object');for(const key of Object.keys(old)){if(!Object.hasOwn(next,key))throw Error('Preserve unchanged record field '+key)}for(const key of Object.keys(next)){if(!Object.hasOwn(old,key)||['__proto__','constructor','prototype'].includes(key))throw Error('Unknown record field '+key);if(old[key]!==null&&typeof old[key]==='object'&&!Array.isArray(old[key]))shape(old[key],next[key]);else if(old[key]!==null&&(Array.isArray(old[key])?!Array.isArray(next[key]):typeof old[key]!==typeof next[key]))throw Error('Wrong type for record field '+key)}};shape(previous,value);}
    }else if(verb==='ADD'||verb==='REMOVE'){
     if(d.type!=='list')throw Error('ADD/REMOVE requires list');
     if(!payload.trim())throw Error('Empty list item');const item=payload.trim();
@@ -63,18 +80,17 @@ function parseCommands(raw,definitions,messages,state){
    validateValue(d,value);if(JSON.stringify(value)===JSON.stringify(previous))continue;
    output.push({key,value,sourceMessageId:id,evidence,reason:verb+' from observed turn'});
    working[key]=value;
-  }catch(error){issues.push(row.slice(0,200)+': '+error.message);}
+  }catch(error){issues.push((Array.isArray(row)?row.join(' :: '):row).slice(0,200)+': '+error.message);}
  }
- return {changes:output,issues,recognized:output.length};
+ return {changes:output,issues,recognized};
 }
 function trackerInstructions(definitions,state,messages){
  const allowed=definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
- const entries=allowed.map(d=>[keyOf(d),d.type,d.label,d.changeRules||d.description||'',JSON.stringify(state[keyOf(d)])].join(' | '));
- return 'You are a state transition extractor, not a storyteller. Read only the finalized turn(s) and confirmed state. Return ZERO or more lines with this exact format:\n'+
- 'UPDATE :: tracker-owner:key :: VERB :: payload :: sourceMessageId :: exact verbatim evidence quote\n'+
- 'Allowed VERB: INCREASE, DECREASE (positive number); SET (number, boolean, enum, text or clock); ADD, REMOVE (list item); FIELD (record/relationship/quest: field=value or field+=item or field-=item); WOUND (location|severity|cause|pain|symptoms|limitations); TREAT (woundId|status|treatment|pain).\n'+
- 'For numeric changes use INCREASE or DECREASE, NEVER guess an exact value; use SET only for explicitly stated values. Numeric deltas should be modest and obey maxDelta. For records update only one field per line, do not replace the whole object. For meals add a short text to recentMeals only after actual eating; preserve old meals. For injuries add WOUND only if bodily injury was explicitly inflicted; use TREAT only on an existing injury. Character beliefs and hypotheticals are NOT facts. Output no JSON, prose, Markdown or explanation. If no confirmed changes, output NONE.\n'+
- 'Tracker definitions and confirmed values:\n'+entries.join('\n')+
- '\nFinalized chat turns (each has exact ID and speaker):\n'+messages.map(m=>'ID '+m.extra?.heroMessageId+' | '+(m.is_user?'Player':m.name||'Character')+': '+String(m.mes||m.text||'').slice(0,1800)).join('\n');
+ const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,current:state[keyOf(d)]}));
+ return 'You are a factual state transition extractor, not a storyteller. Return exactly one JSON object with an operations array. No Markdown or explanations. If nothing changes return {"operations":[]}.\n'+
+ 'Each operation has exactly these fields: {"key":"an exact key from the manifest","verb":"SET","value":"new value or operation payload","sourceMessageId":"an exact message ID","evidence":"an exact verbatim quote proving THIS change"}.\n'+
+ 'Allowed verbs: INCREASE, DECREASE (positive numeric value); SET (typed scalar or complete structured record); ADD, REMOVE (one list item); FIELD (string field=value, field+=item or field-=item); WOUND (location|severity|cause|pain|symptoms|limitations); TREAT (woundId|status|treatment|pain).\n'+
+ 'Only change trackers directly affected by the quoted event. A visitor entering does not change contents, hunger or injuries. Do not reset or empty objects without an explicit emptying event. Preserve all unchanged fields and their types. Never invent exact numeric levels; use modest deltas within maxDelta unless an exact value is explicitly stated. Record lists use JSON arrays, booleans use true/false. Hypotheticals, plans and intentions are not completed events. Leave unrelated trackers out.\n'+
+ 'Tracker manifest:\n'+JSON.stringify(entries)+'\nFinalized messages:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
 }
 module.exports={parseCommands,trackerInstructions};

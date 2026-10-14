@@ -15,3 +15,22 @@ test('Tracker behavior revisions preserve live values and template episodes star
 test('Manual value toggles remain editable on the same message while model events stay idempotent',()=>{const f=fixture();try{let v=injury(f),key=S.keyOf(v.session.definitions[1]),sourceMessageId=v.messages.at(-1).extra.heroMessageId;for(const value of ['bandaged','fresh','bandaged','fresh']){v=f.store.eventPatch(v.session.id,[{key,value,sourceMessageId}],{manual:true});assert.equal(v.context.state[key],value);}}finally{f.cleanup()}});
 
 test('Tracker deletion removes active state, events and generation context without touching the chat',()=>{const f=fixture();try{const v=injury(f),key=S.keyOf(v.session.definitions[1]),message=fs.readFileSync(f.file,'utf8');const deleted=f.store.definitionDelete(v.session.id,key);assert.ok(!deleted.session.definitions.some(d=>S.keyOf(d)===key));assert.ok(!Object.hasOwn(deleted.context.state,key));assert.ok(!deleted.context.trackers.some(d=>d.key===key));assert.ok(!deleted.session.events.some(e=>e.key===key));assert.ok(deleted.session.definitionHistory.some(e=>e.action==='deleted'&&S.keyOf(e.definition)===key));assert.equal(fs.readFileSync(f.file,'utf8'),message);assert.throws(()=>f.store.definitionDelete(v.session.id,key),/not found/);}finally{f.cleanup()}});
+
+test('tracker extraction repairs mixed separators, commits atomically and does not reapply the same message',async()=>{
+ const f=fixture();try{
+  let v=f.store.definitions(f.session.id,[{id:'contents',owner:'character:'+f.session.characterId,type:'record',initialValue:{waste:['leaves'],overflow:true},updateMode:'automatic'}]);
+  v=f.save([...v.messages,{name:'Lyra',is_user:false,mes:'She empties the bowl.',extra:{}}]);
+  // Earlier finalized messages were already checked, as in a live conversation.
+  let saved=f.store.get(v.session.id);saved.analyzedSources=[S.signature(v.messages[0])];f.store.saveSession(saved);
+  const key='character:'+f.session.characterId+':contents',id=v.messages.at(-1).extra.heroMessageId;let calls=0;
+  const api=createStoryAPI(f.store,{generate:async()=>({choices:[{text:++calls===1?'UPDATE :: '+key+' | SET | {"waste":[],"overflow":false} | '+id+' | She empties the bowl.':JSON.stringify({operations:[{key,verb:'SET',value:{waste:[],overflow:false},sourceMessageId:id,evidence:'She empties the bowl.'}]})}]})});
+  const result=await api.action('/story/analyze',{id:v.session.id});assert.equal(calls,2);assert.deepEqual(result.context.state[key],{waste:[],overflow:false});
+  await api.action('/story/analyze',{id:v.session.id});assert.equal(calls,2);
+ }finally{f.cleanup()}
+});
+test('unanswered player turn is not analyzed after a failed or empty assistant generation',async()=>{
+ const f=fixture();try{let v=injury(f),saved=f.store.get(v.session.id);saved.analyzedSources=v.messages.map(S.signature);f.store.saveSession(saved);
+  v=f.save([...v.messages,{name:'Player',is_user:true,mes:'I intend to empty the bowl.',extra:{}},{name:'Lyra',is_user:false,mes:'',extra:{}}]);let calls=0;
+  const api=createStoryAPI(f.store,{generate:async()=>{calls++;return {choices:[{text:'{"operations":[]}'}]}}});await api.action('/story/analyze',{id:v.session.id});assert.equal(calls,0);
+ }finally{f.cleanup()}
+});

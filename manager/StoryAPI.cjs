@@ -44,19 +44,27 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
      v=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
    const s=v.session,head=S.hash(v.messages.map(S.signature));
    const eligible=s.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
-   const pending=v.messages.filter(m=>!m.is_system&&!s.analyzedSources.includes(S.signature(m))).slice(-8).slice(0,2);
+   const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
+   const pending=v.messages.slice(0,lastFinal+1).filter((m,index)=>!m.is_system&&String(m.mes||'').trim()&&!s.analyzedSources.includes(S.signature(m))&&eligible.some(d=>!d.introducedAt||index>=v.messages.findIndex(x=>x.extra?.heroMessageId===d.introducedAt))).slice(0,2);
    if(!eligible.length||!pending.length)return v;
    if(!ready())throw Error('Load the reply model before analyzing tracker changes.');
    const {parseCommands,trackerInstructions}=require('./TrackerDelta.cjs');
    try{
     const p=trackerInstructions(eligible,v.context.state,pending);
-    const response=await pipeline.generate({
-      prompt:'<|im_start|>system\nYou extract factual tracker transitions. Output UPDATE lines only, never JSON or roleplay. /no_think<|im_end|>\n<|im_start|>user\n'+p+'<|im_end|>\n<|im_start|>assistant\n',
-      stream:false,max_tokens:Math.min(1400,Math.max(350,eligible.length*90)),temperature:0.1,stop:['<|im_end|>']
-    },signal,{mode:'utility'});
-    const parsed=parseCommands(String(response.choices?.[0]?.text||''),eligible,pending,v.context.state);
-    if(!parsed.changes.length&&!parsed.issues.length&&!/^NONE\b/i.test(String(response.choices?.[0]?.text||'').trim()))throw Error('Tracker extractor did not follow the update protocol. No state was modified.');
-    if(parsed.issues.length&&!parsed.changes.length)throw Error('Tracker extractor returned invalid operations: '+parsed.issues.slice(0,2).join(' | '));
+    let parsed;
+    for(let attempt=0;attempt<2;attempt++){
+     const repair=attempt?'\nYour previous output failed validation: '+parsed.issues.join('; ').slice(0,1200)+'. Return corrected operations JSON using only the original facts. Omit unsupported changes.':'';
+     const response=await pipeline.generate({
+      prompt:'<|im_start|>system\nExtract factual tracker transitions as operations JSON. Never roleplay or output reasoning. /no_think<|im_end|>\n<|im_start|>user\n'+p+repair+'<|im_end|>\n<|im_start|>assistant\n',
+      stream:false,max_tokens:Math.min(1800,Math.max(500,eligible.length*110)),temperature:0.1,stop:['<|im_end|>']
+     },signal,{mode:'utility'});
+     const raw=String(response.choices?.[0]?.text||'');parsed=parseCommands(raw,eligible,pending,v.context.state);
+     if(!parsed.recognized&&!parsed.issues.length&&!/^NONE\b/i.test(raw.trim()))parsed.issues.push('Tracker extractor did not follow the operations JSON protocol');
+     for(const change of parsed.changes){const d=eligible.find(d=>S.keyOf(d)===change.key);if(d?.introducedAt&&v.messages.findIndex(m=>m.extra?.heroMessageId===change.sourceMessageId)<v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt))parsed.issues.push('Tracker did not exist at source message: '+change.key);}
+     if(!parsed.issues.length)break;
+    }
+    if(parsed.issues.length)throw Error('Tracker extractor returned invalid operations after repair: '+parsed.issues.slice(0,2).join(' | '));
+    if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(parsed.changes.length){const current=store.view(data.id);if(S.hash(current.messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');v=store.eventPatch(data.id,parsed.changes,{expectedHead:head});}
     const persisted=store.get(data.id);
     persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...pending.map(S.signature)])].slice(-1500);

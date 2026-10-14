@@ -25,7 +25,7 @@ test('typed tracker updates change numbers, enum, list and record without JSON r
  assert.equal(r.issues.length,0,JSON.stringify(r.issues));assert.equal(r.changes.length,5);
  assert.deepEqual(r.changes.at(-1).value,{fullness:null,summary:'Eaten a hot soup',recentMeals:['hot soup']});
  assert.equal(r.changes[0].value,73);assert.equal(r.changes[1].value,'happy');assert.deepEqual(r.changes[2].value,['key','coin']);
- assert.doesNotMatch(trackerInstructions(definitions,state,messages),/Return JSON/i);
+ assert.match(trackerInstructions(definitions,state,messages),/operations array/);
 });
 test('removes items, decreases bounded values and declines fabricated evidence',()=>{
  const messages=[make('Lyra gave away her old key, then stumbled.')],state=S.initialState(definitions);
@@ -77,4 +77,15 @@ test('extension injects character metadata and visible tracker state is refreshe
  assert.match(story,/\/story\/analyze/);
  assert.doesNotMatch(story,/data\.api_type!=='koboldcpp'/);
  assert.match(story,/Update now/);
+});
+
+test('JSON record operations preserve array/boolean types, accept no-op state, and reject unknown fields',()=>{
+ const d=S.validateDefinition({...base,id:'contents',label:'Bowl contents',type:'record',initialValue:{waste:['leaves'],overflow:true}}),k=S.keyOf(d),m=make('She empties the bowl. It is no longer overflowing.');
+ const packet=value=>JSON.stringify({operations:[{key:k,verb:'SET',value,sourceMessageId:'turn01',evidence:'She empties the bowl.'}]});
+ const r=parseCommands(packet({waste:[],overflow:false}),[d],[m],{[k]:d.initialValue});assert.equal(r.issues.length,0);assert.deepEqual(r.changes[0].value,{waste:[],overflow:false});
+ const noop=parseCommands(packet(d.initialValue),[d],[m],{[k]:d.initialValue});assert.equal(noop.changes.length,0);assert.ok(noop.recognized);
+ assert.ok(parseCommands(packet({waste:[],overflow:false,invented:1}),[d],[m],{[k]:d.initialValue}).issues.length);
+ assert.ok(parseCommands(packet({waste:'empty',overflow:false}),[d],[m],{[k]:d.initialValue}).issues.length);
+ const empty=parseCommands('{"operations":[]}',[d],[m],{[k]:d.initialValue});assert.equal(empty.issues.length,0);assert.ok(empty.recognized);
+ const field=parseCommands(JSON.stringify({operations:[{key:k,verb:'FIELD',value:'waste=[]',sourceMessageId:'turn01',evidence:'She empties the bowl.'}]}),[d],[m],{[k]:d.initialValue});assert.deepEqual(field.changes[0].value,{waste:[],overflow:true});
 });

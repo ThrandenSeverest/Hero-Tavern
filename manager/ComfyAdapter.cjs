@@ -66,7 +66,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  }
 
  const NODE_REQUIREMENTS={
-  ...Object.fromEntries(require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>[p.id,['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','KSampler','VAEDecode','SaveImage']])),
+  ...Object.fromEntries(require('./ComfyModelHub.cjs').QWEN_PACKS.map(p=>[p.id,['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','LatentUpscale','RepeatLatentBatch','KSampler','VAEDecode','SaveImage']])),
   'flux-klein':['LoraLoaderModelOnly','UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','EmptyFlux2LatentImage','Flux2Scheduler','SamplerCustomAdvanced','RandomNoise','KSamplerSelect','CFGGuider','VAEDecode','SaveImage'],
   'z-turbo':['UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ConditioningZeroOut','ModelSamplingAuraFlow','EmptyLatentImage','KSampler','VAEDecode','SaveImage'],
   'sdxl':['CheckpointLoaderSimple','CLIPTextEncode','EmptyLatentImage','KSampler','VAEDecode','SaveImage']

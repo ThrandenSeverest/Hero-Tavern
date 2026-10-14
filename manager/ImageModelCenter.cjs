@@ -153,48 +153,57 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   return {started:true,packId:id,directory:folder};
  }
  async function installQwenGGUFNode(job){
-  if(!job.id.startsWith('qwen21-'))return;
-  // Reuse an externally managed engine that already exposes the GGUF loader.
-  if(await comfy.available()){
-   const report=await comfy.diagnosePack(job.id);
-   if(!report.missingNodes?.includes('UnetLoaderGGUF'))return;
-   if(!runtime.installed())throw Error('External ComfyUI is missing ComfyUI-GGUF (UnetLoaderGGUF). Install the node in that ComfyUI instance and restart it, or choose managed Portable.');
-  }
+  if(!job.id.startsWith('qwen21-'))return {skipped:true};
   const installed=runtime.installed();
-  if(!installed?.base||!installed?.python)throw Error('Qwen GGUF requires a managed ComfyUI Portable runtime. Install or configure managed Portable before installing the custom node.');
-  const dir=path.join(installed.base,'ComfyUI','custom_nodes','ComfyUI-GGUF');
-  if(fs.existsSync(path.join(dir,'nodes.py')))return;
-  if(fs.existsSync(dir))throw Error('Incomplete ComfyUI-GGUF folder detected at '+dir+'. Repair it manually; no existing files were removed.');
-  fs.mkdirSync(path.dirname(dir),{recursive:true});
-  const log=path.join(root,'Logs','qwen-gguf-install.log');
+  if(!installed?.base||!installed?.python)throw Error('Qwen-Image 2.1 GGUF requires the leejet loader. Connect managed ComfyUI Portable to repair automatically, or update the external ComfyUI custom_nodes/ComfyUI-GGUF to https://github.com/leejet/ComfyUI-GGUF.');
+  const base=path.join(installed.base,'ComfyUI','custom_nodes'),dir=path.join(base,'ComfyUI-GGUF');
+  const loader=path.join(dir,'loader.py');
+  if(fs.existsSync(loader)&&/\bqwen_image21\b/.test(fs.readFileSync(loader,'utf8')))return {alreadySupported:true};
+  // A ComfyUI node being registered is not proof it recognizes the Qwen-Image 2.1 architecture.
+  if(runtime.status().running){job.phase='stopping ComfyUI to safely replace incompatible GGUF loader';await runtime.stop();}
+  const log=path.join(root,'Logs','qwen-gguf-install.log');fs.mkdirSync(path.dirname(log),{recursive:true});
+  const staging=path.join(root,'Downloads','comfy-gguf-leejet-'+require('node:crypto').randomUUID()),archive=path.join(staging,'ComfyUI-GGUF.zip');
+  fs.mkdirSync(staging,{recursive:true});fs.mkdirSync(base,{recursive:true});
   async function run(cmd,args,cwd){
    const fd=fs.openSync(log,'a');
-   try{
-    const child=spawn(cmd,args,{cwd,windowsHide:true,stdio:['ignore',fd,fd]});
+   try{const child=spawn(cmd,args,{cwd,windowsHide:true,stdio:['ignore',fd,fd]});
     const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)});
-    if(code!==0)throw Error('Dependency installer exited with '+code+'. Inspect '+log);
+    if(code!==0)throw Error('GGUF loader installer exited with '+code+'. Inspect '+log);
    }finally{fs.closeSync(fd)}
   }
-  // Windows Portable does not install Git. Download the fixed upstream ZIP with
-  // the OS-provided curl.exe and extract using built-in PowerShell instead.
-  const staging=path.join(root,'Downloads','comfy-gguf-'+require('node:crypto').randomUUID());
-  const archive=path.join(staging,'ComfyUI-GGUF.zip');
-  fs.mkdirSync(staging,{recursive:true});
+  let backup='',moved=false;
   try{
-   job.phase='downloading ComfyUI-GGUF loader (Git not required)';
-   const curl=path.join(process.env.SystemRoot||'C:\\Windows','System32','curl.exe');
-   await run(curl,['--proto','=https','--proto-redir','=https','--location','--fail','--retry','3','--connect-timeout','30','--output',archive,'https://codeload.github.com/city96/ComfyUI-GGUF/zip/refs/heads/main'],staging);
-   job.phase='extracting ComfyUI-GGUF loader';
-   const quote=value=>"'"+value.replace(/'/g,"''")+"'";
+   job.phase='downloading Qwen-Image 2.1 compatible leejet GGUF loader';
+   const curl=process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32','curl.exe'):'curl';
+   await run(curl,['--proto','=https','--proto-redir','=https','--location','--fail','--retry','3','--connect-timeout','30','--output',archive,'https://codeload.github.com/leejet/ComfyUI-GGUF/zip/refs/heads/main'],staging);
+   job.phase='extracting compatible GGUF loader';
+   const quote=x=>"'"+x.replace(/'/g,"''")+"'";
    await run('powershell.exe',['-NoProfile','-NonInteractive','-Command','Expand-Archive -LiteralPath '+quote(archive)+' -DestinationPath '+quote(staging)+' -Force'],staging);
-   const unpacked=path.join(staging,'ComfyUI-GGUF-main');
-   if(!fs.existsSync(path.join(unpacked,'nodes.py')))throw Error('Official GGUF ZIP has no nodes.py; inspect '+log);
+   const unpacked=path.join(staging,'ComfyUI-GGUF-main'),newLoader=path.join(unpacked,'loader.py');
+   if(!fs.existsSync(path.join(unpacked,'nodes.py'))||!fs.existsSync(newLoader)||!/\bqwen_image21\b/.test(fs.readFileSync(newLoader,'utf8')))throw Error('Downloaded GGUF loader does not support Qwen-Image 2.1; existing loader was preserved.');
    const requirements=path.join(unpacked,'requirements.txt');
-   if(fs.existsSync(requirements)){job.phase='installing GGUF Python requirements';await run(installed.python,['-s','-m','pip','install','-r',requirements],unpacked);}
-   if(fs.existsSync(dir))throw Error('Custom node directory appeared during installation. No existing files were overwritten.');
-   fs.renameSync(unpacked,dir);
+   if(fs.existsSync(requirements)){job.phase='installing GGUF dependencies';await run(installed.python,['-s','-m','pip','install','-r',requirements],unpacked);}
+   if(fs.existsSync(dir)){backup=path.join(base,'ComfyUI-GGUF.hero-backup-'+Date.now());job.phase='backing up incompatible GGUF custom node';fs.renameSync(dir,backup);}
+   try{fs.renameSync(unpacked,dir);moved=true;}catch(e){if(backup&&fs.existsSync(backup)&&!fs.existsSync(dir))fs.renameSync(backup,dir);throw e;}
+   fs.writeFileSync(path.join(dir,'.hero-loader-source.json'),JSON.stringify({source:'leejet/ComfyUI-GGUF',installedAt:new Date().toISOString(),backup}));
+   return {repaired:true,backup};
+  }catch(e){
+   if(!moved&&backup&&fs.existsSync(backup)&&!fs.existsSync(dir))fs.renameSync(backup,dir);
+   throw e;
   }finally{fs.rmSync(staging,{recursive:true,force:true});}
  }
+ function repairQwenLoader({confirm=false}={}){
+  if(confirm!==true)throw Error('Confirm repair of the managed ComfyUI GGUF loader. Existing custom nodes are backed up.');
+  if(setupJob||operation||comfy.models.snapshot().download)throw Error('Wait for the current image setup or download.');
+  const job={id:'qwen21-q5km',phase:'checking incompatible GGUF loader',startedAt:Date.now(),cancelled:false};setupJob=job;lastSetup=null;
+  Promise.resolve().then(async()=>{
+   const repaired=await installQwenGGUFNode(job);
+   if(runtime.installed()){job.phase='restarting managed ComfyUI';await runtime.start();const deadline=Date.now()+120000;while(!await comfy.available()){if(Date.now()>deadline||runtime.status().error)throw Error(runtime.status().error||'ComfyUI restart timed out');await new Promise(resolve=>setTimeout(resolve,1200));}}
+   lastSetup={ok:true,packId:job.id,message:repaired.alreadySupported?'Compatible GGUF loader already installed.':'Replaced incompatible GGUF loader with leejet version; old custom node backed up at '+repaired.backup+'. No models deleted.'};
+  }).catch(e=>{lastSetup={ok:false,packId:job.id,message:e.message}}).finally(()=>{setupJob=null});
+  return {started:true,repair:true};
+ }
+
  function setup({id,confirm=false}={}){
   if(confirm!==true)throw Error('Click Install engine + model to download the selected model and runtime.');
   if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Choose a downloadable image model.');
@@ -218,6 +227,6 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  }
  function cancelDownload(){if(setupJob)setupJob.cancelled=true;runtime.cancelInstall?.();return comfy.models.cancel()}
 
- return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot,setup,diagnose};
+ return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot,setup,diagnose,repairQwenLoader};
 }
 module.exports={createImageModelCenter,IDS,SCOPES};

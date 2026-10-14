@@ -79,7 +79,7 @@ function createModelTests(root){
    }
   }
   if(input.kind==='image2text'&&!entry.text.trim()&&!entry.error){entry.status='failed';entry.notes.push('Vision model returned an empty description.');}
-  if(['text2image','image2image'].includes(input.kind)&&!entry.error){
+  if(['text2image','image2image'].includes(input.kind)&&entry.status!=='skipped'&&!entry.error){
    const name=String(input.imageName||'');
    if(!GALLERY.test(name))throw Error('Model test image must be a saved Hero Tavern gallery PNG.');
    const filename=path.join(root,'Images',name),raw=fs.readFileSync(filename);

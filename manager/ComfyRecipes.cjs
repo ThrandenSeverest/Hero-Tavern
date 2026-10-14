@@ -8,7 +8,11 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   // Model-specific defaults: the generic SDXL values (CFG 7 / DPM++ Karras)
   // break Qwen Image 2.1's distilled inference path. Use official Euler + Simple.
   if(typeof params.prompt!=='string'||!params.prompt.trim())throw Error('Qwen Image 2.1 needs a nonempty prompt.');
-  if(Number(params.cfg_scale??1)>2)throw Error('Qwen Image 2.1 uses CFG 1 by default (up to 2 for advanced tests). The old SDXL CFG value can cause nearly identical or degraded images. Set CFG to 1.');
+  // Chat/Adventure callers may still send the generic SDXL guidance value 7.
+  // Normalize that automatically instead of breaking generation outside Image Studio.
+  const requestedCfg=Number(params.cfg_scale??1);
+  if(!Number.isFinite(requestedCfg)||requestedCfg<=0)throw Error('Invalid Qwen image guidance');
+  const effectiveCfg=requestedCfg>2?1:requestedCfg;
   if(Number(params.steps??25)<1)throw Error('Qwen Image 2.1 steps must be positive.');
   if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
   if(mode!=='txt2img'&&!source)throw Error('Select a gallery image for Qwen editing.');
@@ -30,12 +34,12 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   const latent=sourceNode||width===1024&&height===1024?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
-  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:params.cfg_scale??1,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
+  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:effectiveCfg,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
   const result=n('VAEDecode',{samples:sample,vae});
   let output=result;
   if(mode==='inpaint'){const masked=n('LoadImageMask',{image:mask,channel:'red'});output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
   const saved=n('SaveImage',{images:output,filename_prefix:'HeroTavern_Qwen21'});
-  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id};
+  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg>2?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,sampler:'euler',scheduler:'simple'}:null};
  }
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';

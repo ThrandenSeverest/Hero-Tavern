@@ -48,7 +48,8 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const pending=v.messages.slice(0,lastFinal+1).filter((m,index)=>!m.is_system&&String(m.mes||'').trim()&&!s.analyzedSources.includes(S.signature(m))&&eligible.some(d=>!d.introducedAt||index>=v.messages.findIndex(x=>x.extra?.heroMessageId===d.introducedAt))).slice(0,2);
    if(!eligible.length||!pending.length)return v;
    if(!ready())throw Error('Load the reply model before analyzing tracker changes.');
-   const {parseCommands,trackerInstructions}=require('./TrackerDelta.cjs');
+   const {parseCommands,trackerInstructions,explicitClockChanges}=require('./TrackerDelta.cjs');
+   const clockChanges=explicitClockChanges(eligible,pending,v.context.state);
    try{
     const p=trackerInstructions(eligible,v.context.state,pending);
     let parsed;
@@ -63,12 +64,16 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
      for(const change of parsed.changes){const d=eligible.find(d=>S.keyOf(d)===change.key);if(d?.introducedAt&&v.messages.findIndex(m=>m.extra?.heroMessageId===change.sourceMessageId)<v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt))parsed.issues.push('Tracker did not exist at source message: '+change.key);}
      if(!parsed.issues.length)break;
     }
-    if(parsed.issues.length)throw Error('Tracker extractor returned invalid operations after repair: '+parsed.issues.slice(0,2).join(' | '));
+    if(parsed.issues.length&& !clockChanges.length)throw Error('Tracker extractor returned invalid operations after repair: '+parsed.issues.slice(0,2).join(' | '));
+    if(parsed.issues.length)parsed={changes:[],issues:parsed.issues,recognized:0};
+    // Deterministic time wins over speculative model time; other tracker changes remain intact.
+    parsed.changes=parsed.changes.filter(change=>!clockChanges.some(c=>c.key===change.key));
+    parsed.changes.push(...clockChanges);
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(parsed.changes.length){const current=store.view(data.id);if(S.hash(current.messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');v=store.eventPatch(data.id,parsed.changes,{expectedHead:head});}
     const persisted=store.get(data.id);
     persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...pending.map(S.signature)])].slice(-1500);
-    persisted.lastAnalysis={at:Date.now(),processed:pending.length,changes:parsed.changes.length,errors:parsed.issues.slice(-5)};
+    persisted.lastAnalysis={at:Date.now(),processed:pending.length,changes:parsed.changes.length,errors:parsed.issues.slice(-5),deterministicClockUpdates:clockChanges.length};
     store.saveSession(persisted);return store.view(data.id);
    }catch(e){
     const current=store.get(data.id);current.failures.push({at:Date.now(),message:e.message,head});current.failures=current.failures.slice(-30);

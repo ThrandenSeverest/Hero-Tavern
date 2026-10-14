@@ -3,6 +3,7 @@ const fs = require('node:fs'), path = require('node:path');
 const { filterReply, isMetaReply, repetitionIssue } = require('./ReplyFilters.cjs');
 const {profileFor,renderPrompt,modelRequest}=require('./ModelProfiles.cjs');
 const {buildWriterContext,reduceLongContext}=require('./WriterContext.cjs');
+const {writerRepetitionIssue}=require('./WriterFlow.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
 const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
@@ -133,10 +134,22 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
                 stage('writer-planning');
-                const planningContext='<|im_start|>user\n[Novel background]\n'+String(body.hero_writer?.prompt||'').slice(0,1200)+'\n[Permanent canon]\n'+String(body.hero_writer?.memory||'').slice(0,1200)+'\n[Previous chapters — continuity]\n'+String(body.hero_writer?.recap||'').slice(-1500)+'\n[Next-scene author note]\n'+String(body.hero_writer?.note||'').slice(0,600)+'\n[Latest manuscript]\n'+String(body.hero_writer?.text||'').slice(-2500)+'\nList three to six next-scene actions without repeating events that already happened. Never write the final passage here.<|im_end|>\n<|im_start|>assistant\n';
-                const planningPrompt=replyPrompt(planningContext,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
-                const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(256,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
-                if(planned)plan=planned.slice(0,1800);
+                const w=body.hero_writer||{},draft=String(w.text||''),hasDraft=!!draft.trim();
+                const beats=Array.isArray(w.beats)?w.beats:[],index=Number.isInteger(w.beatIndex)?w.beatIndex:0;
+                const activeBeat=String(beats[index]||''),upcomingBeat=String(beats[index+1]||'');
+                const planningContext='<|im_start|>user\n[Story premise (background, not a starting instruction)]\n'+String(w.prompt||'').slice(0,900)+
+                  '\n[Immutable facts]\n'+String(w.memory||'').slice(0,900)+
+                  '\n[Earlier chapter events — already happened]\n'+String(w.recap||'').slice(-1000)+
+                  '\n[CURRENT active beat]\n'+activeBeat.slice(0,600)+
+                  '\n[Later beat — not now]\n'+upcomingBeat.slice(0,250)+
+                  '\n[Author direction]\n'+String(w.note||'').slice(0,550)+
+                  '\n[MANUSCRIPT ENDPOINT — authoritative scene and chronology]\n'+draft.slice(-3500)+
+                  '\n[Writer operation]\n'+String(w.operation||'continue')+
+                  '\nDraft one immediate NEW action or exchange and 1–3 causal consequences. Treat everything before the manuscript endpoint as past history. '+(hasDraft?'Do not describe the opening or repeat meetings/descriptions already written.':'Begin the opening in medias res.')+
+                  ' No exposition dump or plot synopsis.<|im_end|>\n<|im_start|>assistant\n';
+                const planningPrompt=replyPrompt(planningContext,'Private local scene director: decide what happens NEXT at the exact manuscript endpoint. Respect the active beat and current character goals. Output 2–4 concise causal steps, not prose, not a retelling, and never reset the chronology. /no_think');
+                const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(240,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
+                if(planned)plan=planned.slice(0,1600);
             }
             stage(mode==='state'?'analyzing':'responding');
             const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
@@ -193,6 +206,21 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 text=filterReply(await sendChecked({...body,prompt:repairedPrompt,stream:false,max_tokens:replyTokens,temperature:repetitive?Math.max(0.75,Math.min(settings.temperature,1)):Math.min(settings.temperature,0.7),rep_pen:Math.max(settings.repetition_penalty,1.15),repetition_penalty:Math.max(settings.repetition_penalty,1.15),rep_pen_range:1024}),settings);
                 if(settings.avoidRepetition&&repetitionIssue(text,history,settings.repetitionSensitivity))throw Error('The model repeated the conversation again. Try regenerate or adjust repetition sensitivity / sampling in Generation. The repeated draft was hidden.');
                 if(settings.repairMetaReplies&&isMetaReply(text))throw new Error('The model is still returning writer commentary. Review the character card and Generation writing instructions, then retry.');
+            }
+            if(mode==='writer'&&text&&!isWriterNonProse(text)){
+                const issue=writerRepetitionIssue(text,body.hero_writer?.text);
+                if(issue){
+                    stage('repairing-writer-progression');
+                    const rebuilt=await buildWriterContext({...body.hero_writer,flowRepair:true},budget,countTokens);
+                    const boundary='<|im_start|>assistant\n',place=rebuilt.prompt.lastIndexOf(boundary);
+                    if(place<0)throw Error('Writer progression repair lost the manuscript prefill.');
+                    const corrected=rebuilt.prompt.slice(0,place)+'<|im_start|>system\n'+extra+'\nContinue with a NEW causal scene event; do not replay established material.<|im_end|>\n'+rebuilt.prompt.slice(place);
+                    const revised=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.max(0.65,Math.min(1,settings.temperature)),rep_pen:Math.max(1.13,settings.repetition_penalty)}),filters);
+                    const still=writerRepetitionIssue(revised,body.hero_writer?.text);
+                    lastRun.writerProgressRepair={reason:issue,success:!!revised&&!still&&!isWriterNonProse(revised)};
+                    if(!revised||still||isWriterNonProse(revised))throw Error('Writer continued repeating established manuscript events. The draft was preserved; choose Next Scene, edit the active beat, or try another prose model.');
+                    text=revised;
+                }
             }
             if(!text)throw new Error('The model returned only hidden reasoning or an empty reply. Try again or adjust Generation settings.');
             let usage;if(budgeted){try{usage={prompt_tokens:await countTokens(prompt),completion_tokens:await countTokens(text,false),context_size:contextSize};}catch(error){lastRun.metricsWarning=errorDetails(error);}}

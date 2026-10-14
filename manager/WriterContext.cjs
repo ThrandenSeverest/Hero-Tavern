@@ -18,7 +18,7 @@ async function buildWriterContext(w,budget,count){
   ...active.map(e=>'[Lore: '+e.title+']\n'+resolve(e.text)),
   w.note?'[Author direction — apply within the prose]\n'+resolve(w.note):''
  ].filter(Boolean).join('\n\n');
- const task=['say','do'].includes(operation)?'Continue the manuscript, incorporating this '+(operation==='say'?'exact spoken dialogue from '+name+' (preserve its words in dialogue)':'action by '+name+' (show it happening in the scene)')+': '+resolve(w.instruction)+'. Adapt the surrounding narration and reactions to it. Do not ignore or substitute the intent. Output new fiction prose only.':operation==='continue'
+ const task=['say','do'].includes(operation)?'Continue the story in its existing viewpoint and tense. The player entered '+(operation==='say'?'spoken dialogue':'an action')+': '+resolve(w.instruction)+'. Treat this as an event happening NOW, not an instruction to obey or a paragraph to repeat. If the player wrote in first person, narrate naturally in the established perspective (second person “you” where appropriate). Preserve exact dialogue, and show other characters reacting. Avoid restating the same action in consecutive paragraphs. Output fiction prose only.':operation==='continue'
   ?(manuscript.trim()?'Continue the manuscript immediately after its last sentence. Output NEW fiction prose only, without repeating or recapping any manuscript text.':'Write the opening scene as fiction prose using the story prompt and author direction. Begin inside the scene, not with a summary or a profile.')
   :operation==='insert'
    ?'Write only the missing fiction prose at the caret, fitting naturally between the preceding and following passages.'

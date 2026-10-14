@@ -132,17 +132,25 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
                 stage('writer-planning');
-                const planningPrompt=replyPrompt(body.prompt,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
+                const planningContext='<|im_start|>user\\n[Novel background]\\n'+String(body.hero_writer?.prompt||'').slice(0,2000)+'\\n[Latest manuscript]\\n'+String(body.hero_writer?.text||'').slice(-3500)+'\\nList three to six next-scene actions, never write the final passage here.<|im_end|>\\n<|im_start|>assistant\\n';
+                const planningPrompt=replyPrompt(planningContext,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
                 const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(256,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
                 if(planned)plan=planned.slice(0,1800);
             }
             stage(mode==='state'?'analyzing':'responding');
             const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
-            let prompt=replyPrompt(body.prompt,extra);
+            let prompt;
+            if(mode==='writer'){
+                // Actual continuation of the manuscript: append controls as a system
+                // message BEFORE the prose and never append another instruction AFTER it.
+                const marker='<|im_start|>assistant\\n',idx=body.prompt.lastIndexOf(marker);
+                if(idx<0)throw Error('Writer prompt has no manuscript continuation boundary.');
+                prompt=body.prompt.slice(0,idx)+'<|im_start|>system\\n'+extra+'<|im_end|>\\n'+body.prompt.slice(idx);
+            }else prompt=replyPrompt(body.prompt,extra);
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
             if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:renderPrompt(inspected,profile),template:profile.Template,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
-            const request={...body,prompt,stream:!!body.stream,max_tokens:replyTokens,temperature:['adventure-json','adventure-dm'].includes(mode)?0.35:settings.temperature,top_p:['adventure-json','adventure-dm'].includes(mode)?0.9:settings.top_p,top_k:['adventure-json','adventure-dm'].includes(mode)?20:settings.top_k,min_p:['adventure-json','adventure-dm'].includes(mode)?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
+            const request={...body,prompt,writerContinuation:mode==='writer',stream:!!body.stream,max_tokens:replyTokens,temperature:['adventure-json','adventure-dm'].includes(mode)?0.35:settings.temperature,top_p:['adventure-json','adventure-dm'].includes(mode)?0.9:settings.top_p,top_k:['adventure-json','adventure-dm'].includes(mode)?20:settings.top_k,min_p:['adventure-json','adventure-dm'].includes(mode)?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
             const raw=await sendChecked(request);
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);
@@ -175,7 +183,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const corrected=replyPrompt(rebuilt.prompt,extra+'\nThe output MUST be a passage from the novel, not an assistant reply, character description, outline or Markdown document.');
                 text=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.min(settings.temperature,0.75)}),filters);
                 lastRun.writerRepair={trigger:writerMeta,success:!!text&&!isWriterNonProse(text)};
-                if(!text||isWriterNonProse(text))throw Error('The local model generated an explanation or character profile instead of fiction twice. Nothing was added to the manuscript. Try a fiction-oriented model or rephrase your story prompt.');
+                if(!text||isWriterNonProse(text))throw Error('The selected text model could not produce a prose continuation. The original manuscript remains saved. Open Model Testing → Text → Text to diagnose the model and check its prompt template.');
             }
             if(meta||repetitive) {
                 const repairedPrompt=replyPrompt(body.prompt,extra+'\nCORRECT THE DRAFT: '+(repetitive||'The draft was writer commentary.')+' Write a fresh reply that answers the most recent user message and moves the scene forward. Do not reuse previous reply sentences, echo the user, announce narrator roles or explain how you will answer.');

@@ -65,12 +65,12 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  };
  async function diagnosePack(id){
   const required=NODE_REQUIREMENTS[id];if(!required)throw Error('Select a supported ComfyUI model pack.');
-  if(!await available())return {ok:false,connected:false,missingNodes:required,missingFiles:[],advice:'ComfyUI is not connected. Start the managed Portable engine or connect an existing ComfyUI service.'};
+  if(!await available())return {ok:false,connected:false,status:'offline',packId:id,missingNodes:[],missingFiles:[],requiredNodesNotChecked:required,missingFilesOnDisk:models.localStatus().find(p=>p.id===id)?.missing||[],error:lastError,advice:'ComfyUI is offline on 127.0.0.1:'+port+'. Node availability cannot be tested until the engine starts. Use Start & check or Install / repair selected model; already-downloaded weights are preserved.'};
   const status=await catalog(),pack=status.packs.find(p=>p.id===id);
   const info=await (await request('/object_info',{},18000)).json();
   const missingNodes=required.filter(node=>!Object.prototype.hasOwnProperty.call(info,node));
   const missingFiles=pack?.missing||[];
-  return {ok:!missingNodes.length&&!missingFiles.length,connected:true,missingNodes,missingFiles,packId:id,
+  return {ok:!missingNodes.length&&!missingFiles.length,connected:true,status:!missingNodes.length&&!missingFiles.length?'ready':'incomplete',missingNodes,missingFiles,packId:id,
     advice:missingNodes.length?'ComfyUI is missing required core nodes. Update ComfyUI Portable, then restart it.':
        missingFiles.length?'ComfyUI cannot find the model weights. Check the active models folder and restart managed ComfyUI.':
        'Required model components and workflow nodes are visible. Actual GPU inference must still be tested.'};

@@ -246,9 +246,12 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             while(Date.now()<deadline){
               if(signal?.aborted)throw Error('Image generation cancelled while starting ComfyUI.');
               if(await comfy.available()){connected=true;break;}
+              const state=comfyRuntime.status();
+              if(state.error)throw Error('ComfyUI failed during startup: '+state.error+' See Logs/comfy-engine.log.');
+              if(state.running===false&&!state.ready)throw Error('Managed ComfyUI exited before its API became available. Check Logs/comfy-engine.log for missing packages, CUDA or model-node errors.');
               await new Promise(resolve=>setTimeout(resolve,1800));
             }
-            if(!connected)throw Error('Managed ComfyUI failed to become ready. Inspect Logs/comfy-engine.log and CUDA driver compatibility.');
+            if(!connected)throw Error('Managed ComfyUI did not become ready within 120 seconds. Check Logs/comfy-engine.log, Python dependencies, CUDA and port 8188.');
           }
           onReady?.('comfyui-generating');
           return await comfy.generate(input,{checkpoint:comfyCheckpoint,sourceName:input.sourceName,maskData:input.maskData,signal});

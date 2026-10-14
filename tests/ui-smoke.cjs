@@ -10,7 +10,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
  // This is the disposable cloned UI fixture, never a user's installed profile.
  fs.rmSync(path.join(st,'data'),{recursive:true,force:true});
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));

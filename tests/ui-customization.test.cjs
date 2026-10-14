@@ -37,3 +37,11 @@ test('Model and Writer frames accept parent UI size updates',()=>{
   const s=read(p);assert.match(s,/hero-ui-settings/);assert.match(s,/hero-injected-font/);assert.match(s,/e\.origin|event\.origin/);
  }
 });
+
+test('Native lorebook save has an explicit API result and does not rely on UI refresh for persistence',()=>{
+ const story=read('extension/story.js');
+ assert.ok(story.includes("fetchWorld('edit'"));
+ assert.ok(story.includes("fetchWorld('get'"));
+ assert.ok(story.includes('updateWorldInfoList()'));
+ assert.ok(story.includes('AbortController'));
+});

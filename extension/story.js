@@ -23,7 +23,40 @@ export async function initStory({getContext,frame,show}){
     if(c().groupId)throw Error('Select a single character first.');const base=data.card.spec?data.card.data:data.card,avatar=c().characters[c().characterId]?.avatar;const keys=['name','description','personality','scenario','first_mes','mes_example'];const fields=Object.fromEntries(keys.map(k=>[k,String(base[k]||'')]));if(!fields.name.trim())throw Error('Enter a name.');const response=await fetch('/api/characters/merge-attributes',{method:'POST',headers:c().getRequestHeaders(),body:JSON.stringify({avatar,...fields,data:{...fields,tags:base.tags||[],alternate_greetings:base.alternate_greetings||[],extensions:base.extensions||{}}})});if(!response.ok)throw Error('Native character save failed.');await c().getCharacters();const v=await sync();await rpc('/story/profile',{characterId:v.session.characterId,profile:data.profile});return sync();
    }
    if(op==='lore-save-native'){
-    const v=await sync();if(!data.name?.trim())throw Error('Name the lorebook.');const old=await c().loadWorldInfo(data.name)||{entries:{}};const entries=Object.fromEntries(Object.entries(old.entries||{}).filter(([,e])=>!e.extensions?.hero_tavern));let uid=Math.max(-1,...Object.keys(entries).map(Number))+1;for(const e of v.session.lore){entries[uid]={uid,key:e.keywords||[],keysecondary:[],comment:e.label||'Hero lore',content:e.text,constant:!e.keywords?.length,selective:true,selectiveLogic:0,order:100,position:0,disable:true,extensions:{hero_tavern:{id:e.id,condition:e.condition,visibility:e.visibility}}};uid++;}await c().saveWorldInfo(data.name,{...old,entries,hero_tavern:{schemaVersion:1,entries:v.session.lore}},true);await c().updateWorldInfoList();return {name:data.name};
+    const name=String(data.name||'').trim();
+    if(!name||name.length>120||/[\/\\]/.test(name))throw Error('Choose a lorebook name without slashes (up to 120 characters).');
+    // Use the latest saved Hero lore state, without resaving the native chat.
+    // This operation is also available while background tracker analysis runs.
+    const loc=selected()?location():null;
+    const saved=view?.session?.location;
+    const v=view&&loc&&saved?.filename===loc.filename&&saved?.avatar===loc.avatar&&saved?.group===loc.group
+     ? await rpc('/story/get',{id:view.session.id})
+     : await sync();
+    const headers=c().getRequestHeaders();
+    const fetchWorld=async(route,body,missingOk=false)=>{
+     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+     try{
+      const response=await fetch('/api/worldinfo/'+route,{
+       method:'POST',headers,body:JSON.stringify(body),signal:controller.signal
+      });
+      if(missingOk&&[400,404].includes(response.status))return null;
+      if(!response.ok)throw Error('SillyTavern World Info '+route+' failed (HTTP '+response.status+'): '+(await response.text()).slice(0,350));
+      if(route==='get')return response.json();
+      return true;
+     }finally{clearTimeout(timer)}
+    };
+    const old=await fetchWorld('get',{name},true)||{entries:{}};
+    const entries=Object.fromEntries(Object.entries(old.entries||{}).filter(([,e])=>!e.extensions?.hero_tavern));
+    let uid=Math.max(-1,...Object.keys(entries).map(Number))+1;
+    for(const e of v.session.lore){
+     entries[uid]={uid,key:e.keywords||[],keysecondary:[],comment:e.label||'Hero lore',content:e.text,
+      constant:!e.keywords?.length,selective:true,selectiveLogic:0,order:100,position:0,
+      disable:true,extensions:{hero_tavern:{id:e.id,condition:e.condition,visibility:e.visibility}}};uid++;
+    }
+    await fetchWorld('edit',{name,data:{...old,entries,hero_tavern:{schemaVersion:1,entries:v.session.lore}}});
+    // The file is already saved. Refresh ST's world menu without blocking the save confirmation.
+    Promise.resolve().then(()=>c().updateWorldInfoList()).catch(e=>console.warn('World Info list refresh:',e.message));
+    return {name,entries:Object.keys(entries).length};
    }
    if(op==='lore-load-native'){
     const v=await sync(),book=await c().loadWorldInfo(data.name);if(!book)throw Error('Lorebook not found.');const entries=book.hero_tavern?.entries||Object.values(book.entries||{}).filter(e=>!e.disable).map(e=>({id:'native-'+data.name+'-'+e.uid,label:e.comment||'Lore',text:e.content,keywords:e.constant?[]:e.key||[],visibility:'player'}));return rpc('/story/metadata',{id:v.session.id,lore:[...v.session.lore,...entries.filter(e=>!v.session.lore.some(x=>x.id===e.id))]});

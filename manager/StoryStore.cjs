@@ -24,6 +24,12 @@ function createStoryStore(root,{tavernPath=path.join(root,'SillyTavern')}={}){
   for(const member of options.members||[])if(typeof member==='string'&&path.basename(member)===member)idx.characters[member] ||=uuid();
   const owner='character:'+characterId;
   if(!session.initialized){const template=S.scopeTemplate(idx.profiles[characterId]||options.template||{},owner);session.definitions=(template.trackers||[]).map(d=>S.validateDefinition({...d,owner:d.owner&&d.owner!=='character:self'?d.owner:owner}));session.lore=template.lore||[];session.episodes=template.episodes||[];session.initialized=true;}
+  // Seed the 24h story clock exactly once per chat (including existing chats).
+  // A later user deletion is respected; it must not respawn on every sync.
+  if(!session.clockInitialized){const template=S.TEMPLATE_DATA.find(x=>x[0]==='Location & Time')?.[1]||[];
+   if(!session.definitions.some(d=>d.type==='clock'&&d.owner===owner)){const preset=template.find(d=>d.type==='clock');if(preset)session.definitions.push(S.validateDefinition({...preset,owner}));}
+   session.clockInitialized=true;
+  }
   for(const m of doc.messages){m.extra=m.extra||{};m.extra.heroMessageId ||=m.heroMessageId||uuid();m.heroMessageId=m.extra.heroMessageId;}
   const memoryChanges=[],beforeMemory=readMemory(root,id);session.memoryEvents=session.memoryEvents||[];if(beforeMemory.notes&&session.memoryEvents.at(-1)?.notes!==beforeMemory.notes&&doc.messages.length)session.memoryEvents.push({notes:beforeMemory.notes,sourceMessageId:doc.messages.at(-1).extra.heroMessageId,sourcePrefix:S.hash(doc.messages.map(S.signature))});
   const change=S.reconcile(session,doc.messages);if(change.changed){session.analyzedSources=[];session.invalidatedMemory=[...(session.invalidatedMemory||[]),beforeMemory].slice(-30);const validNotes=session.memoryEvents.filter(e=>{const i=doc.messages.findIndex(m=>m.extra.heroMessageId===e.sourceMessageId);return i>=0&&e.sourcePrefix===S.hash(doc.messages.slice(0,i+1).map(S.signature))}).at(-1)?.notes||'';memoryChanges.push({file:memoryPath(id),content:json({notes:validNotes,summary:'',covered:0,hash:''})});}

@@ -74,7 +74,7 @@ def generate(data):
             sample_rate = m.sr
             import torchaudio
             out = io.BytesIO()
-            torchaudio.save(out, wav.cpu(), sample_rate, format="wav")
+            torchaudio.save(out, wav.unsqueeze(0).cpu() if wav.ndim == 1 else wav.cpu(), sample_rate, format="wav")
             encoded = out.getvalue()
         else:
             import soundfile as sf

@@ -91,10 +91,25 @@ function createComfyRuntime(root,{port=8188,spawnFn=spawn,fetchFn=globalThis.fet
  }
  async function stop(){
   if(!child)return {stopped:false,reason:'ComfyUI is externally managed or already stopped.'};
-  const current=child;try{current.kill('SIGTERM')}catch{}
-  let exited=await Promise.race([new Promise(resolve=>current.once('exit',()=>resolve(true))),new Promise(resolve=>setTimeout(()=>resolve(false),12000))]);
-  if(!exited&&child===current){try{current.kill('SIGKILL')}catch{}error='ComfyUI did not exit gracefully. Emergency stop was required.'}
-  return {stopped:true,graceful:exited};
+  const current=child;
+  const waitExit=ms=>new Promise(resolve=>{
+    if(current.exitCode!==null||current.signalCode!==null)return resolve(true);
+    let timer;const done=()=>{clearTimeout(timer);current.removeListener('exit',done);resolve(true)};
+    current.once('exit',done);timer=setTimeout(()=>{current.removeListener('exit',done);resolve(false)},ms);
+  });
+  try{current.kill('SIGTERM')}catch{}
+  const exited=await waitExit(12000);
+  if(!exited&&child===current){
+    error='ComfyUI did not exit in 12 seconds. Emergency stop of the managed process tree was required.';
+    if(process.platform==='win32'&&current.pid){
+      await new Promise(resolve=>{
+        const killer=spawn('taskkill.exe',['/PID',String(current.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+        killer.once('error',()=>resolve());killer.once('exit',()=>resolve());
+      });
+    }else{try{current.kill('SIGKILL')}catch{}}
+    await waitExit(3000);
+  }
+  return {stopped:true,graceful:exited,stillRunning:child===current};
  }
  async function spawnWait(exe,args,logName,state,job){
   const fd=fs.openSync(path.join(logs,logName),'a');

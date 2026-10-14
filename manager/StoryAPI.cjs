@@ -43,6 +43,9 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     if(!v.session.definitions.some(x=>x.owner===d.owner&&x.type==='injuries'))
      v=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
    const session=v.session,head=S.hash(v.messages.map(S.signature));
+   // Do not hammer the reply backend on repeated UI events after an extractor failure.
+   // A new finalized message changes the head; the Re-analyze button overrides this throttle.
+   if(data.recheck!==true&&session.lastAnalysis?.head===head&&(session.lastAnalysis.failed||session.lastAnalysis.partial))return v;
    const eligible=session.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
    const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
    if(!eligible.length||lastFinal<0)return v;

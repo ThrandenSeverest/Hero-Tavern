@@ -113,11 +113,13 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   if(!['flux-klein','z-turbo','sdxl','koboldcpp','custom'].every(id=>options.includes(id)))throw Error('Image Studio unified model selector is incomplete');
   await panel.locator('#image-create-model').selectOption('flux-klein');
   await panel.locator('#image-model-center').waitFor({state:'attached'});
+  if(!await panel.locator('#hero-lora-quick').isVisible()||!await panel.locator('#image-create-guide').isVisible())throw Error('Guided model status and one-click LoRA shelf must be visible during generation');
   if(!await panel.locator('#image-center-global').count())throw Error('Unified Image Model Center did not initialize');
   if(!await panel.locator('#image-center-chat').count()||!await panel.locator('#image-center-adventure').count())throw Error('Chat/Adventure image model selectors missing');
   await panel.locator('[data-tab="image-setup"]').click();
   if(!await panel.locator('#image-center-global').isVisible())throw Error('Unified model controls must be visible in Models & Setup');
   if(!await panel.locator('#image-center-install').isVisible()||!await panel.locator('#image-center-start').isVisible())throw Error('ComfyUI setup controls must be visible without opening Advanced settings');
+  if(!await panel.locator('#hero-lora-library').isVisible())throw Error('LoRA Library must be visible in Models & Setup');
   await panel.locator('[data-tab="images"]').click();
   
   if(!await panel.locator('#image-generate').isEnabled())throw Error('FLUX Generate must not depend on legacy KoboldCpp ImageModels checkpoint');

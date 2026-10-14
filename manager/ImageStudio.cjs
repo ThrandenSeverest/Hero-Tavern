@@ -19,6 +19,11 @@ function createStudio(root,{pipeline,ensureText,generateImage,getImageState=()=>
           refined={original:input.prompt||'Upscale original image',prompt:(input.prompt||'Upscale original image')+(p.style?'\nVisual style: '+p.style:''),preset:p.id};
         }
       }else refined={original:input.prompt||'Upscale original image',prompt:(input.prompt||'Upscale original image')+(input.operation==='upscale'?'':p.style?'\nVisual style: '+p.style:''),preset:p.id};
+      // Apply saved LoRA triggers after the optional LLM rewrite so they cannot be dropped.
+      if(input.operation!=='upscale'&&Array.isArray(input.loraTriggerWords)&&input.loraTriggerWords.length){
+        const words=input.loraTriggerWords.filter(word=>typeof word==='string'&&word.trim()).map(word=>word.trim());
+        if(words.length)refined.prompt+='\n'+[...new Set(words)].join(', ');
+      }
       // Scene editor has deterministic requirements even if a local LLM rewrites the prompt.
       if(input.scene){const composition=scenePrompt(input.scene);refined.prompt=composition+'\nADDITIONAL USER DETAIL: '+refined.prompt;}
       phase='preparing-image-engine';const selected=getImageState().selected||getImageState().running||'';

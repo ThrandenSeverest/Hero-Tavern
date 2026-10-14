@@ -82,10 +82,11 @@ function createLoRAManager(root,{modelRoot=()=>'',fetchFn=globalThis.fetch}={}){
   });
   return {items,pack,upload:upload&&{name:upload.name,bytes:upload.bytes,total:upload.total},download:download&&{name:download.name,bytes:download.bytes,total:download.total,phase:download.phase},last};
  }
- function assign({name,family,manual=true}={}){
+ function assign({name,family,manual=true,triggerWords}={}){
   if(typeof name!=='string'||!list().items.some(x=>x.name===name))throw Error('Select an installed LoRA.');
   if(!ROOTS.includes(family))throw Error('Choose a supported base-model family.');
-  const original=records[name]||{};records[name]={...original,family,manual:!!manual};save();return {name,family};
+  if(triggerWords!==undefined&&(!Array.isArray(triggerWords)||triggerWords.length>12||triggerWords.some(word=>typeof word!=='string'||!word.trim()||word.length>80||/[\r\n]/.test(word))))throw Error('Use up to 12 trigger words, each at most 80 characters.');
+  const original=records[name]||{};records[name]={...original,family,manual:!!manual,...(triggerWords!==undefined?{triggerWords:[...new Set(triggerWords.map(word=>word.trim()))]}:{})};save();return {name,family,triggerWords:records[name].triggerWords||[]};
  }
  function begin({name,size}={}){
   if(upload||download)throw Error('Finish the existing LoRA installation first.');

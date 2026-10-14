@@ -99,10 +99,22 @@ function render(state){
  if(gpu?.vramTotal||gpu?.vram_total){const total=gpu.vramTotal||gpu.vram_total,free=gpu.vramFree||gpu.vram_free;
   jobs.append(element('p',(gpu.name||'GPU')+' · '+(Number(free)/(1024**3)).toFixed(1)+' GB free of '+(Number(total)/(1024**3)).toFixed(1)+' GB VRAM (reported by ComfyUI)','small'));
  }
- const quick=$('image-create-model-status'),current=state.models.find(m=>m.id===state.choices.global);
+ const selected=$('image-create-model')?.value||state.choices.global;
+ const quick=$('image-create-model-status'),current=state.models.find(m=>m.id===selected);
  if(quick&&current){
   quick.textContent=current.ready?'✓ '+current.label+' ready':current.downloaded?(connect?'Downloaded; not visible in running ComfyUI. Open Models & Setup.':'Model downloaded. Its engine starts automatically when needed.'):'Download this model in Models. Hero Tavern prepares its engine and dependencies automatically.';
   quick.classList.toggle('error',!current.ready);
+ }
+ const guide=$('image-create-guide'),fix=$('image-create-fix');
+ if(guide&&fix){
+  const ready=!!current?.ready;
+  guide.textContent=selected==='custom'?'Next: choose a saved workflow in ComfyUI Workflows. Native graphs open in the full node editor.':
+   selected==='koboldcpp'?'Next: load a classic image checkpoint in Models & Setup, then enter a prompt.':
+   ready?'Ready: optionally enable a LoRA, enter a prompt, then generate.':
+   current?.downloaded?'Next: start or repair ComfyUI so it can see the downloaded model.':
+   'Next: install the selected model and its dependencies.';
+  fix.textContent=selected==='custom'?'Open workflow editor':selected==='koboldcpp'?'Open Models & Setup':ready?'Model ready':current?.downloaded?'Start / repair model':'Install selected model';
+  fix.disabled=ready&&!['custom','koboldcpp'].includes(selected);
  }
  $('image-center-cards').replaceChildren(...state.models.filter(m=>m.id!=='custom'&&m.id!=='koboldcpp').map(modelCard));
  renderDownload(state);
@@ -191,13 +203,15 @@ function makeUI(){
  $('models').append(main);
  const mount=()=>{const target=$('image-setup').hidden?$('models'):setup;if(main.parentElement!==target)target.append(main)};new MutationObserver(mount).observe($('image-setup'),{attributes:true,attributeFilter:['hidden']});mount();
  const quick=element('div',null,'hero-unified-quick');
- quick.append(action('Install / fix selected image model',async()=>{
+ const guide=element('p','Checking the selected model…','small');guide.id='image-create-guide';guide.setAttribute('role','status');
+ const fix=action('Install selected model',async()=>{
   const model=last?.models.find(m=>m.id===$('image-create-model').value);
   if(!model)throw Error('Choose an image model first.');
-  if(['koboldcpp','custom'].includes(model.id)){document.querySelector('[data-tab="image-setup"]')?.click();return}
-  if(model.ready){alertError(Error('Model is already ready to generate.'));return}
+  if(model.id==='custom'){document.querySelector('[data-tab="comfy-workflows"]')?.click();return}
+  if(model.id==='koboldcpp'){document.querySelector('[data-tab="image-setup"]')?.click();return}
+  if(model.ready)return;
   await req('/image/model-center/setup',{id:model.id,confirm:true});await refresh(true);document.querySelector('[data-tab="models"]')?.click();return;
- }));
+ });fix.id='image-create-fix';quick.append(guide,fix);
  $('image-create-model-status').after(quick);
  $('image-create-model').onchange=async()=>{
   try{const id=$('image-create-model').value;await req('/image/model-center/select',{scope:'global',id});

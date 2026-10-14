@@ -19,15 +19,16 @@ async function refresh(){
   const showUnknown=$('hero-lora-unknown').checked;
   const matches=installed.filter(l=>((l.compatible)||(showUnknown&&l.unknown))&&l.name.toLowerCase().includes(search));
   const choices=matches.filter(x=>x.compatible).map(x=>[x.name,x.name+' ('+(familyNames[x.family]||x.family)+')']);
-  for(const key of ['hero-comfy-lora-1','hero-comfy-lora-2'])addOptions($(key),choices,'None / incompatible hidden');
+  for(const key of ['hero-comfy-lora-1','hero-comfy-lora-2','hero-comfy-lora-3'])addOptions($(key),choices,'None / incompatible hidden');
   const grid=$('hero-lora-installed');grid.replaceChildren();
   for(const lora of installed.filter(x=>x.name.toLowerCase().includes(search))){
    const card=node('div',{class:'card'}),heading=node('strong',{},lora.name),status=node('p',{class:'small'},lora.error||((lora.compatible?'✓ Compatible':'○ '+(lora.unknown?'Unknown base model':'Different base model'))+' · '+(familyNames[lora.family]||lora.family||'unknown')));
    const selector=node('select');
    selector.append(new Option('Unknown – do not use',''),...Object.entries(familyNames).map(([k,v])=>new Option(v,k)));
    selector.value=lora.family||'';
-   const assign=node('button',{},'Assign base family');assign.onclick=async()=>{try{if(!selector.value)throw Error('Choose a family first.');await api('/lora/assign',{name:lora.name,family:selector.value});message('Family assigned to '+lora.name);await refresh()}catch(e){message(e.message)}};
-   card.append(heading,status,selector,assign);grid.append(card);
+   const words=node('input',{placeholder:'Trigger words, separated by commas',maxlength:'1000'});words.value=(lora.triggerWords||[]).join(', ');
+   const assign=node('button',{},'Save family and trigger words');assign.onclick=async()=>{try{if(!selector.value)throw Error('Choose a family first.');await api('/lora/assign',{name:lora.name,family:selector.value,triggerWords:words.value.split(',').map(x=>x.trim()).filter(Boolean)});message('Saved '+lora.name+'. Trigger words will be added during generation.');await refresh();await window.heroRefreshQuickLoras?.()}catch(e){message(e.message)}};
+   card.append(heading,status,selector,words,assign);grid.append(card);
   }
   $('hero-lora-count').textContent=matches.length+' usable or unclassified LoRA(s) for '+(familyNames[family]||chosenModel())+'. Incompatible LoRAs cannot be selected.';
   const d=state.download;if(d){message('Downloading '+d.name+': '+(d.bytes/1048576).toFixed(1)+' / '+(d.total/1048576).toFixed(1)+' MiB · '+d.phase);}
@@ -58,7 +59,7 @@ async function browse(){
  if(!data.items.length)message('No compatible Civitai LoRAs found. Try a wider search or a different base-model filter.');
 }
 function mount(){
- const advanced=$('hero-comfy-advanced');if(!advanced)return;
+ const advanced=$('hero-comfy-advanced'),host=$('image-model-center')||$('image-setup-content');if(!advanced||!host)return;
  const box=node('div',{class:'card',id:'hero-lora-library'}),h=node('h3',{},'LoRA Library · compatible models only');
  box.append(h,node('p',{class:'small'},'LoRAs are isolated by model family. Unknown or mismatched weights are excluded from generation until you assign a matching family.'));
  const filters=node('div',{class:'controls'}),search=node('input',{id:'hero-lora-filter',placeholder:'Search installed LoRAs'}),unknown=node('label',{},'Include unknown');unknown.append(node('input',{type:'checkbox',id:'hero-lora-unknown'}));filters.append(search,unknown);box.append(filters,node('p',{id:'hero-lora-count',class:'small'}));
@@ -77,7 +78,7 @@ function mount(){
  const buttons=node('div',{class:'actions'}),refreshButton=node('button',{},'Refresh installed LoRAs'),cancel=node('button',{},'Cancel transfer');
  refreshButton.onclick=refresh;cancel.onclick=async()=>{await api('/lora/cancel',{});message('Transfer cancellation requested.');await refresh()};buttons.append(refreshButton,cancel);
  box.append(buttons,node('p',{id:'hero-lora-status',role:'status'}));
- advanced.prepend(box);
+ host.append(box);
  const existing=advanced.querySelectorAll('label');for(const label of existing){if(/LoRA #/.test(label.textContent))label.style.display='none'}
  search.oninput=()=>refresh();unknown.onchange=()=>refresh();
  const observer=new MutationObserver(()=>refresh());observer.observe($('image-create-model'),{attributes:true,attributeFilter:['value']});

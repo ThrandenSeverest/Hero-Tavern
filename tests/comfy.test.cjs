@@ -62,3 +62,24 @@ test('Disconnected ComfyUI diagnosis never pretends every Qwen node is missing',
   assert.match(report.advice,/offline|cannot be tested/i);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+test('Qwen GGUF is discovered through the GGUF loader inventory even when core diffusion list omits it',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-comfy-gguf-')),models=path.join(root,'models');
+ try{
+  fs.mkdirSync(path.join(models,'diffusion_models'),{recursive:true});
+  const adapter=createComfyAdapter(root,{fetchFn:async url=>{
+   const route=new URL(url).pathname;
+   const data=route==='/system_stats'?{devices:[]}:
+    route==='/models/unet_gguf'?['qwen-image-2.1-Q5_K_M.gguf']:
+    route==='/models/text_encoders'?['qwen3vl_8b_int8_convrot.safetensors']:
+    route==='/models/vae'?['qwen_image_2.1_vae_bf16.safetensors']:
+    route==='/object_info'?Object.fromEntries(['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','KSampler','VAEDecode','SaveImage'].map(k=>[k,{}])):
+    route==='/object_info/KSampler'?{KSampler:{input:{required:{}}}}:[];
+   return new Response(JSON.stringify(data),{status:200});
+  }});
+  const catalog=await adapter.catalog();
+  assert.ok(catalog.lists.diffusion_models.includes('qwen-image-2.1-Q5_K_M.gguf'));
+  assert.equal(catalog.packs.find(p=>p.id==='qwen21-q5km').installed,true);
+  const report=await adapter.diagnosePack('qwen21-q5km');
+  assert.equal(report.ok,true);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

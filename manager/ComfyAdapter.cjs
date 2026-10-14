@@ -33,10 +33,17 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
   catch(e){healthy=false;lastError=e.message;return false}finally{lastCheck=Date.now()}
  }
  async function modelList(group){
-  if(!['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'].includes(group))throw Error('Unknown ComfyUI model group.');
+  if(!['checkpoints','loras','upscale_models','diffusion_models','unet_gguf','text_encoders','vae'].includes(group))throw Error('Unknown ComfyUI model group.');
   const r=await request('/models/'+group,{},7000),names=await r.json();
   if(!Array.isArray(names))throw Error('ComfyUI returned an invalid model list for '+group+'.');
   return names.filter(name=>{try{modelName(name);return name.length<=260}catch{return false}});
+ }
+ async function ggufList(){
+  try{return await modelList('unet_gguf')}catch{
+   const info=await (await request('/object_info/UnetLoaderGGUF',{},7000)).json();
+   const names=info.UnetLoaderGGUF?.input?.required?.unet_name?.[0];
+   return Array.isArray(names)?names.filter(name=>{try{modelName(name);return /\.gguf$/i.test(name)}catch{return false}}):[];
+  }
  }
  const checkpoints=()=>modelList('checkpoints').then(names=>names.filter(n=>/\.safetensors$/i.test(n)));
  async function nativeHistory(){
@@ -79,8 +86,11 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
  async function catalog(){
   if(!await available())return {available:false,error:lastError,checkpoints:[],loras:[],upscalers:[],devices:[],packs:models.localStatus().map(pack=>({...pack,downloaded:pack.installed})),modelHub:models.snapshot(),offlineInventory:true};
   const groups=['checkpoints','loras','upscale_models','diffusion_models','text_encoders','vae'];
-  const entries=await Promise.allSettled(groups.map(group=>modelList(group)));
+  const entries=await Promise.allSettled([...groups.map(group=>modelList(group)),ggufList()]);
   const lists=Object.fromEntries(groups.map((name,i)=>[name,entries[i].status==='fulfilled'?entries[i].value:[]]));
+  // ComfyUI-GGUF registers its own file category. The core diffusion_models
+  // endpoint can omit .gguf even while UnetLoaderGGUF sees the weight.
+  if(entries[groups.length].status==='fulfilled')lists.diffusion_models=[...new Set([...lists.diffusion_models,...entries[groups.length].value.filter(name=>/\.gguf$/i.test(name))])];
   let samplingOptions={};try{const info=await (await request('/object_info/KSampler',{},7000)).json(),required=info.KSampler?.input?.required;samplingOptions={samplers:required?.sampler_name?.[0]||[],schedulers:required?.scheduler?.[0]||[]};}catch{}
   return {...samplingOptions,available:true,checkpoints:lists.checkpoints,loras:lists.loras,upscalers:lists.upscale_models,
     packs:models.composeStatus(lists).map(pack=>{
@@ -177,6 +187,10 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
    if(managed){
     const groups=['diffusion_models','text_encoders','vae'];
     const actual=Object.fromEntries(await Promise.all(groups.map(async name=>[name,await modelList(name)])));
+    if(chosenPack.family==='qwen21'){
+     const gguf=await ggufList();
+     actual.diffusion_models=[...new Set([...actual.diffusion_models,...gguf.filter(name=>/\.gguf$/i.test(name))])];
+    }
     const missing=models.composeStatus(actual).find(x=>x.id===chosenPack.id)?.missing||[];
     resolvedFiles=models.resolvePackFiles(chosenPack,actual);
     if(missing.length)throw Error(chosenPack.name+' missing components: '+missing.join(', ')+'. Install its model pack in Image Studio.');

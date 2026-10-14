@@ -33,6 +33,9 @@ test('LoRA browser detects safetensors metadata and refuses mismatched family at
   result=library.list({pack:'sdxl'});
   assert.equal(result.items[0].compatible,true);
   assert.equal(result.items[0].manual,true);
+  library.assign({name:'face.safetensors',family:'sdxl',triggerWords:['silver hair','painted style','silver hair']});
+  assert.deepEqual(library.list({pack:'sdxl'}).items[0].triggerWords,['silver hair','painted style']);
+  assert.throws(()=>library.assign({name:'face.safetensors',family:'sdxl',triggerWords:['bad\nnewline']}),/trigger words/);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 test('Large local LoRA import uses chunks and rejects non-safetensors and filename traversal',()=>{

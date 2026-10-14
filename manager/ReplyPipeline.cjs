@@ -139,7 +139,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const activeBeat=String(beats[index]||''),upcomingBeat=String(beats[index+1]||'');
                 const planningContext='<|im_start|>user\n[Story premise (background, not a starting instruction)]\n'+String(w.prompt||'').slice(0,900)+
                   '\n[Permanent canon]\n'+String(w.memory||'').slice(0,900)+
-                  '\n[Earlier chapter events — already happened]\n'+String(w.recap||'').slice(-1000)+
+                  '\n[Previous chapters — continuity]\n'+String(w.recap||'').slice(-1000)+
                   '\n[CURRENT active beat]\n'+activeBeat.slice(0,600)+
                   '\n[Later beat — not now]\n'+upcomingBeat.slice(0,250)+
                   '\n[Author direction]\n'+String(w.note||'').slice(0,550)+

@@ -33,7 +33,7 @@ test('Tracker analysis accepts typed evidence updates and preserves all chat tex
  const message={mes:'Mira smiled.',extra:{heroMessageId:'m1'}},session={definitions:[d],events:[],analyzedSources:[],failures:[]};
  let calls=0,applied=0;
  const view=()=>({session,messages:[message],context:S.activeContext(session,[message])});
- const store={view,get:()=>session,saveSession:()=>{},eventPatch:(_id,patch)=>{applied++;assert.equal(patch[0].value,'happy');assert.equal(patch[0].evidence,'Mira smiled.');return view()}};
+ const store={view,get:()=>session,saveSession:()=>{},eventPatch:(_id,patch)=>{applied++;assert.equal(patch[0].value,'happy');assert.equal(patch[0].evidence,'Mira smiled.');session.events.push(...S.propose(session,[message],patch));return view()}};
  const api=createStoryAPI(store,{generate:async()=>{calls++;return {choices:[{text:'UPDATE :: character:mira:mood :: SET :: happy :: m1 :: Mira smiled.'}]}}});
  await api.action('/story/analyze',{id:'test'});
  assert.equal(calls,1);assert.equal(applied,1);assert.equal(session.analyzedSources.length,1);assert.equal(session.lastAnalysis.changes,1);assert.equal(message.mes,'Mira smiled.');

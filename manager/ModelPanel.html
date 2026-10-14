@@ -443,6 +443,7 @@ el('image-clear-source').onclick=clearImageSource;
 el('image-clear-loras').onclick=()=>{for(let i=1;i<=3;i++)el('hero-comfy-lora-'+i).value='';showImageRequestState();};
 el('image-reset-state').onclick=()=>{clearImageSource();el('image-clear-loras').click();el('image-seed').value='-1';el('studio-refine').checked=false;el('hero-post-auto').checked=false;el('hero-upscale-auto').checked=false;el('hero-api-workflow').value='';showImageRequestState();};
 for(const id of ['hero-comfy-mode','hero-comfy-reference','image-create-model','image-seed','studio-refine','hero-post-auto','hero-upscale-auto','hero-comfy-lora-1','hero-comfy-lora-2','hero-comfy-lora-3'])el(id).addEventListener('change',showImageRequestState);
+setTimeout(showImageRequestState,0);
 function heroSelectedLoras(){
  const out=[];
  for(let i=1;i<=3;i++){

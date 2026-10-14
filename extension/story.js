@@ -130,11 +130,50 @@ export async function initStory({getContext,frame,show}){
   const audio=document.createElement('audio');audio.controls=true;
   const status=document.createElement('p');status.setAttribute('role','status');
   const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
-  const quick=document.createElement('button');quick.textContent='Use Qwen built-in voice (no WAV)';quick.id='hero-character-voice-quick';quick.onclick=async()=>{quick.disabled=true;try{const name=character.name+' · Qwen Ryan';const r=await rpc('/tts/profiles/save',{name,voice:{engine:'qwen',variant:'custom-0.6',device:state.settings.device,language:'Auto',speaker:'Ryan'}});dialogue.append(new Option(name,r.profile.id));dialogue.value=r.profile.id;status.textContent=state.downloadedModels?.['custom-0.6']?'Qwen voice assigned in editor. Save to the character, then preview.':'Voice profile created. Install Qwen CustomVoice 0.6B in Voice models before preview; no WAV needed.';}catch(e){status.textContent='Profile creation failed: '+e.message}finally{quick.disabled=false}};
+  // A native Character Voice editor, not a link to an unrelated settings screen.
+  const engine=document.createElement('select');engine.id='hero-character-voice-engine';
+  for(const [id,title] of [['qwen:custom-0.6','Qwen CustomVoice 0.6B · no WAV'],['qwen:custom-1.7','Qwen CustomVoice 1.7B · no WAV'],['qwen:design-1.7','Qwen VoiceDesign 1.7B · voice description'],['qwen:clone-0.6','Qwen Base 0.6B · WAV + transcript'],['qwen:clone-1.7','Qwen Base 1.7B · WAV + transcript'],['flash:flash','Chatterbox Flash · WAV']])engine.add(new Option(title,id));
+  const speaker=document.createElement('select');speaker.id='hero-character-voice-speaker';
+  for(const name of ['Ryan','Vivian','Serena','Aiden','Dylan','Eric','Ono_Anna','Sohee','Uncle_Fu'])speaker.add(new Option(name,name));
+  const mood=document.createElement('textarea');mood.rows=2;mood.placeholder='Mood / timbre / speaking style supported by VoiceDesign and CustomVoice 1.7B';
+  const transcript=document.createElement('input');transcript.placeholder='Exact transcript of reference WAV';
+  const wav=document.createElement('select');wav.add(new Option('Choose imported WAV',''));
+  for(const item of state.voices||[])wav.add(new Option(item,item));
+  const upload=document.createElement('input');upload.type='file';upload.accept='.wav,audio/wav';
+  const importWav=document.createElement('button');importWav.textContent='Import WAV for this voice';
+  importWav.onclick=async()=>{
+   const file=upload.files?.[0];if(!file){status.textContent='Choose a WAV first.';return;}
+   if(file.size>12000000){status.textContent='WAV must be below 12 MB.';return;}
+   importWav.disabled=true;
+   try{const base64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=()=>reject(Error('Could not read WAV'));r.readAsDataURL(file)});
+    const v=await rpc('/tts/import',{name:file.name.replace(/\.wav$/i,''),base64});wav.replaceChildren(new Option('Choose imported WAV',''),...(v.voices||[]).map(n=>new Option(n,n)));wav.value=file.name.toLowerCase().replace(/\.wav$/i,'').replace(/[^a-z0-9_-]/g,'').slice(0,60)+'.wav';status.textContent='Reference imported.';
+   }catch(e){status.textContent=e.message}finally{importWav.disabled=false}
+  };
+  const device=document.createElement('select');device.add(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings.device;
+  const voiceOptions=()=>{const [backend,variant]=engine.value.split(':');return {engine:backend,variant,device:device.value,language:'Auto',speaker:speaker.value,reference:wav.value,referenceText:transcript.value,style:mood.value}};
+  const updateVoice=()=>{
+   const chosen=engine.value,reference=chosen.startsWith('flash:')||chosen.includes(':clone-');
+   wav.parentElement.hidden=!reference;upload.parentElement.hidden=!reference;importWav.hidden=!reference;
+   transcript.parentElement.hidden=!chosen.includes(':clone-');
+   mood.parentElement.hidden=!(chosen.includes(':design-')||chosen==='qwen:custom-1.7');
+   speaker.parentElement.hidden=!chosen.includes(':custom-');
+  };
+  const quick=document.createElement('button');quick.id='hero-character-voice-quick';quick.textContent='Create & assign selected voice';
+  quick.onclick=async()=>{quick.disabled=true;try{const voice=voiceOptions(),name=character.name+' · '+voice.engine+' '+voice.variant+' '+(voice.speaker||'');
+   const r=await rpc('/tts/profiles/save',{name,voice});dialogue.add(new Option(name,r.profile.id));dialogue.value=r.profile.id;
+   status.textContent='Assigned in editor. Click Save character voice, then Preview.';
+  }catch(e){status.textContent=e.message}finally{quick.disabled=false}};
+  const install=document.createElement('button');install.id='hero-character-voice-install';install.textContent='Install selected model + dependencies';
+  install.onclick=async()=>{install.disabled=true;try{const voice=voiceOptions();
+   await rpc('/tts/configure',{engine:voice.engine,variant:voice.variant,device:voice.device});
+   const state=await rpc('/tts/setup',{});
+   status.textContent=state.alreadyInstalled?'Weights and runtime are installed. Run Preview to test actual speech.':'Installation started. Progress and errors are shown in Voice Library; your character voice assignment remains saved.';
+  }catch(e){status.textContent=e.message}finally{install.disabled=false}};
+  engine.onchange=updateVoice;
    const preview=document.createElement('button');preview.textContent='Preview character + narrator';preview.onclick=async()=>{preview.disabled=true;status.textContent='Generating preview…';try{const result=await rpc('/tts/message',{text:text.value,assignment:assignment()});audio.src=origin+result.url;status.textContent='Ready · '+result.segments+' synthesis segment(s)';await audio.play().catch(()=>{status.textContent='Ready. Press Play.'})}catch(e){status.textContent=e.message}finally{preview.disabled=false}};
   const save=document.createElement('button');save.textContent='Save character voice';save.onclick=async()=>{try{if(c().characters?.[index]!==character)throw Error('Character selection changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};status.textContent='Saved on character card.'}catch(e){status.textContent='Save failed: '+e.message}};
   const setup=document.createElement('button');setup.textContent='Open Voice Library / create voice';setup.onclick=()=>{box.parentElement.remove();show('voices')};
-  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),quick,text,preview,audio,save,setup,status);
+  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),label('Voice engine ',engine),label('Hardware ',device),label('Preset speaker ',speaker),label('Mood / description ',mood),label('Reference WAV ',wav),label('Transcript ',transcript),label('Import WAV ',upload),importWav,quick,install,text,preview,audio,save,setup,status);updateVoice();
  }
  const style=document.createElement('style');style.textContent='#hero-session-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#202939;border-bottom:1px solid #3a4960;flex-shrink:0;font:12px system-ui}#hero-session-name{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#hero-session-toolbar button,.hero-message-menu button{background:#27354a;border:1px solid #455874;color:#dce8f6;border-radius:6px;padding:5px 8px;cursor:pointer}.hero-message-menu{font:11px system-ui;margin:6px 0;display:flex;gap:5px;flex-wrap:wrap}.hero-story-dialog{position:fixed;inset:0;z-index:2500;background:#080c12cc;display:grid;place-items:center}.hero-story-dialog>section{background:#1e2939;color:#e6edf7;border:1px solid #53627b;border-radius:14px;padding:24px;width:min(680px,90vw);max-height:85vh;overflow:auto}.hero-story-dialog button,.hero-story-dialog input,.hero-story-dialog select,.hero-story-dialog textarea{font:inherit;background:#253247;color:#e6edf7;border:1px solid #53627b;border-radius:8px;padding:10px;margin:6px 3px}.hero-story-dialog textarea{width:90%;min-height:100px}.hero-story-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}';document.head.append(style);
  toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else if(op==='voice')openCharacterVoice().catch(notify);else{show(op);sync().catch(notify)}};

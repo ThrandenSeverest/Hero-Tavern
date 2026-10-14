@@ -379,7 +379,13 @@ async function selectStudioModel(choice,{save=true}={}){
   el('image-cfg').value=1;
   el('image-sampler').value='Euler';
   el('image-scheduler').value='simple';
-  if(!el('image-seed').value)el('image-seed').value='-1';
+  el('image-seed').value='-1';
+  el('studio-preset').value='raw';el('studio-refine').checked=false;
+  el('hero-post-auto').checked=false;el('hero-upscale-auto').checked=false;
+  el('scene-enabled').checked=false;el('scene-fields').hidden=true;
+  el('hero-comfy-mode').value='txt2img';el('hero-comfy-reference').value='';
+  el('hero-comfy-batch').value='1';
+  el('image-width').value=768;el('image-height').value=768;imageGeometryTouched=true;syncImageFormat();
  }
 
  if(item&&choice!=='koboldcpp'&&choice!=='custom'){
@@ -667,7 +673,7 @@ async function heroHubRefresh(){
    const initial=cfg.selected&&cfg.selected!=='sdxl'?cfg.selected:(studio.settings.engine==='koboldcpp'?'koboldcpp':studio.settings.modelPack||'sdxl');
    el('hero-pack-select').value=initial==='koboldcpp'?'sdxl':initial;
    el('image-create-model').value=initial;
-   if(initial.startsWith('qwen21-')){el('image-steps').value=25;el('image-cfg').value=1;el('image-sampler').value='Euler';el('image-scheduler').value='simple';}
+   if(initial.startsWith('qwen21-')){el('image-steps').value=25;el('image-cfg').value=1;el('image-sampler').value='Euler';el('image-scheduler').value='simple';el('image-width').value=768;el('image-height').value=768;el('image-seed').value='-1';el('studio-preset').value='raw';el('studio-refine').checked=false;el('hero-post-auto').checked=false;el('hero-upscale-auto').checked=false;el('scene-enabled').checked=false;el('scene-fields').hidden=true;el('hero-comfy-mode').value='txt2img';el('hero-comfy-reference').value='';el('hero-comfy-batch').value='1';imageGeometryTouched=true;syncImageFormat();}
    el('hero-pack-root').value=cfg.modelRoot||engine.runtime?.detected?.models||'';
    el('hero-runtime-mode').value=engine.runtime?.mode||'external';
    el('hero-runtime-folder').value=engine.runtime?.folder||'';

@@ -51,7 +51,14 @@ function createTTS(root){
  }
  function resolveVoice(profileId,narrator=false){
   if(profileId){if(!Object.hasOwn(profiles,profileId))throw speechError('TTS_CHARACTER_ROUTE_FAILED','Assigned voice profile is missing. Reassign it in Character Voice.');return normalizeVoice(profiles[profileId].voice);}
-  return normalizeVoice(narrator?{speaker:settings.narratorSpeaker,reference:settings.narratorReference,referenceText:settings.narratorReferenceText}:{});
+  const voice=normalizeVoice(narrator?{speaker:settings.narratorSpeaker,reference:settings.narratorReference,referenceText:settings.narratorReferenceText}:{});
+  // Never demand an arbitrary WAV from a character that has no assigned voice
+  // when a local no-reference CustomVoice model is already installed.
+  if(capabilities(voice.engine,voice.variant).referenceAudio&&!voice.reference){
+   const variant=['custom-0.6','custom-1.7'].find(kind=>installedWeight('qwen',kind));
+   if(variant)return normalizeVoice({engine:'qwen',variant,speaker:narrator?(settings.narratorSpeaker||'Ryan'):(settings.speaker||'Ryan'),reference:'',style:''});
+  }
+  return voice;
  }
  function preflight(voice){
   const caps=capabilities(voice.engine,voice.variant);
@@ -251,10 +258,11 @@ function createTTS(root){
   if(typeof input?.text!=='string'||!input.text.trim()||input.text.length>600)throw Error('Speech text must be 1–600 characters');busy=true;
   const started=Date.now(),jobId=require('node:crypto').randomUUID();let task;
   try{
-   const voice=normalizeVoice(input);preflight(voice);
+   const voice=normalizeVoice(input);
+   if(!installedWeight(voice.engine,voice.variant))throw speechError('TTS_WEIGHTS_MISSING','The selected '+voice.engine+' '+voice.variant+' weights are not installed. Open Character Voice → Voice Library → Install + download; no WAV is needed for Qwen CustomVoice.');
+   preflight(voice);
    const ref=voice.reference?path.join(voices,voice.reference):'';
    task={...voice,text:input.text,reference:ref,referenceHash:ref?createHash('sha256').update(fs.readFileSync(ref)).digest('hex'):'',modelPath:weightsDir(voice.engine,voice.variant)};
-   if(!installedWeight(voice.engine,voice.variant))throw speechError('TTS_WEIGHTS_MISSING','Download '+voice.engine+' '+voice.variant+' in Voice Models.');
    task.audioFormat='pcm24-v1';task.modelRevision=fs.readFileSync(path.join(task.modelPath,'.hero-downloaded'),'utf8');
    const key=hash(task),dest=path.join(cache,key+'.wav');let cached=fs.existsSync(dest)&&fs.statSync(dest).size>44;
    if(!cached){const result=await call(task),bytes=Buffer.from(result.audio,'base64');if(bytes.length<44||bytes.subarray(0,4).toString()!=='RIFF'||bytes.subarray(8,12).toString()!=='WAVE'||bytes.length>18000000)throw speechError('TTS_EMPTY_OR_INVALID_WAV','Speech engine returned invalid audio.');fs.writeFileSync(dest,bytes);}

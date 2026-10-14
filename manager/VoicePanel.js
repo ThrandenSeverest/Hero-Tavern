@@ -3,6 +3,7 @@ async function api(route,data){const r=await fetch(route,{method:data?'POST':'GE
 const human=n=>n>1073741824?(n/1073741824).toFixed(2)+' GiB':n>1048576?(n/1048576).toFixed(1)+' MiB':n>1024?(n/1024).toFixed(1)+' KiB':n+' bytes';
 const ago=ts=>ts?Math.max(0,Math.round((Date.now()-ts)/1000)):0;
 const duration=s=>s>=3600?Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m':s>=60?Math.floor(s/60)+'m '+s%60+'s':s+'s';
+const visibilityStyle=document.createElement('style');visibilityStyle.textContent='#voices [hidden]{display:none!important}';document.head.append(visibilityStyle);
 let controlsLoaded=false,lastState=null,setupInProgress=false;
 function restoreControls(s){
  $('tts-engine').value=s.settings.engine;$('tts-variant').value=s.settings.variant;

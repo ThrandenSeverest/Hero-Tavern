@@ -18,7 +18,7 @@ function createTTS(root){
  let child=null,pending=new Map(),sequence=0,install=null,installOutput='',fault='',busy=false;
  const voices=path.join(root,'Voices'),cache=path.join(root,'TTSCache');fs.mkdirSync(voices,{recursive:true});fs.mkdirSync(cache,{recursive:true});
  const executable=()=>{const dir=path.join(root,'TTSRuntime',settings.engine);return process.platform==='win32'?path.join(dir,'Scripts','python.exe'):path.join(dir,'bin','python');};
- const status=()=>({settings,ready:fs.existsSync(executable()),running:!!child,busy,installing:!!install,installOutput:installOutput.slice(-5000),error:fault,voices:fs.readdirSync(voices).filter(x=>/^[a-z0-9_-]+\.wav$/i.test(x))});
+ const status=()=>({settings,ready:fs.existsSync(executable())&&fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed')),running:!!child,busy,installing:!!install,installOutput:installOutput.slice(-5000),error:fault,voices:fs.readdirSync(voices).filter(x=>/^[a-z0-9_-]+\.wav$/i.test(x))});
  const stop=()=>{if(child){child.kill();child=null;}for(const p of pending.values())p.reject(Error('Speech engine stopped'));pending.clear();};
  const configure=next=>{if(!next||typeof next!=='object')throw Error('Invalid voice settings');const previous=settings.engine;const updated={...settings};for(const key of ['engine','variant','device','language','speaker','narratorSpeaker','enabled','autoPlay','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(next[key]!==undefined)updated[key]=next[key];if(!['flash','qwen'].includes(updated.engine))throw Error('Choose Flash or Qwen3-TTS');if(!['cpu','cuda'].includes(updated.device))throw Error('Invalid device');if(!['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].includes(updated.variant))throw Error('Invalid Qwen3 variant');for(const key of ['speaker','narratorSpeaker','language','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(typeof updated[key]!=='string'||updated[key].length>1200)throw Error('Invalid voice setting');for(const key of ['enabled','autoPlay'])if(typeof updated[key]!=='boolean')throw Error('Invalid playback setting');settings=updated;fs.writeFileSync(file,JSON.stringify(settings,null,2));if(previous!==settings.engine)stop();return status();};
  const installEngine=()=>{if(install)throw Error('Installation already running');if(child)stop();const target=path.join(root,'TTSRuntime',settings.engine);fs.mkdirSync(path.dirname(target),{recursive:true});
@@ -35,7 +35,13 @@ function createTTS(root){
    installOutput+='\nInstalling '+engine+' dependencies…';const pip=process.platform==='win32'?path.join(target,'Scripts','python.exe'):path.join(target,'bin','python');
    const packages=engine==='flash'?['chatterbox-flash']:['qwen-tts','soundfile'];
    const args=['-m','pip','install','--upgrade',...packages];install=spawn(pip,args,{windowsHide:true,stdio:['ignore','pipe','pipe']});const pkg=install;pkg.stdout.on('data',log);pkg.stderr.on('data',log);
-   pkg.on('error',e=>{fault='Dependency installation failed: '+e.message;install=null});pkg.on('close',c=>{if(install!==pkg)return;if(c)fault='TTS dependency installation failed; check log and compatible PyTorch CUDA wheels.';install=null;});
+   pkg.on('error',e=>{fault='Dependency installation failed: '+e.message;install=null});pkg.on('close',c=>{if(install!==pkg)return;if(c){fault='TTS dependency installation failed; check log and compatible PyTorch CUDA wheels.';install=null;return;}
+    if(engine==='flash'){
+     installOutput+='\nApplying PyTorch 2.7 CUDA 12.8 compatibility for RTX 5070…';
+     const args=['-m','pip','install','--upgrade','torch==2.7.1','torchaudio==2.7.1','torchvision==0.22.1','--index-url','https://download.pytorch.org/whl/cu128'];
+     install=spawn(pip,args,{windowsHide:true,stdio:['ignore','pipe','pipe']});const gpu=install;gpu.stdout.on('data',log);gpu.stderr.on('data',log);gpu.on('error',e=>{fault='CUDA dependencies failed: '+e.message;install=null});gpu.on('close',result=>{if(install!==gpu)return;if(result)fault='Compatible RTX 5070 PyTorch installation failed; inspect installer output.';else fs.writeFileSync(path.join(target,'.installed'),new Date().toISOString());install=null;});return;
+    }
+    fs.writeFileSync(path.join(target,'.installed'),new Date().toISOString());install=null;});
   });return status();
  };
  function start(){if(child)return child;if(!fs.existsSync(executable()))throw Error('Install the selected TTS engine first in Voices settings.');

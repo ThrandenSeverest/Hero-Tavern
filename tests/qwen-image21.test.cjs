@@ -31,3 +31,30 @@ test('Qwen inpainting requires mask, carries the reference and preserves origina
  assert.ok(nodes.find(x=>x.class_type==='ImageCompositeMasked'));
  assert.ok(nodes.find(x=>x.class_type==='TextEncodeQwenImage21').inputs['images.image_1']);
 });
+
+test('Qwen generated images follow text and use correct distilled sampler independent of stale SDXL controls',()=>{
+ const pack=QWEN_PACKS.find(p=>p.id==='qwen21-q5km');
+ const base={negative_prompt:'',width:1024,height:1024,operation:'txt2img',seed:-1,steps:25,cfg_scale:7,sampler_name:'DPM++ 2M Karras',scheduler:'karras'};
+ const a=recipeGraph(pack,{...base,prompt:'A bright red hot air balloon above snowy Alps.'});
+ const b=recipeGraph(pack,{...base,prompt:'A blue fish swimming in a glass bowl.'});
+ const nodes=obj=>Object.values(obj.graph);
+ const input=(o,type)=>nodes(o).find(x=>x.class_type===type).inputs;
+ assert.equal(input(a,'TextEncodeQwenImage21').prompt,'A bright red hot air balloon above snowy Alps.');
+ assert.equal(input(b,'TextEncodeQwenImage21').prompt,'A blue fish swimming in a glass bowl.');
+ assert.equal(input(a,'KSampler').cfg,1);
+ assert.equal(input(a,'KSampler').sampler_name,'euler');
+ assert.equal(input(a,'KSampler').scheduler,'simple');
+ assert.equal(input(a,'KSampler').denoise,1);
+ assert.notEqual(input(a,'KSampler').seed,input(b,'KSampler').seed);
+ assert.equal(input(a,'KSampler').latent_image[0],Object.entries(a.graph).find(([id,node])=>node.class_type==='TextEncodeQwenImage21')[0]);
+ assert.notDeepEqual(a.graph,b.graph,'two text prompts must produce different ComfyUI conditioning graphs');
+});
+test('Qwen reference edits must use text-encoder native latent and never preserve stale SDXL CFG',()=>{
+ const pack=QWEN_PACKS.find(p=>p.id==='qwen21-q5km');
+ const g=recipeGraph(pack,{prompt:'Change the coat to black',negative_prompt:'',operation:'img2img',steps:25,cfg_scale:5,seed:234}, {source:'reference.png'});
+ const encoded=Object.entries(g.graph).find(([,node])=>node.class_type==='TextEncodeQwenImage21');
+ const sampler=Object.values(g.graph).find(node=>node.class_type==='KSampler').inputs;
+ assert.deepEqual(sampler.latent_image,[encoded[0],2]);
+ assert.equal(sampler.cfg,1);
+ assert.equal(sampler.scheduler,'simple');
+});

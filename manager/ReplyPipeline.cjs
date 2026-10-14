@@ -63,17 +63,16 @@ async function completionText(response) {
 }
 function isWriterNonProse(input){
  const text=String(input||'').trim();if(!text)return 'empty output';
- // Only evaluate the start of a prose passage. Quoted dialogue may legitimately say "I understand".
- const head=text.replace(/^(?:[\\s#*_-]|(?:\\*\\*))+/, '').slice(0,700).trim();
+ // A character's quoted dialogue may legitimately contain "I understand".
+ const head=text.replace(/^(?:[\s#*_-]|\*\*)+/, '').slice(0,700).trim();
  if(isMetaReply(text))return 'assistant commentary';
- if(/^(?:okay|ok|alright|all right|right|sure|yes|certainly|absolutely|of course|got it|understood|roger|понял|хорошо|итак|да,?\\s*понял)[\\s,!.:-]*(?:now|so|then|i |i['’]ve |let|here|understand|got|буду|теперь|я |сейчас|давайте|начну|вот|что |как |мне )/i.test(head))return 'assistant acknowledgment';
+ if(/^(?:okay|ok|alright|all right|right|sure|yes|certainly|absolutely|of course|got it|understood|roger|понял|хорошо|итак|да,?\s*понял)[\s,!.:-]*(?:now|so|then|i |i['’]ve |let|here|understand|got|буду|теперь|я |сейчас|давайте|начну|вот|что |как |мне )/i.test(head))return 'assistant acknowledgment';
  if(/^(?:I (?:now )?(?:understand|realize|get|see|know)|I['’]ve (?:got|understood|figured)|Now I (?:understand|see|know)|Let me|I (?:will|can|should|need to|am going to)|Here(?:['’]s| is| are)|To (?:continue|write|start|create|do)|You (?:want|asked|mean)|The (?:task|request|instructions|story) (?:is|are)|As (?:requested|you asked)|Based on (?:your|the)|My (?:approach|plan)|I (?:must|should) (?:write|continue))/i.test(head))return 'assistant preface';
- if(/^(?:\\*\\*|#{1,4}\\s*)?(?:character (?:profile|description|sheet)|physical appearance|appearance|personality|background|overview|summary|scenario|outline|review|analysis|notes|instruction|plan)\\s*[:\\n]/i.test(head))return 'non-fiction outline';
- if(/^(?:[A-Z][a-z]+(?: [A-Z][a-z]+)?):\\s*(?:Tall|Short|A |An |She |He |They )/i.test(head)&&/\\n(?:Physical Appearance|Personality|Background|Age|Height):/i.test(text))return 'profile fields';
+ if(/^(?:\*\*|#{1,4}\s*)?(?:character (?:profile|description|sheet)|physical appearance|appearance|personality|background|overview|summary|scenario|outline|review|analysis|notes|instruction|plan)\s*[:\n]/i.test(head))return 'non-fiction outline';
+ if(/^(?:[A-Z][a-z]+(?: [A-Z][a-z]+)?):\s*(?:Tall|Short|A |An |She |He |They )/i.test(head)&&/\n(?:Physical Appearance|Personality|Background|Age|Height):/i.test(text))return 'profile fields';
  if(/(?:here(?:['’]s| is) (?:the|a|my) (?:revised|requested|next)|I'll (?:write|continue|provide)|I now understand what|now I understand what|what (?:am I|I'm) supposed to do)/i.test(head.slice(0,180))&&!/^[“"«]/.test(text))return 'assistant talking about task';
  return '';
 }
-
 function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
     let active = null,lastRun=null;const runSnapshot=()=>lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
     async function generate(body, signal, {mode='chat'}={}) {

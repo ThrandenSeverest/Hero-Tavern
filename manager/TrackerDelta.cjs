@@ -84,6 +84,24 @@ function parseCommands(raw,definitions,messages,state){
  }
  return {changes:output,issues,recognized};
 }
+// Deterministic facts are independent of model formatting and never infer real-world time.
+function explicitClockChanges(definitions,messages,state){
+ const clocks=definitions.filter(d=>d.type==='clock'&&d.enabled!==false&&d.updateMode!=='manual');
+ if(!clocks.length)return [];
+ let match=null;
+ for(const m of messages){
+  const content=String(m.mes||m.text||'');
+  const pattern=/\b(?:it(?:'|’)s|it is|the time is|current time(?: is)?|time is|clock (?:reads|shows)|сейчас|время(?: сейчас)?)\s*(?:at\s*)?[:=–-]?\s*([01]?\d|2[0-3]):([0-5]\d)\b/gi;
+  for(const found of content.matchAll(pattern)){
+   if(/\b(?:not|isn(?:'|’)t|wasn(?:'|’)t|не|нет)\s*$/i.test(content.slice(Math.max(0,found.index-18),found.index)))continue;
+   if(!m.extra?.heroMessageId)continue;
+   const hh=String(+found[1]).padStart(2,'0'),value=hh+':'+found[2];
+   match={value,sourceMessageId:m.extra.heroMessageId,evidence:found[0]};
+  }
+ }
+ if(!match)return [];
+ return clocks.filter(d=>state[keyOf(d)]!==match.value).map(d=>({key:keyOf(d),...match,reason:'Explicit story time stated in finalized dialogue'}));
+}
 function trackerInstructions(definitions,state,messages){
  const allowed=definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
  const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,current:state[keyOf(d)]}));
@@ -93,4 +111,4 @@ function trackerInstructions(definitions,state,messages){
  'Only change trackers directly affected by the quoted event. A visitor entering does not change contents, hunger or injuries. Do not reset or empty objects without an explicit emptying event. Preserve all unchanged fields and their types. Never invent exact numeric levels; use modest deltas within maxDelta unless an exact value is explicitly stated. Record lists use JSON arrays, booleans use true/false. Hypotheticals, plans and intentions are not completed events. Leave unrelated trackers out.\n'+
  'Tracker manifest:\n'+JSON.stringify(entries)+'\nFinalized messages:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
 }
-module.exports={parseCommands,trackerInstructions};
+module.exports={parseCommands,trackerInstructions,explicitClockChanges};

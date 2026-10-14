@@ -12,9 +12,10 @@ test('regression: selected-model text tool is not Qwen-only Assistant',()=>{
  assert.match(tools,/api\('\/tools\/text'/);assert.match(bridge,/if\(req.url==='\/tools\/text'\)/);
 });
 test('regression: interrupted TTS install preserves existing env and user voice data',()=>{
- assert.match(tts,/Reusing existing TTS Python 3\.11 environment/);
- assert.match(tts,/Preserved incomplete TTS environment/);
+ assert.match(tts,/Reusing existing Python 3\.11 environment/);
+ assert.match(tts,/Preserved incomplete runtime at/);
  assert.match(tts,/Move-Item -LiteralPath \$target -Destination \$backup/);
+ assert.match(tts,/uv pip directly manages environments without needing/);
  assert.doesNotMatch(tts,/Remove-Item.*TTSModels/);
 });
 test('regression: Writer passage editor occupies available width',()=>{

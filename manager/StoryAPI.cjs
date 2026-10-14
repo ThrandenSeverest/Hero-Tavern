@@ -94,7 +94,10 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     // Explicit typed statements win over the model for the same tracker in the same message.
     const directKeys=new Set(direct.map(c=>c.key+'|'+c.sourceMessageId));
     const ordered=[...direct,...parsed.changes.filter(c=>!directKeys.has(c.key+'|'+c.sourceMessageId))].sort((a,b)=>(indexById.get(a.sourceMessageId)??Infinity)-(indexById.get(b.sourceMessageId)??Infinity));
-    for(const candidate of ordered){
+    // Multiple FIELD/ADD operations in one message may affect the same record.
+    // Keep the final validated state for that tracker/source, not the first partial one.
+    const combined=new Map();for(const item of ordered)combined.set(item.key+'|'+item.sourceMessageId,item);
+    for(const candidate of combined.values()){
      const identifier=candidate.key+'|'+candidate.sourceMessageId;
      if(seen.has(identifier))continue;
      const definition=eligible.find(d=>S.keyOf(d)===candidate.key);

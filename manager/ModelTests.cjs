@@ -69,7 +69,7 @@ function createModelTests(root){
   if(!input||!kinds.includes(input.kind))throw Error('Unknown model test.');
   if(!['passed','warning','failed','skipped'].includes(input.status))throw Error('Invalid test status.');
   if(typeof input.model!=='string'||input.model.length>200)throw Error('Invalid tested model.');
-  const previous=history(),entry={id:crypto.randomUUID(),at:new Date().toISOString(),kind:input.kind,model:input.model,status:input.status,elapsedMs:Number.isFinite(Number(input.elapsedMs))?Math.max(0,Math.round(Number(input.elapsedMs))):null,prompt:String(input.prompt||'').slice(0,5000),settings:input.settings&&typeof input.settings==='object'?input.settings:{},notes:[],text:String(input.text||'').slice(0,12000)};
+  const previous=history(),entry={id:crypto.randomUUID(),at:new Date().toISOString(),kind:input.kind,model:input.model,status:input.status,elapsedMs:Number.isFinite(Number(input.elapsedMs))?Math.max(0,Math.round(Number(input.elapsedMs))):null,prompt:String(input.prompt||'').slice(0,5000),settings:input.settings&&typeof input.settings==='object'?input.settings:{},notes:Array.isArray(input.notes)?input.notes.slice(0,8).map(n=>String(n).slice(0,400)):[],text:String(input.text||'').slice(0,12000)};
   if(input.error){entry.error=String(input.error).slice(0,1500);entry.status='failed';}
   if(input.kind==='text2text'){
    if(!entry.error){

@@ -86,7 +86,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    if(!online){
     const error=runtime.status().error||'Managed ComfyUI did not respond within 90 seconds.';
     const log=path.join(root,'Logs','comfy-engine.log');
-    let tail='';try{tail=fs.readFileSync(log,'utf8').split(/\\r?\\n/).slice(-20).join('\\n').slice(-3500)}catch{}
+    let tail='';try{tail=fs.readFileSync(log,'utf8').split(/\r?\n/).slice(-20).join('\n').slice(-3500)}catch{}
     return {ok:false,connected:false,status:'startup-failed',packId:id,missingNodes:[],missingFiles:[],error,startedManaged,logTail:tail,
      advice:'ComfyUI was found but could not start: '+error+' Check Logs/comfy-engine.log. Do not reinstall image weights until the startup error is resolved.'};
    }

@@ -32,7 +32,7 @@ def load(engine, variant, device, model_path):
     with redirect_stdout(sys.stderr):
         if engine == "flash":
             from chatterbox_flash import ChatterboxFlashTTS
-            model = ChatterboxFlashTTS.from_pretrained(model_path, device=device)
+            model = ChatterboxFlashTTS.from_local(model_path, device=device)
         elif engine == "qwen":
             import torch
             from qwen_tts import Qwen3TTSModel

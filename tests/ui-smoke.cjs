@@ -156,6 +156,17 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await waitFor(async()=>await page.locator('#hero-welcome').isHidden());
   const clip=await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text')].some(el=>el.scrollWidth>el.clientWidth+2));if(clip)throw Error('Character drawer clips dialogue');
   await page.screenshot({path:path.join(repo,'.ci/hero-characters-qa.png')});
+  // Real character screen must expose voice creation and model-specific controls.
+  await page.locator('#hero-character-voice').click();
+  await page.locator('#hero-character-voice-engine').waitFor({state:'visible'});
+  await page.locator('#hero-character-voice-engine').selectOption('qwen:custom-0.6');
+  if(!await page.locator('#hero-character-voice-speaker').isVisible())throw Error('Qwen CustomVoice speaker controls are missing');
+  await page.locator('#hero-character-voice-quick').click();
+  await waitFor(async()=>(await page.locator('#hero-character-dialogue-voice option').count())>1);
+  await page.getByRole('button',{name:'Save character voice'}).click();
+  await waitFor(async()=>(await page.locator('.hero-story-dialog [role="status"]').textContent()).includes('Saved on character card.'));
+  await page.getByRole('button',{name:'Cancel',exact:true}).last().click();
+
   // Generate through the actual chat event path, not only a manual API request.
   await page.locator('#hero-character-leading-prompt').click();
   await page.locator('#hero-leading-prompt-field').fill('Scene theme: slow-burning mystery; remain terse and suspicious.');

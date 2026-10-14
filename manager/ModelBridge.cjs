@@ -16,6 +16,7 @@ const {createComfyRuntime}=require('./ComfyRuntime.cjs');
 const {createImageModelCenter}=require('./ImageModelCenter.cjs');
 const {shutdown}=require('./EngineShutdown.cjs');
 const {requestExit}=require('./AppLifecycle.cjs');
+const {createModelTests}=require('./ModelTests.cjs');
 const {runtimeEnvironment}=require('./EngineRuntime.cjs');
 const {readMemory,editMemory}=require('./ContextMemory.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
@@ -285,6 +286,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     };
     const studio=createStudio(root,{pipeline,ensureText,generateImage:generateStudioImage,getImageState:()=>images.snapshot()});
     const imageCenter=createImageModelCenter(root,{studio,comfy,runtime:comfyRuntime,images});
+    const modelTests=createModelTests(root);
     const writerAPI=createWriterAPI(root,pipeline,{ensureText:async signal=>{if(imageJob||textPausedForImages)throw Error('Finish image generation or unload the image model before writing.');if(tuner.snapshot()?.status==='running')throw Error('Finish hardware tuning before writing.');await ensureText(signal);}});
     const assistant=createAssistantWorkspace(root,{backendURL,ensureText,getModelProfile:()=>profileFor(root,runningModel||selected()),modelName:()=>runningModel||selected(),contextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,readGeneration:()=>readSettings(root)});
     const tuner=createAutoTune(root,{systemInfo,readGeneration:()=>readSettings(root),saveGeneration:value=>saveSettings(root,value),abort:()=>pipeline.abort(),stop:async()=>{lastAttempt=selected();stopBackend();if(images.snapshot().running)await images.action('/images/stop',{});await waitUntil(()=>!backend&&!images.snapshot().running,null,30000);},load:async(signal,limit)=>{await runBackend();await waitUntil(()=>{if(!backend&&!starting)throw Error(backendError||'Engine failed to load.');return backendReady;},signal,limit);},benchmark:async signal=>{const started=Date.now();const r=await pipeline.generate({prompt:'<|im_start|>user\n'+('A traveller enters an inn and remembers a blue cloak. '.repeat(120))+'\nWrite a brief vivid continuation with a new action.<|im_end|>\n<|im_start|>assistant\n',stream:false,seed:1234},signal,{mode:'utility'});return {...r,elapsedMs:Date.now()-started};}});
@@ -354,6 +356,8 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&req.url.startsWith('/tts/audio/')){const file=tts.readAudio(req.url);if(!file){json(404,{error:'Audio not found'});return;}res.writeHead(200,{'Content-Type':'audio/wav','Access-Control-Allow-Origin':'http://127.0.0.1:8000','Vary':'Origin'});fs.createReadStream(file).pipe(res);return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
         if(req.method==='GET'&&req.url==='/tts/status'){json(200,tts.status());return;}
+        if(req.method==='GET'&&req.url==='/model-tests/presets'){json(200,modelTests.presets());return;}
+        if(req.method==='GET'&&req.url==='/model-tests/history'){json(200,modelTests.history());return;}
         if(req.method==='GET'&&req.url.startsWith('/tts/audio/')){const file=tts.readAudio(req.url);if(!file){json(404,{error:'Audio not found'});return;}res.writeHead(200,{'Content-Type':'audio/wav','Access-Control-Allow-Origin':'http://127.0.0.1:8000','Vary':'Origin'});fs.createReadStream(file).pipe(res);return;}
         if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
         if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
@@ -377,6 +381,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
             if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
+            if(req.url==='/model-tests/record'){json(200,modelTests.record(data));return;}
             if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');

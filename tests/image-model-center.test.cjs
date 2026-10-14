@@ -114,7 +114,7 @@ test('Engine installation and startup are visible without opening Advanced setti
  assert.match(src,/Start engine & check workflow/);
  assert.doesNotMatch(src,/actions\.append\(action\([^\n]+,install,start,restart/);
  assert.match(src,/'Download '\+choiceLabel\(model.id\)/);
- assert.match(src,/No separate engine installation or manual launch is needed/);
+ assert.match(src,/ComfyUI Portable is a separate local runtime/);
 });
 
 test('Explicit readiness check starts an installed managed ComfyUI runtime and checks actual nodes',async()=>{

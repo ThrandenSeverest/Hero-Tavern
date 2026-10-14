@@ -102,7 +102,7 @@ test('Writer retries a repeated passage with scene-progression repair but keeps 
 
 test('Writer interface contains planning/beat controls and can advance scenes without toggling into chat mode',()=>{
  const html=fs.readFileSync(path.join(__dirname,'../manager/Writer.html'),'utf8');
- for(const id of ['id="beats-editor"','id="beat-next"','id="beat-prev"','id="plan-beats"','id="advance"','id="writer-scene-pace"'])assert.ok(html.includes(id),id);
+ for(const id of ['id="beats-editor"','id="beat-next"','id="beat-prev"','id="plan-beats"','id="advance"',"select.id='writer-scene-pace'"])assert.ok(html.includes(id),id);
  assert.match(html,/api\('plan-beats'/);
  assert.match(html,/beatIndex:Math\.min/);
  assert.match(html,/generate\('advance'\)|'continue','advance','insert'/);

@@ -84,31 +84,65 @@ function parseCommands(raw,definitions,messages,state){
  }
  return {changes:output,issues,recognized};
 }
-// Deterministic facts are independent of model formatting and never infer real-world time.
-function explicitClockChanges(definitions,messages,state){
- const clocks=definitions.filter(d=>d.type==='clock'&&d.enabled!==false&&d.updateMode!=='manual');
- if(!clocks.length)return [];
- let match=null;
- for(const m of messages){
-  const content=String(m.mes||m.text||'');
-  const pattern=/\b(?:it(?:'|’)s|it is|the time is|current time(?: is)?|time is|clock (?:reads|shows)|сейчас|время(?: сейчас)?)\s*(?:at\s*)?[:=–-]?\s*([01]?\d|2[0-3]):([0-5]\d)\b/gi;
-  for(const found of content.matchAll(pattern)){
-   if(/\b(?:not|isn(?:'|’)t|wasn(?:'|’)t|не|нет)\s*$/i.test(content.slice(Math.max(0,found.index-18),found.index)))continue;
-   if(!m.extra?.heroMessageId)continue;
-   const hh=String(+found[1]).padStart(2,'0'),value=hh+':'+found[2];
-   match={value,sourceMessageId:m.extra.heroMessageId,evidence:found[0]};
+// Explicit typed facts can be committed without waiting for the LLM.
+// Free-form actions (wounds, meals, quests, relationships, etc.) still go through
+// evidence-backed model operations; deterministic extraction never guesses them.
+function explicitStateChanges(definitions,messages,state){
+ const result=[],working=copy(state);
+ const escapeRegExp=x=>String(x).replace(/[.*+?^\${}()|[\]\\]/g,'\\$&');
+ for(const message of messages){
+  const content=String(message.mes||message.text||''),id=message.extra?.heroMessageId;
+  if(!id||!content.trim())continue;
+  for(const d of definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual')){
+   const key=keyOf(d);if(!Object.hasOwn(working,key))continue;
+   let found=null,value;
+   if(d.type==='clock'){
+    const pattern=/\b(?:it(?:'|’)s|it is|the time is|current time(?: is)?|time is|clock (?:reads|shows)|сейчас|время(?: сейчас)?)\s*(?:at\s*)?[:=–-]?\s*([01]?\d|2[0-3]):([0-5]\d)\b/gi;
+    for(const m of content.matchAll(pattern)){
+     if(/\b(?:not|isn(?:'|’)t|wasn(?:'|’)t|не|нет)\s*$/i.test(content.slice(Math.max(0,m.index-18),m.index)))continue;
+     found=m[0];value=String(Number(m[1])).padStart(2,'0')+':'+m[2];
+    }
+   }
+   if(!found){
+    const names=[d.label,d.id.replace(/_/g,' ')].filter(Boolean);
+    for(const name of names){
+     const short=name.replace(/\s*\([^)]*\)\s*$/,'').trim();
+     if(short.length<3)continue;
+     const re=new RegExp('(?:^|[\\n;.!?]\\s*|\\b(?:my|the|current|our)\\s+)('+escapeRegExp(short)+')\\s*(?::|=|\\bis\\b|\\bnow\\b|\\breads\\b|\\bshows\\b|\\bbecomes\\b|\\bchanged to\\b)\\s*([^\\n;.!?]+)','gi');
+     for(const m of content.matchAll(re)){
+      const literal=m[2].trim().replace(/[”"'\s]+$/,'').trim();
+      let candidate;
+      try{
+       if(d.type==='number'){const match=/^-?\d+(?:\.\d+)?/.exec(literal);if(!match)continue;candidate=Number(match[0]);}
+       else if(d.type==='clock'){const match=/^([01]?\d|2[0-3]):([0-5]\d)\b/.exec(literal);if(!match)continue;candidate=String(Number(match[1])).padStart(2,'0')+':'+match[2];}
+       else if(d.type==='boolean'){if(!/^(true|false|yes|no|on|off)\b/i.test(literal))continue;candidate=/^(true|yes|on)\b/i.test(literal);}
+       else if(d.type==='enum'){candidate=d.allowedValues?.find(x=>x.toLowerCase()===literal.toLowerCase());if(candidate===undefined)continue;}
+       else if(d.type==='text'){candidate=literal.slice(0,6000);}
+       else if(['list','record','quest','timer','relationship','injuries'].includes(d.type)){candidate=JSON.parse(literal);}
+       else continue;
+       validateValue(d,candidate);
+      }catch{continue;}
+      found=m[0].trim();value=candidate;
+     }
+     if(found)break;
+    }
+   }
+   if(!found||JSON.stringify(working[key])===JSON.stringify(value))continue;
+   try{validateValue(d,value)}catch{continue}
+   result.push({key,value,sourceMessageId:id,evidence:found,reason:'Explicit '+d.type+' state in finalized dialogue'});
+   working[key]=copy(value);
   }
  }
- if(!match)return [];
- return clocks.filter(d=>state[keyOf(d)]!==match.value).map(d=>({key:keyOf(d),...match,reason:'Explicit story time stated in finalized dialogue'}));
+ return result;
 }
-function trackerInstructions(definitions,state,messages){
+function explicitClockChanges(definitions,messages,state){return explicitStateChanges(definitions.filter(d=>d.type==='clock'),messages,state);}
+function trackerInstructions(definitions,state,messages,contextMessages=[]){
  const allowed=definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
  const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,current:state[keyOf(d)]}));
  return 'You are a factual state transition extractor, not a storyteller. Return exactly one JSON object with an operations array. No Markdown or explanations. If nothing changes return {"operations":[]}.\n'+
  'Each operation has exactly these fields: {"key":"an exact key from the manifest","verb":"SET","value":"new value or operation payload","sourceMessageId":"an exact message ID","evidence":"an exact verbatim quote proving THIS change"}.\n'+
  'Allowed verbs: INCREASE, DECREASE (positive numeric value); SET (typed scalar or complete structured record); ADD, REMOVE (one list item); FIELD (string field=value, field+=item or field-=item); WOUND (location|severity|cause|pain|symptoms|limitations); TREAT (woundId|status|treatment|pain).\n'+
  'Only change trackers directly affected by the quoted event. A visitor entering does not change contents, hunger or injuries. Do not reset or empty objects without an explicit emptying event. Preserve all unchanged fields and their types. Never invent exact numeric levels; use modest deltas within maxDelta unless an exact value is explicitly stated. Record lists use JSON arrays, booleans use true/false. Hypotheticals, plans and intentions are not completed events. Leave unrelated trackers out.\n'+
- 'Tracker manifest:\n'+JSON.stringify(entries)+'\nFinalized messages:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
+ 'Tracker manifest:\n'+JSON.stringify(entries)+'\nEarlier context (read-only; never cite these as source IDs):\n'+JSON.stringify(contextMessages.map(m=>({speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,2400)})))+'\nMessages eligible for evidence-backed changes:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
 }
-module.exports={parseCommands,trackerInstructions,explicitClockChanges};
+module.exports={parseCommands,trackerInstructions,explicitClockChanges,explicitStateChanges};

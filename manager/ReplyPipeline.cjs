@@ -213,4 +213,4 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
     }
     return {generate,handle,abort,runSnapshot};
 }
-module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,createPipeline};
+module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,isWriterNonProse,createPipeline};

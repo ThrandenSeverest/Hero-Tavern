@@ -22,3 +22,15 @@ test('regression: Writer passage editor occupies available width',()=>{
  assert.match(writer,/\.writer-passage\{width:100%/);
  assert.match(writer,/Regenerate this/);
 });
+
+test('regression: full diagnostic workflow is discoverable and preserves per-stage evidence',()=>{
+ const panel=read('manager/ModelPanel.html'),runner=read('manager/ModelTestsPanel.js');
+ for(const id of ['model-test-run-diagnostic-flow','model-test-flow-stages','model-test-flow-summary','model-test-flow-export','diagnostic-open-flow'])
+  assert.ok(panel.includes('id="'+id+'"'),'missing full flow control '+id);
+ for(const stage of ["['preflight'","['text'","['imageA'","['imageB'","['edit'","['vision'","['tts'"])
+  assert.ok(runner.includes(stage),'missing stage '+stage);
+ for(const marker of ['/diagnostics/check','/diagnostics/sample','/tts/status','/tts/speak','/model-tests/text','/images/cancel','/tts/stop'])
+  assert.ok(runner.includes(marker),'flow missing engine interaction '+marker);
+ assert.match(runner,/flowReport\.summary=reportSummary\(\)/);
+ assert.match(runner,/model-test-flow-export/);
+});

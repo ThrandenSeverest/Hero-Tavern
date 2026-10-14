@@ -12,7 +12,7 @@
   if(cancelling)return;cancelling=true;
   try{
    // Request engine cancellation independently; aborting fetch alone will not interrupt ComfyUI.
-   const route=['text2image','image2image'].includes(currentKind)?'/images/cancel':currentKind==='image2text'?'/vision/stop':'/generation/abort';
+   const route=['text2image','image2image'].includes(currentKind)?'/images/cancel':currentKind==='image2text'?'/vision/stop':currentKind==='tts'?'/tts/stop':'/generation/abort';
    await api(route,{}, {timeoutMs:16000}).catch(e=>notify('Stop was requested but engine did not acknowledge: '+e.message));
   }finally{cancelling=false}
  }
@@ -27,12 +27,12 @@
   }finally{clearTimeout(timer);if(currentController===controller){currentController=null;currentKind='';}}
  }
  $('model-test-stop').onclick=()=>{
-  if(!active||!currentController)return;
+  if(!active)return;
   stopRequested=true;cancelReason='Cancelled by user. Stop requested for the active engine.';
-  notify('Stopping '+(kindNames[currentKind]||currentKind)+'…');
-  currentController.abort();
+  notify(currentController?'Stopping '+(kindNames[currentKind]||currentKind)+'…':'Stopping after the current preflight operation…');
+  if(currentController)currentController.abort();
  };
- const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text'};
+ const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text',tts:'Text → Speech'};
  const base=(chosenModel)=>{
   const model=chosenModel||$('model-test-model').value;
   const opts=model==='sdxl'?{steps:28,cfg_scale:6,sampler_name:'DPM++ 2M Karras',scheduler:'karras'}:model==='flux-klein'?{steps:4,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:model==='z-turbo'?{steps:9,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:{steps:25,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'};
@@ -110,8 +110,147 @@
   try{const result=await record(report);notify((result.status==='passed'?'PASS':'CHECK')+' · '+kindNames[kind]+' · '+(result.elapsedMs/1000).toFixed(1)+' sec'+(result.error?' · '+result.error:''));return result;}
   catch(e){notify('Could not save test report: '+e.message);return {...report,error:report.error||e.message};}
  }
- const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
+ const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-diagnostic-flow','model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
  async function guarded(fn){if(active)return;stopRequested=false;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
+
+ // Full diagnosis is deliberately separate from individual history cards and from
+ // the hardware-only sequential benchmark. Each stage has a durable result.
+ const FLOW_STAGES=[
+  ['preflight','Engine connections and hardware'],
+  ['text','Text → Text · isolated exact-instruction test'],
+  ['imageA','Text → Image · red teapot'],
+  ['imageB','Text → Image · green frog'],
+  ['edit','Image → Image · edit reference'],
+  ['vision','Image → Text · visual description'],
+  ['tts','Text → Speech · synthesize WAV']
+ ];
+ let flowReport=null;
+ const flowState={};
+ function drawFlow(){
+  const box=$('model-test-flow-stages');box.replaceChildren();
+  for(const [id,label] of FLOW_STAGES){
+   const item=flowState[id]||{status:'pending'},li=document.createElement('li');
+   const name=document.createElement('strong');name.textContent=label+' · ';
+   const detail=document.createElement('span');detail.textContent=item.status.toUpperCase()+(item.note?' — '+item.note:'');
+   detail.style.color=item.status==='passed'?'#93dfb3':item.status==='failed'?'#ffa4a4':item.status==='warning'?'#f1d58f':'#b3c2d7';
+   li.append(name,detail);box.append(li);
+  }
+ }
+ const flowSet=(id,status,note='',extra={})=>{
+  flowState[id]={status,note,...extra};drawFlow();
+  $('model-test-flow-summary').textContent=(status==='running'?'Running: ':'Finished: ')+FLOW_STAGES.find(x=>x[0]===id)[1]+' · '+note;
+ };
+ const clip=e=>String(e?.message||e||'Unknown failure').slice(0,300);
+ async function flowSample(stage){
+  try{
+   const data=await api('/diagnostics/sample',undefined,{timeoutMs:12000});
+   flowReport.samples.push({stage,at:new Date().toISOString(),...data});
+   if(flowReport.samples.length>80)flowReport.samples.shift();
+  }catch(error){flowReport.errors.push('Hardware telemetry ('+stage+'): '+clip(error));}
+ }
+ async function flowStage(id,fn){
+  if(stopRequested){flowSet(id,'skipped','Stopped');return null;}
+  flowSet(id,'running','Testing…');
+  const started=Date.now();
+  await flowSample(id+':before');
+  try{
+   const result=await fn();
+   if(result?.skipped)flowSet(id,'skipped',result.note||'Model unavailable');
+   else if(result?.status)flowSet(id,result.status,result.error||result.notes?.join('; ')||'Completed');
+   else flowSet(id,'passed','Completed');
+   flowReport.stages[id]={...flowState[id],elapsedMs:Date.now()-started,result:result||null};
+   return result;
+  }catch(error){
+   const message=clip(error);
+   flowSet(id,'failed',message);
+   flowReport.stages[id]={...flowState[id],elapsedMs:Date.now()-started};
+   flowReport.errors.push(id+': '+message);return null;
+  }finally{await flowSample(id+':after')}
+ }
+ function skipFlow(id,note){
+  flowSet(id,'skipped',note);
+  flowReport.stages[id]={...flowState[id]};
+ }
+ const reportSummary=()=>{
+  const counts={passed:0,warning:0,failed:0,skipped:0};
+  for(const [id] of FLOW_STAGES){const s=flowState[id]?.status||'skipped';if(counts[s]!==undefined)counts[s]++;}
+  return counts;
+ };
+ $('model-test-flow-export').onclick=()=>{
+  if(!flowReport)return;
+  const blob=new Blob([JSON.stringify(flowReport,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');
+  anchor.href=url;anchor.download='hero-full-diagnostics-'+flowReport.id+'.json';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+ };
+ $('model-test-flow-hardware').onclick=()=>{document.querySelector('[data-tab="diagnostics"]')?.click();};
+ const flowRun=()=>guarded(async()=>{
+  const suiteId='compare-'+Date.now();
+  flowReport={id:suiteId,startedAt:new Date().toISOString(),completedAt:null,mode:'full-diagnostic-flow',modelSelection:$('model-test-model').value,stages:{},samples:[],errors:[],testRecordIds:[],connections:null,hardware:null};
+  $('model-test-flow-export').disabled=true;
+  for(const [id] of FLOW_STAGES)flowState[id]={status:'pending'};
+  drawFlow();
+  let comfy=null,vision=null,voice=null,engine=null;
+  await flowStage('preflight',async()=>{
+   const checks=await Promise.allSettled([
+    api('/diagnostics/check',undefined,{timeoutMs:20000}),
+    api('/status',undefined,{timeoutMs:15000}),
+    api('/comfy/status',undefined,{timeoutMs:15000}),
+    api('/vision/status',undefined,{timeoutMs:15000}),
+    api('/tts/status',undefined,{timeoutMs:15000})
+   ]);
+   const get=i=>checks[i].status==='fulfilled'?checks[i].value:null;
+   flowReport.connections=get(0);engine=get(1);comfy=get(2);vision=get(3);voice=get(4);
+   flowReport.hardware=flowReport.connections?.environment||null;
+   const unavailable=['Connections','Text service','ComfyUI','Vision','TTS'].filter((_,i)=>!get(i));
+   if(unavailable.length)return {status:'warning',notes:['Some services unavailable: '+unavailable.join(', ')]};
+   return {status:'passed',notes:['Services responded; readiness is checked independently in each stage']};
+  });
+  const add=async (id,kind,override={})=>{
+   const result=await flowStage(id,()=>run(kind,{...override,suiteId}));
+   if(result?.id)flowReport.testRecordIds.push(result.id);
+   return result;
+  };
+  if(!engine?.selected&&!engine?.runningModel)skipFlow('text','No text model selected');
+  else await add('text','text2text');
+  const selected=$('model-test-model').value,pack=(comfy?.packs||[]).find(x=>x.id===selected);
+  const imageReady=!!pack?.installed;
+  if(!imageReady){
+   for(const id of ['imageA','imageB','edit'])skipFlow(id,'Selected image pack not installed: '+(selected||'none'));
+  }else{
+   const first=await add('imageA','text2image',{model:selected});
+   if(stopRequested)skipFlow('imageB','Stopped');
+   else await add('imageB','text2image',{model:selected,second:true});
+   if(!sourceImage)skipFlow('edit','No generated reference image');
+   else if(selected==='z-turbo')skipFlow('edit','Selected pack supports text-to-image only');
+   else if(selected.startsWith('qwen21-')&&!$('model-test-include-heavy').checked)
+    skipFlow('edit','Heavy Qwen editing omitted for 12 GB VRAM safety; opt in to run');
+   else await add('edit','image2image',{model:selected,confirmed:true});
+  }
+  if(stopRequested)skipFlow('vision','Stopped');
+  else if(!vision?.settings?.name||!vision?.settings?.mmproj)skipFlow('vision','Vision model or matching projector missing');
+  else if(!sourceImage)skipFlow('vision','No gallery image generated or selected');
+  else if(vision.settings.mode!=='cpu'&&!$('model-test-include-heavy').checked)
+   skipFlow('vision','GPU vision test omitted in safe mode; enable heavy tests or select CPU mode');
+  else await add('vision','image2text');
+  if(stopRequested)skipFlow('tts','Stopped');
+  else if(!voice?.ready||!voice?.weightsReady)skipFlow('tts','TTS dependencies or voice weights missing; install from All AI models');
+  else await flowStage('tts',async()=>{
+   const started=Date.now();
+   const result=await callTest('/tts/speak',{text:'This is a Hero Tavern speech diagnostics test.'},'tts',150000);
+   if(!/^\/tts\/audio\/[a-z0-9_-]+\.wav$/i.test(result.url||''))throw Error('TTS response did not contain a valid WAV path');
+   return {status:'passed',notes:['WAV synthesis succeeded'],url:result.url,elapsedMs:Date.now()-started,engine:voice.settings?.engine,variant:voice.settings?.variant};
+  });
+  flowReport.completedAt=new Date().toISOString();flowReport.summary=reportSummary();
+  flowReport.cancelled=stopRequested;
+  const resultText=JSON.stringify(flowReport.summary);
+  $('model-test-flow-summary').textContent=(stopRequested?'Flow stopped. ':'Full diagnostic flow finished. ')+resultText+' · Each image and text result remains in the test history.';
+  $('model-test-flow-telemetry').textContent='Hardware samples: '+flowReport.samples.length+' · '+(flowReport.errors.length?'Warnings: '+flowReport.errors.join(' | '):'No telemetry exceptions')+
+    '\nExport the full report for connections, raw telemetry, test records and audio result.';
+  $('model-test-flow-export').disabled=false;
+ });
+ $('model-test-run-diagnostic-flow').onclick=flowRun;
+ window.heroRunModelDiagnosticFlow=flowRun;
+ drawFlow();
+
  $('model-test-run-all').onclick=()=>guarded(async()=>{
   const suite=[];
   const add=async (kind,config)=>{if(stopRequested)return null;const result=await run(kind,config);suite.push(result);if(result?.status==='failed'&&/cancelled|timed out/i.test(result.error||''))stopRequested=true;return result;};

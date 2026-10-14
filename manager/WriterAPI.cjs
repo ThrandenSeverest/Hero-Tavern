@@ -6,7 +6,7 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
  async function action(route,data={},signal){
   const op=route.replace('/writer/api/','');
   if(op==='list')return store.list();if(op==='create')return store.create(data.story);if(op==='get')return store.read(data.id);
-  if(op==='save')return store.save(data.id,data.story,data.expectedVersion);if(op==='restore')return store.restore(data.id,data.revision,data.expectedVersion);if(op==='fork')return store.fork(data.id);
+  if(op==='save')return store.save(data.id,data.story,data.expectedVersion);if(op==='restore')return store.restore(data.id,data.revision,data.expectedVersion);if(op==='fork')return store.fork(data.id);if(op==='delete')return store.remove(data.id);
   if(op==='import'){if(data.story?.schemaVersion!==1&&data.story?.schemaVersion!==undefined)throw Error('Unsupported Writer export version.');return store.create(data.story)}
   if(op==='cancel'){active?.abort();if(active)pipeline.abort();return {cancelled:!!active}}
   if(op==='accept'){

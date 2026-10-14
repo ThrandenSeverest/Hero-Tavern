@@ -183,7 +183,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
    if(!fs.existsSync(path.join(unpacked,'nodes.py'))||!fs.existsSync(newLoader)||!/\bqwen_image21\b/.test(fs.readFileSync(newLoader,'utf8')))throw Error('Downloaded GGUF loader does not support Qwen-Image 2.1; existing loader was preserved.');
    const requirements=path.join(unpacked,'requirements.txt');
    if(fs.existsSync(requirements)){job.phase='installing GGUF dependencies';await run(installed.python,['-s','-m','pip','install','-r',requirements],unpacked);}
-   if(fs.existsSync(dir)){backup=path.join(base,'ComfyUI-GGUF.hero-backup-'+Date.now());job.phase='backing up incompatible GGUF custom node';fs.renameSync(dir,backup);}
+   if(fs.existsSync(dir)){backup=path.join(root,'Backups','ComfyUI-GGUF-'+Date.now());fs.mkdirSync(path.dirname(backup),{recursive:true});job.phase='backing up incompatible GGUF custom node outside custom_nodes to prevent duplicate node registration';fs.renameSync(dir,backup);}
    try{fs.renameSync(unpacked,dir);moved=true;}catch(e){if(backup&&fs.existsSync(backup)&&!fs.existsSync(dir))fs.renameSync(backup,dir);throw e;}
    fs.writeFileSync(path.join(dir,'.hero-loader-source.json'),JSON.stringify({source:'leejet/ComfyUI-GGUF',installedAt:new Date().toISOString(),backup}));
    return {repaired:true,backup};

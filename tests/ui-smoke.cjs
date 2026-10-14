@@ -178,21 +178,23 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.locator('.hero-nav[data-hero="comfy-workflows"]').click();await panel.locator('#comfy-workflows').waitFor({state:'visible'});await panel.locator('#hero-api-workflow-file').waitFor({state:'visible'});
   await page.locator('.hero-nav[data-hero="writer"]').click();await writer.locator('#title').waitFor({state:'visible'});await writer.locator('#memory').fill('Established fact. '.repeat(1000));await writer.locator('[data-context-tab="persona"]').click();await writer.locator('#persona-name').fill('Mira');await writer.locator('#persona-description').fill('A traveller.');await writer.locator('#save').click();await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved'));await writer.locator('#new').click();await waitFor(async()=>(await writer.locator('#memory').inputValue())==='');if((await writer.locator('#error').textContent()).trim())throw Error('Writer new story failed after editing memory/persona');
   await writer.locator('#import').setInputFiles({name:'sample.txt',mimeType:'text/plain',buffer:Buffer.from('Mira approached the gate.')});await waitFor(async()=>(await writer.locator('#manuscript').inputValue())==='Mira approached the gate.');const download=page.waitForEvent('download');await writer.locator('summary').filter({hasText:'Import / Export'}).click();await writer.locator('#export').click();const exported=await download;if(!exported.suggestedFilename().endsWith('.json'))throw Error('Writer export did not create JSON');
+  // The drawer uses globally unique IDs even inside its shadow DOM.
+  // Playwright pierces open shadow DOM, so assert the namespaced selector contract here.
   // Shared tools run inside Writer and insert reviewed output without submitting a story turn.
   const sharedTools=writer.locator('#hero-shared-tools');
   await writer.locator('#manuscript').focus();
   await writer.locator('#manuscript').evaluate(el=>el.setSelectionRange(0,el.value.length));
-  await sharedTools.locator('#launch').click();
-  await sharedTools.locator('#prompt').fill('Describe a quiet tavern.');
-  await sharedTools.locator('#text').click();
-  await waitFor(async()=>(await sharedTools.locator('#status').textContent())==='Done.');
-  if(!(await sharedTools.locator('#output').textContent()).trim())throw Error('Shared text tool returned no result');
-  await sharedTools.locator('#insert').click();
+  await sharedTools.locator('#hero-tools-launch').click();
+  await sharedTools.locator('#hero-tools-prompt').fill('Describe a quiet tavern.');
+  await sharedTools.locator('#hero-tools-text').click();
+  await waitFor(async()=>(await sharedTools.locator('#hero-tools-status').textContent())==='Done.');
+  if(!(await sharedTools.locator('#hero-tools-output').textContent()).trim())throw Error('Shared text tool returned no result');
+  await sharedTools.locator('#hero-tools-insert').click();
   if(!(await writer.locator('#manuscript').inputValue()).trim())throw Error('Shared result did not insert');
   await sharedTools.locator('[data-panel="images"]').click();
-  const nested=sharedTools.frameLocator('#workspace');await nested.locator('#images').waitFor({state:'visible'});
+  const nested=sharedTools.frameLocator('#hero-tools-workspace');await nested.locator('#images').waitFor({state:'visible'});
   if(await nested.locator('#hero-shared-tools').count())throw Error('Shared workspace must not recursively mount another drawer');
-  await sharedTools.locator('#close').click();
+  await sharedTools.locator('#hero-tools-close').click();
   await page.locator('.hero-nav[data-hero="models"]').click();
   await panel.locator('#stop').click();await waitFor(async()=>(await panel.locator('#state').textContent()).includes('AI stopped.'));
   if((await panel.locator('#error').textContent()).trim())throw Error('Stopping AI must not display an engine error.');

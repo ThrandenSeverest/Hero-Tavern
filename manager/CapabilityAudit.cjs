@@ -17,15 +17,17 @@ function latestPass(history,kind,model){
 function buildCapabilityReport({engine={},center={},vision={},tts={},tests=[],trackerSessions=[]}={}){
  const installed=new Set(engine.installed||[]),selection=engine.selected||'',active=engine.runningModel||'';
  const catalog=(engine.catalog||[]).filter(m=>m.Role!=='vision');
- const defaultText=catalog.findIndex(m=>m.Recommended)||0;
+ const recommendedIndex=(engine.catalog||[]).findIndex(m=>m.Role!=='vision'&&m.Recommended);
+ const defaultText=recommendedIndex>=0?recommendedIndex:(engine.catalog||[]).findIndex(m=>m.Role!=='vision');
  const textInstalled=!!selection&&installed.has(selection);
+ const reuseText=!textInstalled?[...installed][0]:null;
  const textOnline=!!engine.backendReady&&active===selection;
  const issues=[];
  const text={
   id:'text',label:'Local text generation',description:'Text model for Chat, Adventure, Writer and Assistant.',
   state:!textInstalled?'missing':textOnline&&latestPass(tests,'text2text',active)?'verified':textOnline?'online':'installed',
-  selected:selection,missing:!textInstalled?['Select or download a local GGUF text model']:!textOnline?['Start the selected text model']:[],
-  action:!textInstalled?{kind:'text',index:defaultText}:!textOnline?{kind:'loadText'}:{kind:'test',tab:'diagnostics'}
+  selected:selection,missing:!textInstalled?[reuseText?'Select an already installed GGUF model':'Download a local GGUF text model']:!textOnline?['Start the selected text model']:[],
+  action:!textInstalled?(reuseText?{kind:'selectText',name:reuseText}:{kind:'text',index:Math.max(0,defaultText)}):!textOnline?{kind:'loadText'}:{kind:'test',tab:'diagnostics'}
  };
  const selections=center.choices||{},packs=center.models||[];
  function image(scope){

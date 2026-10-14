@@ -88,6 +88,49 @@ const initHeroTavern = async () => {
     });
     const chatIdentity=()=>{const c=context?.();return c&&(c.characterId!==undefined||c.groupId)&&c.chatId?String(c.groupId||c.characters?.[c.characterId]?.avatar||'character')+':'+c.chatId:'';};
     const pending=new Map();
+    // Voice playback follows the saved chat message, not raw reasoning or planning output.
+    let heroSpeaking=false,heroAudio=null,heroLastSpoken='',heroVoiceStatus=null;
+    async function heroVoiceSettings(){const state=await bridgeRequest('/tts/status',{});heroVoiceStatus=state;return state;}
+    async function heroSpeakMessage(element,force=false){
+      if(heroSpeaking)return;
+      const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled)return;
+      const raw=element.querySelector('.mes_text')?.innerText||'';
+      const cleaned=raw.replace(/<think>[\\s\\S]*?<\\/think>/gi,'').trim();if(!cleaned)return;
+      const id=String(element.getAttribute('mesid')||element.dataset.mesid||'')+'|'+cleaned;
+      if(!force&&id===heroLastSpoken)return;
+      const who=element.querySelector('.name_text')?.textContent?.trim()||context?.()?.name2||'Character';
+      heroSpeaking=true;heroLastSpoken=id;
+      try{
+       const speech=await bridgeRequest('/tts/split',{text:cleaned,speaker:who,narrator:'Narrator'});
+       for(const segment of speech.segments.slice(0,25)){
+        if(!document.contains(element))break;
+        const voice=segment.kind==='narration'?state.settings.narratorSpeaker:state.settings.speaker;
+        const result=await bridgeRequest('/tts/speak',{text:segment.text,speaker:voice});
+        const audio=new Audio(bridgeOrigin+result.url);heroAudio=audio;
+        await audio.play();
+        await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});
+       }
+      }catch(e){console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;heroAudio=null;}
+    }
+    const heroChat=document.getElementById('chat');
+    if(heroChat){
+     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeaking=false;heroSpeakMessage(button.closest('.mes'),true);}});
+     const attachVoiceButtons=()=>{
+      for(const message of heroChat.querySelectorAll('.mes:not(.is_user)')){
+       if(message.querySelector('.hero-speak-message'))continue;
+       const text=message.querySelector('.mes_text');if(!text)continue;
+       const btn=document.createElement('button');btn.className='hero-speak-message';btn.type='button';btn.textContent='▶ Voice';btn.title='Read narration and dialogue with separate voices';btn.style.cssText='margin:5px 0;padding:4px 9px;font-size:12px;border:1px solid #756348;border-radius:6px;background:#252b39;color:#e9d5a3;cursor:pointer';text.after(btn);
+      }
+     };
+     let voiceTimer=null;
+     new MutationObserver(()=>{clearTimeout(voiceTimer);voiceTimer=setTimeout(attachVoiceButtons,350)}).observe(heroChat,{subtree:true,childList:true});
+     attachVoiceButtons();
+     if(c?.eventSource&&c?.eventTypes?.GENERATION_ENDED)c.eventSource.on(c.eventTypes.GENERATION_ENDED,async()=>{
+      const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled||!state.settings.autoPlay)return;
+      const last=[...heroChat.querySelectorAll('.mes:not(.is_user)')].at(-1);if(last)heroSpeakMessage(last);
+     });
+    }
+
     function bridgeRequest(route,data){return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);reject(Error('Local service timed out.'))},600000);pending.set(id,{resolve,reject,timer});frame.contentWindow.postMessage({type:'hero-request',id,route,data},bridgeOrigin)});}
     let generationType='normal';
     const c=context?.();

@@ -168,9 +168,9 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const retryPrompt=mode==='writer'?prompt:replyPrompt(recoveryBodyPrompt,extra+'\n[Output recovery: The previous attempt produced no visible answer. Disable thinking. Answer the latest task DIRECTLY. Never emit <think> tags, scratchpad, or analysis. For image-prompt tasks return only the visual prompt; for JSON tasks return only one complete JSON object. /no_think]');
                 const capacity=Math.max(128,contextSize-await countTokens(retryPrompt)-64);
                 const retryTokens=Math.min(capacity,Math.max(replyTokens,['adventure-json','adventure-dm'].includes(mode)?2048:1024));
-                const retryRaw=await sendChecked({...request,prompt:retryPrompt,stop:['<|im_end|>'],stream:false,max_tokens:retryTokens,temperature:0.45,top_p:0.9,min_p:0,top_k:20});
-                text=filterReply(retryRaw,{...filters,stopMarkers:[]});
-                lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text,stopReset:true,rawCharacters:retryRaw.length,visibleCharacters:text.length,template:profile.Template,thinkingControl:profile.Family==='Qwen3'?'qwen3-template-empty-thinking':'instruction'};
+                const retryRaw=await sendChecked({...request,prompt:retryPrompt,stop:[],noStopSequences:true,stream:false,max_tokens:retryTokens,temperature:0.65,top_p:0.94,min_p:0,top_k:20});
+                text=filterReply(retryRaw,{...filters,stopAtSpeaker:false,stopMarkers:[]});
+                lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text,stopReset:true,noStopSequences:true,rawCharacters:retryRaw.length,visibleCharacters:text.length,template:profile.Template,thinkingControl:profile.Family==='Qwen3'?'qwen3-template-empty-thinking':'instruction'};
                 if(!text&&mode==='image-prompt'&&body.hero_image_context){text='Illustrate this visible scene with coherent composition, keeping the described people distinct. '+String(body.hero_image_context).replace(/<[^>]+>/g,'').slice(0,5000);lastRun.imagePromptFallback=true;}
                 if(!text)throw Error((/<think>|<\|channel\|>analysis/i.test(retryRaw)?'THINKING_ONLY':'EMPTY_OUTPUT')+': No visible reply after recovery. Model template: '+profile.Template+'; output budget: '+retryTokens+'. Open Diagnostics for request metadata. Your chat and trackers were preserved.');
             }

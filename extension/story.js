@@ -204,7 +204,7 @@ export async function initStory({getContext,frame,show}){
   const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
   const analysis=view.session.lastAnalysis;
   if(analysis){const health=document.createElement('span');health.className='hero-track-meta';
-   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns';
+   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns'+(analysis.recheck?' · replayed':'')+(analysis.partial?' ⚠ partial; retry available':'');
    health.title='Check the Prompt Inspector for the full tracker update history';head.append(health);}
   const pending=view.session.events.filter(e=>e.status==='pending');
   if(pending.length){const review=document.createElement('button');review.textContent='Review '+pending.length+' state changes';
@@ -214,6 +214,9 @@ export async function initStory({getContext,frame,show}){
    try{const v=await sync();view=await rpc('/story/analyze',{id:v.session.id});publish()}
    catch(error){notify(error);refresh.disabled=false;refresh.textContent='Retry update'}};
   head.append(refresh);
+  const replay=document.createElement('button');replay.textContent='Re-analyze recent turns';replay.title='Recheck the last 8 completed story messages for ANY missed automatic tracker changes. Previously confirmed or manually corrected values are not applied twice.';
+  replay.onclick=async()=>{replay.disabled=true;replay.textContent='Rechecking…';try{const current=await sync();view=await rpc('/story/analyze',{id:current.session.id,recheck:true});publish();if(view.session.lastAnalysis?.partial)window.toastr?.warning('Some state changes need review. Open Diagnostics → Story trackers.','Tracker analysis');}catch(e){notify(e)}finally{replay.disabled=false;replay.textContent='Re-analyze recent turns'}};
+  head.append(replay);
   const edit=document.createElement('button');edit.textContent='Manage trackers';edit.onclick=()=>{show('trackers');sync().catch(notify)};head.append(edit);
   const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.setAttribute('aria-expanded',String(trackerStrip.dataset.collapsed!=='true'));collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);
   trackerStrip.append(head);

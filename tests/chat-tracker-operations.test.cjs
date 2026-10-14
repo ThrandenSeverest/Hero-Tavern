@@ -72,6 +72,7 @@ test('chat memory includes canonical character card and no injected thinking pre
 test('extension injects character metadata and visible tracker state is refreshed after each turn',()=>{
  const story=fs.readFileSync(path.join(__dirname,'../extension/story.js'),'utf8');
  assert.match(story,/data\.hero_context\.character/);
+ assert.match(story,/data\.hero_context\.messages=c\(\)\.chat\.map/);
  assert.match(story,/GENERATION_ENDED/);
  assert.match(story,/\/story\/analyze/);
  assert.doesNotMatch(story,/data\.api_type!=='koboldcpp'/);

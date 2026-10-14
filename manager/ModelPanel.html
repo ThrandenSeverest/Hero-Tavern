@@ -1175,7 +1175,7 @@ el('hero-upscale-run').onclick=async()=>{
  active=!root.hidden;if(active)refresh();
  setInterval(()=>{if(active)refresh()},2500);
 })();
-</script><script src="/model-tests-panel.js"></script><script src="/voice-panel.js"></script><script src="/image-model-center.js"></script><script src="/lora-library.js"></script><script src="/assistant-panel.js"></script><script src="/story-panel.js"></script><script src="/creator-panel.js"></script><script>
+</script><script src="/capability-audit.js"></script><script src="/model-tests-panel.js"></script><script src="/voice-panel.js"></script><script src="/image-model-center.js"></script><script src="/lora-library.js"></script><script src="/assistant-panel.js"></script><script src="/story-panel.js"></script><script src="/creator-panel.js"></script><script>
 window.addEventListener('message',event=>{
  if(!['http://127.0.0.1:8000','http://localhost:8000'].includes(event.origin)||event.source!==parent||event.data?.type!=='hero-ui-settings')return;
  const size=Number(event.data.settings?.font);if(!Number.isFinite(size)||size<12||size>28)return;

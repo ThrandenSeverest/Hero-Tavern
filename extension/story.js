@@ -29,9 +29,9 @@ export async function initStory({getContext,frame,show}){
     // This operation is also available while background tracker analysis runs.
     const loc=selected()?location():null;
     const saved=view?.session?.location;
-    const v=view&&loc&&saved?.filename===loc.filename&&saved?.avatar===loc.avatar&&saved?.group===loc.group
-     ? await rpc('/story/get',{id:view.session.id})
-     : await sync();
+    if(!view?.session||!loc||saved?.filename!==loc.filename||saved?.avatar!==loc.avatar||saved?.group!==loc.group)
+     throw Error('Selected chat changed. Open the Lorebook tab again before saving.');
+    const v=view;
     const headers=c().getRequestHeaders();
     const fetchWorld=async(route,body,missingOk=false)=>{
      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);

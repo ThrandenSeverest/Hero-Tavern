@@ -108,7 +108,7 @@ function explicitStateChanges(definitions,messages,state){
     for(const name of names){
      const short=name.replace(/\s*\([^)]*\)\s*$/,'').trim();
      if(short.length<3)continue;
-     const re=new RegExp('(?:^|[\\n;.!?]\\s*|\\b(?:my|the|current|our)\\s+)('+escapeRegExp(short)+')\\s*(?::|=|\\bis\\b|\\bnow\\b|\\breads\\b|\\bshows\\b|\\bbecomes\\b|\\bchanged to\\b)\\s*([^\\n;.!?]+)','gi');
+     const re=new RegExp('(?:^|[\\n;.!?]\\s*|\\b(?:my|the|current|our)\\s+)('+escapeRegExp(short)+')\\s*(?::|=|\\bis\\b|\\bnow\\b|\\breads\\b|\\bshows\\b|\\bbecomes\\b|\\bchanged to\\b)\\s*([^\\n;!?]+)','gi');
      for(const m of content.matchAll(re)){
       const literal=m[2].trim().replace(/[”"'\s]+$/,'').trim();
       let candidate;
@@ -117,7 +117,7 @@ function explicitStateChanges(definitions,messages,state){
        else if(d.type==='clock'){const match=/^([01]?\d|2[0-3]):([0-5]\d)\b/.exec(literal);if(!match)continue;candidate=String(Number(match[1])).padStart(2,'0')+':'+match[2];}
        else if(d.type==='boolean'){if(!/^(true|false|yes|no|on|off)\b/i.test(literal))continue;candidate=/^(true|yes|on)\b/i.test(literal);}
        else if(d.type==='enum'){candidate=d.allowedValues?.find(x=>x.toLowerCase()===literal.toLowerCase());if(candidate===undefined)continue;}
-       else if(d.type==='text'){candidate=literal.slice(0,6000);}
+       else if(d.type==='text'){candidate=literal.split(/\.\s+(?=[A-ZА-ЯЁ])/)[0].replace(/\.$/,'').slice(0,6000);}
        else if(['list','record','quest','timer','relationship','injuries'].includes(d.type)){candidate=JSON.parse(literal);}
        else continue;
        validateValue(d,candidate);

@@ -378,7 +378,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
              if(req.url.startsWith('/lora/')){const operations={'/lora/assign':()=>loraManager.assign(data),'/lora/upload/start':()=>loraManager.begin(data),'/lora/upload/chunk':()=>loraManager.chunk(data),'/lora/upload/finish':()=>loraManager.finish(data),'/lora/cancel':()=>loraManager.cancel(),'/lora/browse':()=>loraManager.browse(data),'/lora/version':()=>loraManager.getVersion(data.versionId,data.token),'/lora/download':()=>loraManager.startDownload(data)};if(!operations[req.url])throw Error('Unknown LoRA action.');json(200,await operations[req.url]());return;}
              if(req.url==='/image/model-center/status'){json(200,await imageCenter.status());return;}
              if(req.url==='/image/model-center/setup'){if(imageJob)throw Error('Finish image generation before setting up or restarting an image engine.');json(202,imageCenter.setup(data));return;}
-             if(req.url==='/image/model-center/diagnose'){json(200,await comfy.diagnosePack(data.id));return;}
+             if(req.url==='/image/model-center/diagnose'){json(200,await imageCenter.diagnose(data));return;}
              if(req.url==='/image/model-center/select'){json(200,await imageCenter.select(data));return;}
              if(req.url==='/image/model-center/download'){if(imageJob)throw Error('Finish the image first.');json(202,imageCenter.startDownload(data));return;}
              if(req.url==='/image/model-center/cancel'){json(200,imageCenter.cancelDownload());return;}

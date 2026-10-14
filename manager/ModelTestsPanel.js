@@ -3,7 +3,11 @@
  const notify=(s)=>{$('model-test-status').textContent=s};
  async function api(route,data){const response=await fetch(route,{method:data===undefined?'GET':'POST',headers:{'X-Hero-Token':'__TOKEN__','Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw Error(result.error||'Model test failed');return result;}
  const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text'};
- const base=()=>({prompt:'',modelPack:$('model-test-model').value,negative_prompt:'',operation:'txt2img',width:768,height:768,steps:24,cfg_scale:1,seed:-1,sampler_name:'Euler',scheduler:'simple',preset:'raw',refine:false,releaseGPU:true,batch_size:1,lora:[],sourceName:'',referenceName:'',maskData:''});
+ const base=()=>{
+  const model=$('model-test-model').value;
+  const opts=model==='sdxl'?{steps:28,cfg_scale:6,sampler_name:'DPM++ 2M Karras',scheduler:'karras'}:model==='flux-klein'?{steps:4,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:model==='z-turbo'?{steps:9,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:{steps:25,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'};
+  return {prompt:'',modelPack:model,negative_prompt:'',operation:'txt2img',width:768,height:768,seed:-1,preset:'raw',refine:false,releaseGPU:true,batch_size:1,lora:[],sourceName:'',referenceName:'',maskData:'',comfyCheckpoint:$('hero-comfy-checkpoint')?.value||'',...opts};
+ };
  const getFilename=url=>{const name=String(url||'').split('/').pop();if(!/^\d{12,17}-[a-f0-9]{8,24}\.png$/.test(name))throw Error('Select a genuine Hero Tavern gallery PNG before editing or analyzing.');return name};
  async function gallery(){
   const x=await api('/gallery/list');const names=(x.items||[]).map(i=>i.name).filter(n=>/^\d{12,17}-[a-f0-9]{8,24}\.png$/.test(n));const sel=$('model-test-source'),prior=sel.value;sel.replaceChildren(new Option('Select an existing gallery image',''),...names.slice(0,200).map(n=>new Option(n,n)));if(names.includes(prior))sel.value=prior;else if(sourceImage&&names.includes(sourceImage))sel.value=sourceImage;

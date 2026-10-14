@@ -1,7 +1,7 @@
 // Versioned state contract. Shared by the service and unit tests; dialogue never contains patches.
 const crypto=require('node:crypto');
 const clone=x=>JSON.parse(JSON.stringify(x)),hash=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const TYPES=['number','boolean','enum','text','list','relationship','timer','quest','injuries','record'];
+const TYPES=['number','boolean','enum','text','list','relationship','timer','clock','quest','injuries','record'];
 const keyOf=d=>d.owner+':'+d.id;
 function parseModelJSON(raw){
  const text=String(raw).replace(/<think>[\s\S]*?<\/think>/gi,'');
@@ -36,7 +36,7 @@ function validateValue(d,v){
  if(d.type==='text'&&(typeof v!=='string'||v.length>6000))throw Error(d.label+': use a short fact.');
  if(d.type==='list'&&(!Array.isArray(v)||v.length>500||v.some(x=>typeof x!=='string'||x.length>500)))throw Error(d.label+': use a list of short entries.');
  if(d.type==='relationship'&&(!v||typeof v!=='object'||Array.isArray(v)||Object.values(v).some(x=>!Number.isFinite(x)||x<d.min||x>d.max)))throw Error(d.label+': invalid relationship values.');
- if(d.type==='timer'&&(!v||!Number.isFinite(v.remaining)||v.remaining<0||!['story','wall'].includes(v.clock)))throw Error(d.label+': timer needs remaining duration and story/wall clock.');
+ if(d.type==='clock'&&!(typeof v==='string'&&(v==='--:--'||/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(v))))throw Error(d.label+': use 24-hour HH:mm, or --:-- until the scene establishes a time.');\n if(d.type==='timer'&&(!v||!Number.isFinite(v.remaining)||v.remaining<0||!['story','wall'].includes(v.clock)))throw Error(d.label+': timer needs remaining duration and story/wall clock.');
  if(d.type==='quest'&&(!v||typeof v.stage!=='string'||!['inactive','active','complete','failed'].includes(v.status)))throw Error(d.label+': quest needs stage and status.');
  if(d.type==='record'){if(!v||typeof v!=='object'||Array.isArray(v)||JSON.stringify(v).length>24000||Object.keys(v).length>30)throw Error(d.label+': use a structured record (maximum 30 fields / 24000 characters).');const check=(x,depth=0)=>{if(depth>5)throw Error('Tracker record is too deeply nested.');if(x===null||typeof x==='boolean'||typeof x==='string'&&x.length<=6000||Number.isFinite(x))return;if(Array.isArray(x)&&x.length<=100){x.forEach(y=>check(y,depth+1));return}if(x&&typeof x==='object'&&Object.keys(x).length<=30){Object.values(x).forEach(y=>check(y,depth+1));return}throw Error('Invalid tracker record field.');};check(v);}
  if(d.type==='injuries')validateInjuries(v);
@@ -130,7 +130,7 @@ const TEMPLATE_DATA=[
   {id:'known_names',label:'Known people',category:'Knowledge',icon:'📖',type:'list',initialValue:[],updateMode:'approval',description:'People the owner has actually met or learned about in-story.'}
  ]],
  ['Location & Time',[
-  {id:'location',label:'Current location',category:'World',icon:'📍',type:'text',initialValue:'Starting location',updateMode:'automatic',description:'Precisely named current scene location. Avoid inventing unexplored places.',changeRules:'Update after explicitly moving to a new location.'},
+  {id:'location',label:'Current location',category:'World',icon:'📍',type:'text',initialValue:'Starting location',updateMode:'automatic',description:'Precisely named current scene location. Avoid inventing unexplored places.',changeRules:'Update after explicitly moving to a new location.'},\n  {id:'current_time',label:'Current story time (24h)',category:'World',icon:'🕒',type:'clock',initialValue:'--:--',unit:'HH:mm',updateMode:'automatic',description:'Local time INSIDE the story, in 24-hour HH:mm format. --:-- means no story time is established. Not the computer clock.',instructions:'Keep daylight, locations, NPC schedules and elapsed time coherent. Never announce or change the time without an event.',changeRules:'Update only from an explicit stated time or reliable progression of an established fictional clock. Use HH:mm (00:00–23:59); do not confuse duration with an absolute clock time.'},
   {id:'recovery',label:'Recovery countdown',category:'Time',icon:'⏳',type:'timer',unit:'days',initialValue:{remaining:3,clock:'story'},updateMode:'approval',description:'Story days of medically established healing remaining; never use real-world clock time without opting in.'}
  ]],
  ['Quests & Flags',[

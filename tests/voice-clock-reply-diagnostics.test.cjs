@@ -46,3 +46,70 @@ test('Character voice assignment and standalone diagnostics are available from t
  assert.match(ui,/insertBefore\(el\('model-diagnostic-flow'\)/);
  assert.match(tts,/engine:'qwen',variant:'custom-0.6'/);
 });
+
+test('Universal direct tracker updates support numeric, enum, boolean, text, list, record and quest state',()=>{
+ const {explicitStateChanges}=require('../manager/TrackerDelta.cjs');
+ const base={owner:'character:seraphina',updateMode:'automatic'};
+ const d=[
+  S.validateDefinition({...base,id:'health',label:'Health',type:'number',min:0,max:100,initialValue:70}),
+  S.validateDefinition({...base,id:'mood',label:'Mood',type:'enum',allowedValues:['calm','angry'],initialValue:'calm'}),
+  S.validateDefinition({...base,id:'door_unlocked',label:'Door unlocked',type:'boolean',initialValue:false}),
+  S.validateDefinition({...base,id:'location',label:'Current location',type:'text',initialValue:'Unknown'}),
+  S.validateDefinition({...base,id:'inventory',label:'Inventory',type:'list',initialValue:[]}),
+  S.validateDefinition({...base,id:'needs',label:'Needs',type:'record',initialValue:{fullness:null,summary:'Unknown'}}),
+  S.validateDefinition({...base,id:'quest',label:'Quest',type:'quest',initialValue:{stage:'Waiting',status:'inactive'}})
+ ];
+ const messages=[
+  message('Health: 75.5\nMood: angry\nDoor unlocked: true\nCurrent location: Old forest','m1'),
+  message('Inventory: ["rope","torch"]\nNeeds: {"fullness":30,"summary":"Hungry"}\nQuest: {"stage":"Find the gate","status":"active"}','m2')
+ ];
+ const result=explicitStateChanges(d,messages,S.initialState(d)),state=Object.fromEntries(result.map(x=>[x.key,x.value]));
+ assert.equal(result.length,7);
+ assert.equal(state['character:seraphina:health'],75.5);
+ assert.equal(state['character:seraphina:mood'],'angry');
+ assert.equal(state['character:seraphina:door_unlocked'],true);
+ assert.equal(state['character:seraphina:location'],'Old forest');
+ assert.deepEqual(state['character:seraphina:inventory'],['rope','torch']);
+ assert.deepEqual(state['character:seraphina:needs'],{fullness:30,summary:'Hungry'});
+ assert.deepEqual(state['character:seraphina:quest'],{stage:'Find the gate',status:'active'});
+ for(const change of result){
+  const source=messages.find(m=>m.extra.heroMessageId===change.sourceMessageId);
+  assert.ok(source.mes.includes(change.evidence),'Every change has its own verbatim source evidence');
+ }
+});
+test('Universal AI reanalysis repairs missed state for earlier processed dialogue exactly once',async()=>{
+ const {createStoryAPI}=require('../manager/StoryAPI.cjs');
+ const base={owner:'character:seraphina',updateMode:'automatic'};
+ const inventory=S.validateDefinition({...base,id:'inventory',label:'Inventory',type:'list',initialValue:[]});
+ const m=message('I put the silver key in my bag.', 'old-assistant'),msgs=[m];
+ const session={id:'test',characterId:'seraphina',definitions:[inventory],events:[],analyzedSources:[S.signature(m)],failures:[]};
+ const state=()=>S.stateAt(session,msgs);
+ const store={
+  view:()=>({session,messages:msgs,context:{state:state()}}),
+  get:()=>session,
+  saveSession:()=>{},
+  eventPatch(_id,changes){session.events.push(...S.propose(session,msgs,changes));return this.view();}
+ };
+ let calls=0;
+ const pipeline={generate:async()=>{calls++;return {choices:[{text:JSON.stringify({operations:[{key:S.keyOf(inventory),verb:'ADD',value:'silver key',sourceMessageId:m.extra.heroMessageId,evidence:'I put the silver key in my bag.'}]})}]}}};
+ const api=createStoryAPI(store,pipeline);
+ assert.deepEqual((await api.action('/story/analyze',{id:'test'})).context.state[S.keyOf(inventory)],[]);
+ const first=await api.action('/story/analyze',{id:'test',recheck:true});
+ assert.deepEqual(first.context.state[S.keyOf(inventory)],['silver key']);
+ assert.equal(first.session.lastAnalysis.changeTypes.list,1);
+ await api.action('/story/analyze',{id:'test',recheck:true});
+ assert.equal(session.events.length,1,'Reanalysis must not apply the same source/key twice');
+ assert.equal(calls,2);
+});
+test('Extractor failure is retryable and does not mark source messages analyzed',async()=>{
+ const {createStoryAPI}=require('../manager/StoryAPI.cjs');
+ const d=S.validateDefinition({owner:'character:seraphina',id:'hunger',label:'Hunger',type:'number',min:0,max:100,initialValue:50,updateMode:'automatic'});
+ const m=message('She skipped dinner and feels hungry.');
+ const session={id:'test',characterId:'seraphina',definitions:[d],events:[],analyzedSources:[],failures:[]};
+ const store={view:()=>({session,messages:[m],context:{state:S.initialState([d])}}),get:()=>session,saveSession:()=>{}};
+ const api=createStoryAPI(store,{generate:async()=>({choices:[{text:''}]})});
+ await assert.rejects(api.action('/story/analyze',{id:'test'}),/could not validate any changes/);
+ assert.deepEqual(session.analyzedSources,[]);
+ assert.equal(session.lastAnalysis.failed,true);
+ assert.ok(session.failures.length);
+});

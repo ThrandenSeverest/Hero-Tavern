@@ -184,6 +184,26 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const retryRaw=await sendChecked({...request,prompt:retryPrompt,stop:[],noStopSequences:true,stream:false,max_tokens:retryTokens,temperature:0.65,top_p:0.94,min_p:0,top_k:20});
                 text=filterReply(retryRaw,{...filters,stopAtSpeaker:false,stopMarkers:[]});
                 lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text,stopReset:true,noStopSequences:true,rawCharacters:retryRaw.length,visibleCharacters:text.length,template:profile.Template,thinkingControl:profile.Family==='Qwen3'?'qwen3-template-empty-thinking':'instruction'};
+                // Some Mistral-family GGUFs are bundled with the opposite instruction
+                // template. Try the alternate serializer once before rejecting the reply.
+                // This does not change the saved profile or fabricate chat content.
+                if(!text&&mode==='chat'&&['mistral-v3','mistral-v7'].includes(profile.Template)){
+                    stage('recovering-template-mismatch');
+                    const alternative=profile.Template==='mistral-v3'?'mistral-v7':'mistral-v3';
+                    const alternateProfile={...profile,Template:alternative};
+                    const finalPrompt=replyPrompt(body.prompt,extra+'\nWrite the character response now in natural speech and action. Do not explain the task or start a new instruction turn.');
+                    const altRequest={...request,prompt:finalPrompt,stream:false,stop:[],noStopSequences:true,max_tokens:retryTokens,temperature:0.7,top_p:0.95,min_p:0,top_k:30};
+                    try{
+                        const encoded=modelRequest(altRequest,alternateProfile);
+                        if(!budgeted||await countTokens(encoded.prompt,false)+retryTokens<=contextSize){
+                            const altRaw=await completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(encoded),signal:controller.signal,timeoutMs:timeoutSeconds*1000,onEvent:trace}));
+                            text=filterReply(altRaw,{...filters,stopAtSpeaker:false,stopMarkers:[]});
+                            lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,rawCharacters:altRaw.length,visibleCharacters:text.length,success:!!text};
+                        }else lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,skipped:'Context budget'};
+                    }catch(alternativeError){
+                        lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,error:errorDetails(alternativeError)};
+                    }
+                }
                 if(!text&&mode==='image-prompt'&&body.hero_image_context){text='Illustrate this visible scene with coherent composition, keeping the described people distinct. '+String(body.hero_image_context).replace(/<[^>]+>/g,'').slice(0,5000);lastRun.imagePromptFallback=true;}
                 if(!text)throw Error((/<think>|<\|channel\|>analysis/i.test(retryRaw)?'THINKING_ONLY':'EMPTY_OUTPUT')+': No visible reply after recovery. Model template: '+profile.Template+'; output budget: '+retryTokens+'. Open Diagnostics for request metadata. Your chat and trackers were preserved.');
             }

@@ -1,5 +1,5 @@
 (()=>{'use strict';
- const $=id=>document.getElementById(id);let presets=null,history=[],active=false,sourceImage='',currentController=null,currentKind='',cancelReason='',cancelling=false;
+ const $=id=>document.getElementById(id);let presets=null,history=[],active=false,sourceImage='',currentController=null,currentKind='',cancelReason='',cancelling=false,stopRequested=false;
  const notify=(s)=>{$('model-test-status').textContent=s};
  async function api(route,data,{signal,timeoutMs=20000}={}){
   const controller=signal?null:new AbortController(),timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
@@ -28,7 +28,7 @@
  }
  $('model-test-stop').onclick=()=>{
   if(!active||!currentController)return;
-  cancelReason='Cancelled by user. Stop requested for the active engine.';
+  stopRequested=true;cancelReason='Cancelled by user. Stop requested for the active engine.';
   notify('Stopping '+(kindNames[currentKind]||currentKind)+'…');
   currentController.abort();
  };
@@ -111,13 +111,25 @@
   catch(e){notify('Could not save test report: '+e.message);return {...report,error:report.error||e.message};}
  }
  const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-all','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
- async function guarded(fn){if(active)return;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
+ async function guarded(fn){if(active)return;stopRequested=false;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
  $('model-test-run-all').onclick=()=>guarded(async()=>{
-  const suite=[];suite.push(await run('text2text'));suite.push(await run('text2image'));suite.push(await run('text2image',{second:true}));if($('model-test-include-heavy').checked||!$('model-test-model').value.startsWith('qwen21-'))suite.push(await run('image2image',{confirmed:$('model-test-include-heavy').checked}));else suite.push(await record({kind:'image2image',model:$('model-test-model').value,status:'skipped',prompt:presets.image2image.prompt,notes:['Heavy Qwen image editing skipped to protect a 12 GB GPU. Run the individual test if you want to benchmark it.']}));
-  const vision=await api('/vision/status').catch(()=>({settings:{}}));
-  if(!vision.settings?.name||!vision.settings?.mmproj)suite.push(await record({kind:'image2text',model:'unconfigured vision model',status:'skipped',prompt:presets.image2text.question,notes:['Install/configure a vision model plus matching projector before testing image-to-text.']}));else suite.push(await run('image2text'));
+  const suite=[];
+  const add=async (kind,config)=>{if(stopRequested)return null;const result=await run(kind,config);suite.push(result);if(result?.status==='failed'&&/cancelled|timed out/i.test(result.error||''))stopRequested=true;return result;};
+  await add('text2text');
+  await add('text2image');
+  await add('text2image',{second:true});
+  if(!stopRequested){
+   if($('model-test-include-heavy').checked||!$('model-test-model').value.startsWith('qwen21-'))await add('image2image',{confirmed:$('model-test-include-heavy').checked});
+   else suite.push(await record({kind:'image2image',model:$('model-test-model').value,status:'skipped',prompt:presets.image2image.prompt,notes:['Qwen image editing skipped for 12 GB GPU safety. Click Image → Image to run this test individually.']}));
+  }
+  if(!stopRequested){
+   const vision=await api('/vision/status').catch(()=>({settings:{}}));
+   if(!vision.settings?.name||!vision.settings?.mmproj)suite.push(await record({kind:'image2text',model:'unconfigured vision model',status:'skipped',prompt:presets.image2text.question,notes:['Install a vision model and matching projector before testing image-to-text.']}));
+   else if(vision.settings.mode!=='cpu'&&!$('model-test-include-heavy').checked)suite.push(await record({kind:'image2text',model:vision.settings.name,status:'skipped',prompt:presets.image2text.question,notes:['CUDA vision test skipped in safe mode to protect GPU after diffusion tests. Select CPU mode or opt into heavy tests.']}));
+   else await add('image2text');
+  }
   const counts={passed:0,failed:0,warning:0,skipped:0};for(const s of suite)counts[s.status]=(counts[s.status]||0)+1;
-  notify('Model test run complete: '+JSON.stringify(counts)+'. See each output below.');
+  notify((stopRequested?'Suite stopped safely. ':'Safe model test suite finished: ')+JSON.stringify(counts)+'. View individual results and timings below.');
  });
  for(const kind of ['text2text','text2image','image2image','image2text'])$('model-test-run-'+kind).onclick=()=>guarded(()=>run(kind));
  $('model-test-refresh').onclick=()=>guarded(refresh);

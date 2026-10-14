@@ -43,9 +43,12 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     if(!v.session.definitions.some(x=>x.owner===d.owner&&x.type==='injuries'))
      v=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
    const session=v.session,head=S.hash(v.messages.map(S.signature));
-   // Do not hammer the reply backend on repeated UI events after an extractor failure.
-   // A new finalized message changes the head; the Re-analyze button overrides this throttle.
-   if(data.recheck!==true&&session.lastAnalysis?.head===head&&(session.lastAnalysis.failed||session.lastAnalysis.partial))return v;
+   // One bounded automatic retry is allowed after a failure/partial extraction.
+   // Unlike the old permanent same-head throttle, temporary empty outputs are recoverable.
+   const last=session.lastAnalysis;
+   if(data.recheck!==true&&last?.head===head&&(last.failed||last.partial)){
+    if((last.autoRetries||0)>=1||Date.now()<(last.retryAt||0))return v;
+   }
    const eligible=session.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
    const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
    if(!eligible.length||lastFinal<0)return v;
@@ -65,7 +68,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const eligibleFor=m=>eligible.filter(d=>sourceIndex(m)>=firstIndex(d));
    const direct=explicitStateChanges(eligible,selected,v.context.state);
    const contextBefore=v.messages.slice(Math.max(0,sourceIndex(selected[0])-5),sourceIndex(selected[0])).filter(m=>!m.is_system);
-   const diagnostics={at:Date.now(),head,recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length};
+   const diagnostics={at:Date.now(),head,recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length,autoRetries:recheck?0:(last?.head===head?(last.autoRetries||0)+1:0)};
    try{
     let parsed={changes:[],issues:[],recognized:0};
     if(ready()){
@@ -125,13 +128,14 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     // A failed/partial extraction never consumes its source signatures.
     // It can retry on the next completed turn or by the explicit Re-analyze button.
     if(!diagnostics.partial&&diagnostics.modelUsed)persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...selected.map(S.signature)])].slice(-1500);
+    if(diagnostics.partial)diagnostics.retryAt=Date.now()+15000;
     persisted.lastAnalysis=diagnostics;
     if(diagnostics.errors.length){persisted.failures.push({at:Date.now(),message:diagnostics.errors.join(' | ').slice(0,1500),head});persisted.failures=persisted.failures.slice(-30);}
     store.saveSession(persisted);return store.view(data.id);
    }catch(error){
     const current=store.get(data.id);
     current.failures.push({at:Date.now(),message:error.message,head});current.failures=current.failures.slice(-30);
-    current.lastAnalysis={...diagnostics,failed:true,error:error.message,partial:true};
+    current.lastAnalysis={...diagnostics,failed:true,error:error.message,partial:true,retryAt:Date.now()+15000};
     store.saveSession(current);throw error;
    }
   }

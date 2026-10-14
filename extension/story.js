@@ -305,20 +305,27 @@ export async function initStory({getContext,frame,show}){
  }
  function updateMessageMenus(){for(const node of document.querySelectorAll('#chat .mes')){if(node.querySelector('.hero-message-menu'))continue;const index=Number(node.getAttribute('mesid'));if(!Number.isInteger(index))continue;const menu=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Story actions';menu.className='hero-message-menu';menu.append(summary);for(const [label,action]of [['Bookmark',async()=>{const label=prompt('Bookmark name','Before the next scene');if(label)await run('bookmark',{index,label})}],['Branch Here',()=>run('fork',{mode:'branch',atIndex:index})],['Rollback to Here',()=>rewind(index)],['View State Here',async()=>{const p=await run('preview',{index}),{box}=dialog('State at this message'),pre=document.createElement('pre');const v=await rpc('/story/state-at',{id:view.session.id,index});const visible=new Set(v.definitions.filter(d=>d.visibility!=='hidden').map(d=>d.owner+':'+d.id));pre.textContent=JSON.stringify(Object.fromEntries(Object.entries(v.state).filter(([k])=>visible.has(k))),null,2)+'\nReversals from current state:\n'+p.changes.map(x=>x.key+' → '+JSON.stringify(x.to)).join('\n');box.append(pre)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=e=>{e.preventDefault();Promise.resolve(action()).catch(notify)};menu.append(b);}node.append(menu);}}
  let currentGeneration='normal';c().eventSource.on(c().eventTypes.GENERATION_STARTED,type=>{currentGeneration=type;});
- c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration))return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};// Keep the complete native transcript even if another extension supplied an
- // incomplete hero_context object before our interception.
- data.hero_context.messages=c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes}));
- data.hero_context.generationType=currentGeneration;
- const char=c().characters?.[c().characterId],cardData=char?.data||char||{};
- data.hero_context.character={
+ // SillyTavern does not await async GENERATE_AFTER_DATA handlers. Never await
+ // saveChat()/sync() here: the prompt may already be sent before hero_context
+ // and tracker/character metadata reach the inference backend.
+ c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,(data,dryRun)=>{
+  if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration))return;
+  const current=c(),loc=location(),stored=current.chatMetadata?.hero_tavern||{};
+  const matches=!!view?.session&&view.session.location?.filename===loc.filename&&view.session.location?.avatar===loc.avatar&&view.session.location?.group===loc.group;
+  const sessionId=matches?view.session.id:stored.sessionId||'';
+  const messages=current.chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes}));
+  const char=current.characters?.[current.characterId],cardData=char?.data||char||{};
+  data.hero_context={...(data.hero_context||{}),id:sessionId||legacy(),...(sessionId?{sessionId}:{ }),messages,generationType:currentGeneration};
+  data.hero_context.character={
    name:String(cardData.name||char?.name||'').slice(0,180),
    description:String(cardData.description||'').slice(0,4400),
    personality:String(cardData.personality||'').slice(0,2000),
    scenario:String(cardData.scenario||'').slice(0,1500),
    mes_example:String(cardData.mes_example||'').slice(0,1000),
    leadingPrompt:String(cardData.extensions?.hero_tavern?.leadingPrompt||char?.extensions?.hero_tavern?.leadingPrompt||'').slice(0,4000)
- };
- if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
+  };
+  if(actionInstruction)data.hero_context.oneReply=actionInstruction;
+ });
  let generating=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});
  const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{
   if(generating){schedule();return;}

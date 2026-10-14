@@ -42,62 +42,86 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    for(const d of v.session.definitions.filter(d=>d.template==='Health & Injuries'&&d.enabled!==false))
     if(!v.session.definitions.some(x=>x.owner===d.owner&&x.type==='injuries'))
      v=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
-   const s=v.session,head=S.hash(v.messages.map(S.signature));
-   const eligible=s.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
+   const session=v.session,head=S.hash(v.messages.map(S.signature));
+   const eligible=session.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
    const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
-   const pending=v.messages.slice(0,lastFinal+1).filter((m,index)=>!m.is_system&&String(m.mes||'').trim()&&!s.analyzedSources.includes(S.signature(m))&&eligible.some(d=>!d.introducedAt||index>=v.messages.findIndex(x=>x.extra?.heroMessageId===d.introducedAt))).slice(0,2);
-   if(!eligible.length)return v;
-   const {parseCommands,trackerInstructions,explicitClockChanges}=require('./TrackerDelta.cjs');
-   // After upgrading from an extractor that marked zero-change replies as analyzed,
-   // recover an explicit, still-unset story clock from recent finalized messages.
-   // Never use system/computer timestamps or facts preceding the tracker definition.
-   const clockDefs=eligible.filter(d=>d.type==='clock'&&v.context.state[S.keyOf(d)]==='--:--');
-   const windowStart=Math.max(0,lastFinal-15);
-   const recoverable=clockDefs.filter(d=>!d.introducedAt||v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt)<=lastFinal);
-   const recent=v.messages.slice(windowStart,lastFinal+1).filter(m=>!m.is_system&&String(m.mes||'').trim());
-   const backfill=explicitClockChanges(recoverable,recent,v.context.state).filter(change=>{
-      const d=recoverable.find(x=>S.keyOf(x)===change.key);
-      const start=d?.introducedAt?v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt):0;
-      const source=v.messages.findIndex(m=>m.extra?.heroMessageId===change.sourceMessageId);
-      return source>=Math.max(start,0);
-   });
-   if(!pending.length){
-     if(!backfill.length)return v;
-     const result=store.eventPatch(data.id,backfill,{expectedHead:head});
-     const saved=store.get(data.id);saved.lastAnalysis={at:Date.now(),processed:0,changes:backfill.length,deterministicClockUpdates:backfill.length,backfilled:true,errors:[]};
-     store.saveSession(saved);return store.view(data.id);
-   }
-   if(!ready()&&!backfill.length)throw Error('Load the reply model before analyzing tracker changes.');
-   const clockChanges=explicitClockChanges(eligible,pending,v.context.state);
-   for(const fix of backfill)if(!clockChanges.some(x=>x.key===fix.key))clockChanges.push(fix);
+   if(!eligible.length||lastFinal<0)return v;
+   const indexById=new Map(v.messages.map((m,i)=>[m.extra?.heroMessageId,i]));
+   const firstIndex=d=>d.introducedAt?indexById.get(d.introducedAt)??Infinity:0;
+   const available=(m,index)=>!m.is_system&&String(m.mes||'').trim()&&m.extra?.heroMessageId&&eligible.some(d=>index>=firstIndex(d));
+   const all=v.messages.slice(0,lastFinal+1).filter(available);
+   const recheck=data.recheck===true;
+   // Never silently replay an already processed turn. Explicit recheck is the recovery path,
+   // including old versions which incorrectly saved an empty/failed extraction as complete.
+   const selected=recheck?all.slice(-8):all.filter(m=>!session.analyzedSources.includes(S.signature(m))).slice(0,2);
+   if(!selected.length)return v;
+   const selectedIds=new Set(selected.map(m=>m.extra.heroMessageId));
+   const priorEvents=new Set(session.events.filter(e=>e.op==='set'&&e.status!=='invalid'&&selectedIds.has(e.sourceMessageId)).map(e=>e.key+'|'+e.sourceMessageId));
+   const {parseCommands,trackerInstructions,explicitStateChanges}=require('./TrackerDelta.cjs');
+   const sourceIndex=m=>indexById.get(m.extra.heroMessageId);
+   const eligibleFor=m=>eligible.filter(d=>sourceIndex(m)>=firstIndex(d));
+   const direct=explicitStateChanges(eligible,selected,v.context.state);
+   const contextBefore=v.messages.slice(Math.max(0,sourceIndex(selected[0])-5),sourceIndex(selected[0])).filter(m=>!m.is_system);
+   const diagnostics={at:Date.now(),recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length};
    try{
-    const p=trackerInstructions(eligible,v.context.state,pending);
-    let parsed;
-    for(let attempt=0;attempt<2;attempt++){
-     const repair=attempt?'\nYour previous output failed validation: '+parsed.issues.join('; ').slice(0,1200)+'. Return corrected operations JSON using only the original facts. Omit unsupported changes.':'';
-     const response=await pipeline.generate({
-      prompt:'<|im_start|>system\nExtract factual tracker transitions as operations JSON. Never roleplay or output reasoning. /no_think<|im_end|>\n<|im_start|>user\n'+p+repair+'<|im_end|>\n<|im_start|>assistant\n',
-      stream:false,max_tokens:Math.min(1800,Math.max(500,eligible.length*110)),temperature:0.1,stop:['<|im_end|>']
-     },signal,{mode:'utility'});
-     const raw=String(response.choices?.[0]?.text||'');parsed=parseCommands(raw,eligible,pending,v.context.state);
-     if(!parsed.recognized&&!parsed.issues.length&&!/^NONE\b/i.test(raw.trim()))parsed.issues.push('Tracker extractor did not follow the operations JSON protocol');
-     for(const change of parsed.changes){const d=eligible.find(d=>S.keyOf(d)===change.key);if(d?.introducedAt&&v.messages.findIndex(m=>m.extra?.heroMessageId===change.sourceMessageId)<v.messages.findIndex(m=>m.extra?.heroMessageId===d.introducedAt))parsed.issues.push('Tracker did not exist at source message: '+change.key);}
-     if(!parsed.issues.length)break;
+    let parsed={changes:[],issues:[],recognized:0};
+    if(ready()){
+     diagnostics.modelUsed=true;
+     const p=trackerInstructions(eligible,v.context.state,selected,contextBefore);
+     const retries=2;
+     for(let attempt=0;attempt<retries;attempt++){
+      const repair=attempt?'\nThe previous response had validation errors: '+parsed.issues.join('; ').slice(0,1200)+'. Output valid operations JSON only. Do not invent changes.':'';
+      try{
+       const response=await pipeline.generate({
+        prompt:'<|im_start|>system\nExtract factual state transitions from completed dialogue. Return operations JSON only, no roleplay or reasoning. /no_think<|im_end|>\n<|im_start|>user\n'+p+repair+'<|im_end|>\n<|im_start|>assistant\n',
+        stream:false,max_tokens:Math.min(2200,Math.max(800,eligible.length*130)),temperature:0.1,stop:['<|im_end|>']
+       },signal,{mode:'utility'});
+       const raw=String(response.choices?.[0]?.text||'');
+       parsed=parseCommands(raw,eligible,selected,v.context.state);
+       if(!parsed.recognized&&!parsed.issues.length)parsed.issues.push('Model returned no operations JSON (not a valid no-change result).');
+       for(const change of parsed.changes){
+        const d=eligible.find(d=>S.keyOf(d)===change.key),at=indexById.get(change.sourceMessageId);
+        if(!d||at===undefined||at<firstIndex(d))parsed.issues.push('Tracker not active for source message: '+change.key);
+       }
+       if(!parsed.issues.length)break;
+      }catch(error){
+       parsed={changes:[],recognized:0,issues:['Model extractor failed: '+error.message]};
+       if(attempt===retries-1)break;
+      }
+     }
+    }else diagnostics.errors.push('Reply model is not loaded: explicit facts only; remaining tracker actions require AI analysis.');
+    const updates=[],seen=new Set(priorEvents);
+    // Explicit typed statements win over the model for the same tracker in the same message.
+    const directKeys=new Set(direct.map(c=>c.key+'|'+c.sourceMessageId));
+    const ordered=[...direct,...parsed.changes.filter(c=>!directKeys.has(c.key+'|'+c.sourceMessageId))].sort((a,b)=>(indexById.get(a.sourceMessageId)??Infinity)-(indexById.get(b.sourceMessageId)??Infinity));
+    for(const candidate of ordered){
+     const identifier=candidate.key+'|'+candidate.sourceMessageId;
+     if(seen.has(identifier))continue;
+     const definition=eligible.find(d=>S.keyOf(d)===candidate.key);
+     const at=indexById.get(candidate.sourceMessageId);
+     if(!definition||at===undefined||at<firstIndex(definition)){diagnostics.errors.push('Skipped event for an inactive tracker: '+candidate.key);continue;}
+     seen.add(identifier);updates.push(candidate);
     }
-    if(parsed.issues.length&& !clockChanges.length)throw Error('Tracker extractor returned invalid operations after repair: '+parsed.issues.slice(0,2).join(' | '));
-    if(parsed.issues.length)parsed={changes:[],issues:parsed.issues,recognized:0};
-    // Deterministic time wins over speculative model time; other tracker changes remain intact.
-    parsed.changes=parsed.changes.filter(change=>!clockChanges.some(c=>c.key===change.key));
-    parsed.changes.push(...clockChanges);
+    if(parsed.issues.length)diagnostics.errors.push(...parsed.issues.slice(0,8));
+    diagnostics.partial=diagnostics.errors.length>0;
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
-    if(parsed.changes.length){const current=store.view(data.id);if(S.hash(current.messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');v=store.eventPatch(data.id,parsed.changes,{expectedHead:head});}
+    if(updates.length){
+     v=store.eventPatch(data.id,updates,{expectedHead:head});
+     diagnostics.changes=updates.length;
+     for(const change of updates){const type=eligible.find(d=>S.keyOf(d)===change.key)?.type||'unknown';diagnostics.changeTypes[type]=(diagnostics.changeTypes[type]||0)+1;}
+    }
     const persisted=store.get(data.id);
-    persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...pending.map(S.signature)])].slice(-1500);
-    persisted.lastAnalysis={at:Date.now(),processed:pending.length,changes:parsed.changes.length,errors:parsed.issues.slice(-5),deterministicClockUpdates:clockChanges.length};
+    // A failed/partial extraction never consumes its source signatures.
+    // It can retry on the next completed turn or by the explicit Re-analyze button.
+    if(!diagnostics.partial&&diagnostics.modelUsed)persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...selected.map(S.signature)])].slice(-1500);
+    persisted.lastAnalysis=diagnostics;
+    if(diagnostics.errors.length){persisted.failures.push({at:Date.now(),message:diagnostics.errors.join(' | ').slice(0,1500),head});persisted.failures=persisted.failures.slice(-30);}
     store.saveSession(persisted);return store.view(data.id);
-   }catch(e){
-    const current=store.get(data.id);current.failures.push({at:Date.now(),message:e.message,head});current.failures=current.failures.slice(-30);
-    current.lastAnalysis={at:Date.now(),failed:true,error:e.message};store.saveSession(current);throw e;
+   }catch(error){
+    const current=store.get(data.id);
+    current.failures.push({at:Date.now(),message:error.message,head});current.failures=current.failures.slice(-30);
+    current.lastAnalysis={...diagnostics,failed:true,error:error.message,partial:true};
+    store.saveSession(current);throw error;
    }
   }
   if(op==='helper'){

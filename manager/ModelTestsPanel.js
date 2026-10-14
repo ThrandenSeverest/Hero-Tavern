@@ -143,7 +143,7 @@
  const clip=e=>String(e?.message||e||'Unknown failure').slice(0,300);
  async function flowSample(stage){
   try{
-   const data=await api('/diagnostics/sample',undefined,{timeoutMs:12000});
+   const data=await api('/diagnostics/sample',{}, {timeoutMs:12000});
    flowReport.samples.push({stage,at:new Date().toISOString(),...data});
    if(flowReport.samples.length>80)flowReport.samples.shift();
   }catch(error){flowReport.errors.push('Hardware telemetry ('+stage+'): '+clip(error));}
@@ -191,7 +191,7 @@
   let comfy=null,vision=null,voice=null,engine=null;
   await flowStage('preflight',async()=>{
    const checks=await Promise.allSettled([
-    api('/diagnostics/check',undefined,{timeoutMs:20000}),
+    api('/diagnostics/check',{}, {timeoutMs:20000}),
     api('/status',undefined,{timeoutMs:15000}),
     api('/comfy/status',undefined,{timeoutMs:15000}),
     api('/vision/status',undefined,{timeoutMs:15000}),

@@ -88,7 +88,7 @@
 <label>Image model<select id="hero-pack-select"><option value="sdxl">SDXL · artwork and LoRAs</option><option value="flux-klein">FLUX.2 Klein 4B · character edits</option><option value="z-turbo">Z-Image Turbo · fast scenes</option></select></label>
 <label>ComfyUI models directory (absolute Windows path)<input id="hero-pack-root" placeholder="C:\AI\ComfyUI\models"></label>
 </div>
-<div class="actions"><button id="hero-pack-check">Check installed model packs</button><button id="hero-pack-save">Use selected image model</button><button id="hero-pack-download">Download missing model files</button><button id="hero-pack-cancel">Cancel model download</button></div>
+<div class="actions"><button id="hero-pack-check">Check installed model packs</button><button id="hero-pack-save">Use selected image model</button><button id="hero-pack-download">Download missing model files</button><button id="hero-pack-cancel">Cancel model download</button><button id="hero-pack-repair-qwen" title="Safely backup the old GGUF custom node and install the Qwen-Image 2.1 compatible loader">Repair Qwen 2.1 GGUF loader</button></div>
 <p id="hero-pack-state"></p><div id="hero-pack-cards" class="grid"></div>
 <details><summary>Install or connect ComfyUI engine</summary>
 <p>The official NVIDIA Portable package includes its Python/CUDA environment. Its archive is several gigabytes; downloading requires consent, enough free disk space and the locally installed 7-Zip extractor. No software is silently installed. You can also connect a previously installed ComfyUI instance at 127.0.0.1:8188.</p>
@@ -662,6 +662,7 @@ el('hero-pack-download').onclick=async()=>{
   await heroHubRefresh();
  }catch(e){el('hero-pack-state').textContent=e.message}finally{heroHubDownloading=false;el('hero-pack-download').disabled=false}
 };
+el('hero-pack-repair-qwen').onclick=async()=>{if(!confirm('Repair Qwen-Image 2.1 GGUF loader? Managed ComfyUI will restart; the older custom node will be backed up. Your model weights and gallery will not be deleted.'))return;try{const v=await request('/image/model-center/repair-qwen-loader',{confirm:true});el('hero-pack-state').textContent='Loader repair started. Open model hub status after ComfyUI restarts.';await heroHubRefresh();}catch(e){el('hero-pack-state').textContent=e.message}};
 el('hero-pack-cancel').onclick=async()=>{try{await request('/image/model-center/cancel',{});el('hero-pack-state').textContent='Model download cancellation requested; partial download remains resumable.'}catch(e){el('hero-pack-state').textContent=e.message}};
 el('hero-runtime-save').onclick=async()=>{
  try{

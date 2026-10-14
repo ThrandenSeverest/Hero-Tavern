@@ -25,6 +25,7 @@ const {createAssistantWorkspace}=require('./AssistantWorkspace.cjs');
 const {createDiskCare}=require('./DiskCare.cjs');
 const {createImageGallery}=require('./ImageGallery.cjs');
 const { filterReply } = require('./ReplyFilters.cjs');
+const {createTTS}=require('./TTSService.cjs');
 
 async function verifyModel(file, expectedSize = 0, expectedHash = '') {
     const stat = fs.statSync(file);
@@ -85,6 +86,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const story=createStoryStore(root,{tavernPath});
     const diskCare=createDiskCare(root);
     const imageGallery=createImageGallery(root);
+    const tts=createTTS(root);
     const vision=createThinkingWorker(root,{command:backendCommand,prefix:backendPrefix,port:5004,resolveModel,verifyModel,pollInterval,configName:'vision-model.json',workerName:'vision'});
     const thinking=createThinkingWorker(root,{command:thinkingCommand,prefix:thinkingPrefix,port:thinkingPort,resolveModel,verifyModel,pollInterval});
     const images=createImages(root,{command:imageCommand,prefix:imagePrefix,port:imagePort,pollInterval,readinessTimeout});
@@ -290,7 +292,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
         return { state, backendRunning: !!backend || starting, backendReady, selected: active,
-            tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,assistant:assistant.snapshot(),pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
+            tts:tts.status(),tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,assistant:assistant.snapshot(),pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
             engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(), imageModels:{choices:{global:imageCenter.choice('global'),chat:imageCenter.choice('chat'),adventure:imageCenter.choice('adventure')}}, vision:{...vision.snapshot(),busy:visionBusy,setup:visionSetup,setupError:visionSetupError},thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
             download: download && { name: download.name, bytes: download.bytes, size: download.size, verifying: download.verifying } };
@@ -306,7 +308,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
            res.writeHead(202,{'Content-Type':'application/json'});res.end(JSON.stringify({stopping:true}));
            setImmediate(async()=>{
              try{
-               studio.cancel();tuner.cancel();pipeline.abort();
+               studio.cancel();tuner.cancel();pipeline.abort();tts.stop();
                await comfy.cancel().catch(()=>{});
                if(images.snapshot().running)await images.action('/images/stop',{});
                if(thinking.snapshot().running)thinking.stop();
@@ -341,10 +343,12 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(fs.readFileSync(path.join(root, 'ModelPanel.html'), 'utf8').replaceAll('__TOKEN__', token)); return;
         }
-        const assets={'/lora-library.js':'LoRALibraryUI.js','/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js'};
+        const assets={'/lora-library.js':'LoRALibraryUI.js','/writer':'Writer.html','/image-model-center.js':'ImageModelCenterUI.js','/assistant-panel.js':'AssistantPanel.js','/adventure':'Adventure.html','/adventure-adapter.js':'AdventureAdapter.js','/spells.json':'spells.json','/story-panel.js':'StoryPanel.js','/creator-panel.js':'CreatorPanel.js','/voice-panel.js':'VoicePanel.js'};
         if(req.method==='GET'&&assets[req.url]){const file=assets[req.url];res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'application/json'});res.end(fs.readFileSync(path.join(root,file),'utf8').replaceAll('__TOKEN__',token));return;}
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
+        if(req.method==='GET'&&req.url==='/tts/status'){json(200,tts.status());return;}
+        if(req.method==='GET'&&req.url.startsWith('/tts/audio/')){const file=tts.readAudio(req.url);if(!file){json(404,{error:'Audio not found'});return;}res.writeHead(200,{'Content-Type':'audio/wav','Access-Control-Allow-Origin':'http://127.0.0.1:8000','Vary':'Origin'});fs.createReadStream(file).pipe(res);return;}
         if(req.method==='GET'&&req.url==='/assistant/status'){json(200,assistant.snapshot());return;}
         if(req.method==='GET'&&(req.url==='/assistant/chats'||req.url==='/assistant/files')){json(200,await assistant.action(req.url));return;}
         if(req.method==='GET'&&req.url.startsWith('/lora/library')){const q=new URL(req.url,'http://127.0.0.1').searchParams;try{json(200,loraManager.list({pack:q.get('pack')||'',checkpoint:q.get('checkpoint')||''}))}catch(e){json(400,{error:e.message})}return;}
@@ -366,6 +370,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            if(req.url.startsWith('/tts/')){let result;switch(req.url){case '/tts/configure':result=tts.configure(data);break;case '/tts/install':result=tts.installEngine();break;case '/tts/split':result={segments:tts.splitSpeech(data.text,{speaker:data.speaker,narrator:data.narrator})};break;case '/tts/speak':result=await tts.speak(data);break;case '/tts/import':result=tts.importVoice(data);break;case '/tts/delete':result=tts.removeVoice(data);break;case '/tts/stop':tts.stop();result=tts.status();break;default:json(404,{error:'Unknown voice action'});return;}json(200,result);return;}
             if(imageJob&&['/select','/start','/hardware','/performance/apply'].includes(req.url))throw Error('Wait for the image job to restore the text engine.');
             if(assistant.snapshot().busy&&['/select','/start','/stop','/delete','/hardware','/performance/apply','/generation','/thinking/start','/thinking/stop'].includes(req.url))throw Error('Finish or cancel the Assistant reply before changing the loaded model.');
             if(tuner.snapshot()?.status==='running'&&['/start','/select','/hardware','/performance/apply','/studio/generate','/studio/refine','/story/analyze','/task','/diagnostics/text','/diagnostics/image'].includes(req.url))throw Error('Wait for tuning to finish or cancel it.');if(req.url==='/performance/tune'){json(202,await tuner.start(data));return;}if(req.url==='/performance/tune-cancel'){tuner.cancel();json(200,tuner.snapshot());return;}
@@ -523,7 +528,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
         } catch (e) { if (!backend) { state = e.message; backendError = e.message; engineState = 'error'; } } finally { checking = false; }
     }, pollInterval);
-    server.on('close', () => { comfyRuntime.stop().catch(()=>{});comfy.models.cancel();comfyRuntime.cancelInstall();comfy.cancel().catch(()=>{});studio.cancel();assistant.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close();vision.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
+    server.on('close', () => { tts.stop();comfyRuntime.stop().catch(()=>{});comfy.models.cancel();comfyRuntime.cancelInstall();comfy.cancel().catch(()=>{});studio.cancel();assistant.cancel(); tuner.close(); clearInterval(timer); pipeline.abort(); images.close(); thinking.close();vision.close(); download?.process?.kill(); stopBackend(); manager?.kill(); });
     // Calibration must be user-initiated: an automatic first-launch calibration can repeatedly kill the chat worker.
     server.listen(port, '127.0.0.1');
     return server;

@@ -5,6 +5,11 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
  const [samplerName,scheduler]=sampling(params,pack.family==='qwen21'?['euler','simple']:['euler','normal']);
  if(pack.family==='qwen21'){
   const mode=params.operation||'txt2img';
+  // Model-specific defaults: the generic SDXL values (CFG 7 / DPM++ Karras)
+  // break Qwen Image 2.1's distilled inference path. Use official Euler + Simple.
+  if(typeof params.prompt!=='string'||!params.prompt.trim())throw Error('Qwen Image 2.1 needs a nonempty prompt.');
+  if(Number(params.cfg_scale??1)>2)throw Error('Qwen Image 2.1 uses CFG 1 by default (up to 2 for advanced tests). The old SDXL CFG value can cause nearly identical or degraded images. Set CFG to 1.');
+  if(Number(params.steps??25)<1)throw Error('Qwen Image 2.1 steps must be positive.');
   if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
   if(mode!=='txt2img'&&!source)throw Error('Select a gallery image for Qwen editing.');
   if(mode==='inpaint'&&!mask)throw Error('Paint a mask area to change before Qwen inpainting.');
@@ -19,10 +24,13 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   const textInputs={clip,vae,prompt:params.prompt,negative_prompt:params.negative_prompt||'',resolution:1024};
   if(sourceNode)textInputs['images.image_1']=sourceNode;
   const encoded=n('TextEncodeQwenImage21',textInputs);
-  const latent=sourceNode?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
+  // The node outputs a Qwen-native 64-channel latent. At default 1024²,
+  // always use that rather than a generic four-channel EmptyLatentImage.
+  // Explicit alternate aspect ratios use ComfyUI's latent size conversion.
+  const latent=sourceNode||width===1024&&height===1024?[encoded[0],2]:n('EmptyLatentImage',{width,height,batch_size:params.batch_size||1});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
-  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps||25,cfg:params.cfg_scale||1,sampler_name:samplerName,scheduler,denoise:mode==='txt2img'?1:params.denoise??0.7});
+  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:params.cfg_scale??1,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
   const result=n('VAEDecode',{samples:sample,vae});
   let output=result;
   if(mode==='inpaint'){const masked=n('LoadImageMask',{image:mask,channel:'red'});output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}

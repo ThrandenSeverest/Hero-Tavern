@@ -1,6 +1,25 @@
 'use strict';
 const crypto=require('node:crypto');
 const {createWriterStore}=require('./WriterStore.cjs');
+function writerEvent(operation,raw,name=''){
+ if(!['say','do'].includes(operation))return '';
+ const instruction=String(raw||'').replace(/[\r\n\t]+/g,' ').replace(/\s+/g,' ').trim();
+ if(!instruction||instruction.length>2000)throw Error('Enter a dialogue or action of 1–2000 characters.');
+ if(operation==='say'){
+  // Treat the exact words as dialogue, not a suggestion for the AI to paraphrase.
+  const spoken=instruction.replace(/^(?:"|“|«)/,'').replace(/(?:"|”|»)$/,'').trim();
+  if(!spoken)throw Error('Enter words to say.');
+  const actor=String(name||'').trim();
+  return (actor?actor+' says, ':'You say, ')+'“'+spoken+'”';
+ }
+ let action=instruction.replace(/^\*+|\*+$/g,'').trim();
+ if(/^(?:I|я)\s+/i.test(action))action=action.replace(/^I\s+am\s+/i,'You are ').replace(/^I\s+have\s+/i,'You have ').replace(/^I\s+/i,'You ').replace(/^я\s+/i,'Я ');
+ else if(/^(?:(?:you|ты|вы)\s+)/i.test(action))action=action[0].toUpperCase()+action.slice(1);
+ else if(/^[a-z]/.test(action)&&!(/^(?:he|she|they|savos|mira)\s+/i.test(action)))action='You '+action;
+ else action=action[0].toUpperCase()+action.slice(1);
+ return action.match(/[.!?…]$/)?action:action+'.';
+}
+
 function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
  const store=createWriterStore(root),candidates=new Map();let active=null;
  async function action(route,data={},signal){
@@ -24,9 +43,9 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    if(op==='regenerate'){const replacement=data.replacement;if(!replacement||!Number.isInteger(replacement.start)||typeof replacement.text!=='string'||original.text.slice(replacement.start,replacement.start+replacement.text.length)!==replacement.text)throw Error('Generated passage was edited. Use Undo or restore the previous draft before retrying.');base=original.text.slice(0,replacement.start)+original.text.slice(replacement.start+replacement.text.length);start=replacement.start;end=start;}
    else if(['continue','say','do'].includes(operation))start=end=base.length;
    if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<start||end>base.length||operation==='rewrite'&&start===end)throw Error('Select a valid manuscript passage.');
-   if(['say','do'].includes(operation)&&!String(data.instruction||'').trim())throw Error('Enter dialogue or an action first.');
+   if(['say','do'].includes(operation))writerEvent(operation,data.instruction,original.persona?.name);
    const controller=new AbortController();active=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
-   try{await ensureText(controller.signal);const result=await pipeline.generate({prompt:'',writerSettings:original.settings,hero_writer:{...original,text:base,operation,start,end,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});let prose=String(result.choices?.[0]?.text||'').replace(/\{\{user\}\}/gi,()=>original.persona?.name?.trim()||'you');if(!prose.trim())throw Error('The model returned no prose; original draft preserved.');if(operation==='say'&&!prose.includes(String(data.instruction).trim()))prose=(original.persona?.name?.trim()||'You')+': «'+String(data.instruction).trim()+'»\n\n'+prose;
+   try{await ensureText(controller.signal);const event=writerEvent(operation,data.instruction,original.persona?.name);const tail=event?(base&& !/\s$/.test(base)?'\n\n':'')+event+'\n\n':'';const result=await pipeline.generate({prompt:'',writerSettings:original.settings,hero_writer:{...original,text:base+tail,operation,start:(base+tail).length,end:(base+tail).length,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});let prose=String(result.choices?.[0]?.text||'').replace(/\{\{user\}\}/gi,()=>original.persona?.name?.trim()||'you');if(!prose.trim())throw Error('The model returned no prose; original draft preserved.');if(event)prose=tail+prose;
    const before=base.slice(0,start),after=base.slice(end);if(operation!=='rewrite'&&before&&!/\s$/.test(before)&&! /^[\s.,;:!?…)}\]]/.test(prose))prose=' '+prose;if(after&&prose&&/[\p{L}\p{N}]$/u.test(prose)&&/^[\p{L}\p{N}]/u.test(after))prose+=' ';
    const saved=store.save(original.id,{text:before+prose+after,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
    return {story:saved,replacement:{start,text:prose},usage:result.usage,context:result.writerContext};
@@ -38,11 +57,12 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const append=['continue','say','do'].includes(operation),start=append?s.text.length:data.start,end=append?s.text.length:data.end;
    if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<start||end>s.text.length||operation==='rewrite'&&start===end)throw Error('Select a valid manuscript passage.');
    if(typeof (data.instruction||'')!=='string'||(data.instruction||'').length>2000)throw Error('Invalid rewrite instruction.');
-   if(['say','do'].includes(operation)&&!data.instruction?.trim())throw Error('Enter the dialogue or action first.');
+   if(['say','do'].includes(operation))writerEvent(operation,data.instruction,s.persona?.name);
    const controller=new AbortController();active=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
    try{await ensureText(controller.signal);if(controller.signal.aborted)throw Error('Writer generation cancelled.');
-    const r=await pipeline.generate({prompt:'',writerSettings:s.settings,hero_writer:{...s,operation,start,end,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});
-    let prose=r.choices[0].text.replace(/\{\{user\}\}/gi,()=>s.persona?.name?.trim()||'you');if(operation==='say'&&!prose.includes(data.instruction.trim()))prose=(s.persona?.name?.trim()||'You')+': «'+data.instruction.trim()+'»\n\n'+prose;
+    const event=writerEvent(operation,data.instruction,s.persona?.name),tail=event?(s.text&&!/\s$/.test(s.text)?'\n\n':'')+event+'\n\n':'';
+    const r=await pipeline.generate({prompt:'',writerSettings:s.settings,hero_writer:{...s,text:s.text+tail,operation,start:(s.text+tail).length,end:(s.text+tail).length,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});
+    let prose=r.choices[0].text.replace(/\{\{user\}\}/gi,()=>s.persona?.name?.trim()||'you');if(event)prose=tail+prose;
     const candidate={id:crypto.randomUUID(),storyId:s.id,version:s.version,operation,start,end,text:prose,usage:r.usage,context:r.writerContext};candidates.set(candidate.id,candidate);while(candidates.size>50)candidates.delete(candidates.keys().next().value);return candidate;
    }finally{active=null;signal?.removeEventListener('abort',abort)}
   }
@@ -50,4 +70,4 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
  }
  return {action,store};
 }
-module.exports={createWriterAPI};
+module.exports={createWriterAPI,writerEvent};

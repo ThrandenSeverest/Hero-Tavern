@@ -367,8 +367,19 @@ async function selectStudioModel(choice,{save=true}={}){
  const engine=choice==='koboldcpp'?'koboldcpp':'comfyui';
  el('hero-pack-select').value=pack;el('hero-engine').value=engine;
  const item=(heroHubDetails?.engine?.packs||heroHubDetails?.hub?.packs||[]).find(x=>x.id===pack);
+ const isQwen=choice.startsWith('qwen21-');
+ if(isQwen){
+  // Qwen-Image 2.1 uses a distilled Euler/simple path. Generic SDXL defaults
+  // (CFG 7, DPM++ Karras) previously produced unusable/repeated output.
+  el('image-steps').value=25;
+  el('image-cfg').value=1;
+  el('image-sampler').value='Euler';
+  el('image-scheduler').value='simple';
+  if(!el('image-seed').value)el('image-seed').value='-1';
+ }
+
  if(item&&choice!=='koboldcpp'&&choice!=='custom'){
-  el('image-steps').value=item.steps;el('image-cfg').value=item.cfg;
+  if(!isQwen){if(Number.isFinite(item.steps))el('image-steps').value=item.steps;if(Number.isFinite(item.cfg))el('image-cfg').value=item.cfg;}
   if(choice!=='sdxl'){el('studio-preset').value='raw';el('hero-comfy-batch').value='1';}
  }
  updateStudioModelStatus();
@@ -615,6 +626,7 @@ async function heroHubRefresh(){
    const initial=cfg.selected&&cfg.selected!=='sdxl'?cfg.selected:(studio.settings.engine==='koboldcpp'?'koboldcpp':studio.settings.modelPack||'sdxl');
    el('hero-pack-select').value=initial==='koboldcpp'?'sdxl':initial;
    el('image-create-model').value=initial;
+   if(initial.startsWith('qwen21-')){el('image-steps').value=25;el('image-cfg').value=1;el('image-sampler').value='Euler';el('image-scheduler').value='simple';}
    el('hero-pack-root').value=cfg.modelRoot||engine.runtime?.detected?.models||'';
    el('hero-runtime-mode').value=engine.runtime?.mode||'external';
    el('hero-runtime-folder').value=engine.runtime?.folder||'';

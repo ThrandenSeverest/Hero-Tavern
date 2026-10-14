@@ -106,7 +106,7 @@ const initHeroTavern = async () => {
        for(const segment of speech.segments.slice(0,25)){
         if(!document.contains(element))break;
         const voice=segment.kind==='narration'?state.settings.narratorSpeaker:state.settings.speaker;
-        const result=await bridgeRequest('/tts/speak',{text:segment.text,speaker:voice});
+        const isNarration=segment.kind==='narration';const ref=isNarration?state.settings.narratorReference:state.settings.dialogueReference;const transcript=isNarration?state.settings.narratorReferenceText:state.settings.referenceText;const result=await bridgeRequest('/tts/speak',{text:segment.text,speaker:voice,reference:ref,referenceText:transcript,style:state.settings.style});
         const audio=new Audio(bridgeOrigin+result.url);heroAudio=audio;
         await audio.play();
         await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});

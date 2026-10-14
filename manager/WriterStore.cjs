@@ -1,14 +1,14 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const copy=x=>JSON.parse(JSON.stringify(x));
-const DEFAULTS={maxReplyTokens:384,temperature:0.85,top_p:0.95,top_k:40,min_p:0.05,repetition_penalty:1.08};
+const DEFAULTS={maxReplyTokens:768,writerTwoPass:true,temperature:0.85,top_p:0.95,top_k:40,min_p:0.05,repetition_penalty:1.08};
 function validate(input){
  const s=copy(input);for(const k of ['prompt','memory','note','text'])if(s[k]===undefined)s[k]='';if(s.title===undefined)s.title='Untitled story';if(s.lore===undefined)s.lore=[];
  for(const [k,max] of [['title',200],['prompt',200000],['text',1000000],['memory',200000],['note',50000]])if(typeof s[k]!=='string'||s[k].length>max)throw Error('Writer '+k+' must be text, at most '+max+' characters. Your draft is preserved.');
  s.persona={name:'',description:'',...s.persona};for(const [k,max] of [['name',200],['description',12000]])if(typeof s.persona[k]!=='string'||s.persona[k].length>max)throw Error('Invalid Writer persona '+k);
  if(!Array.isArray(s.lore)||s.lore.length>300)throw Error('Writer lorebook must have at most 300 entries.');
  for(const e of s.lore)if(!e||typeof e.title!=='string'||e.title.length>200||typeof e.text!=='string'||e.text.length>12000||!Array.isArray(e.keys)||e.keys.some(k=>typeof k!=='string'||!k.trim()||k.length>100)||e.keys.length>30)throw Error('Invalid lorebook entry.');
- s.settings={...DEFAULTS,...s.settings};for(const [k,min,max] of [['maxReplyTokens',32,2048],['temperature',0,2],['top_p',0.01,1],['top_k',0,200],['min_p',0,1],['repetition_penalty',1,2]])if(!Number.isFinite(s.settings[k])||s.settings[k]<min||s.settings[k]>max)throw Error('Invalid Writer setting '+k);
+ s.settings={...DEFAULTS,...s.settings};if(typeof s.settings.writerTwoPass!=='boolean')throw Error('Invalid Writer two-pass setting');for(const [k,min,max] of [['maxReplyTokens',32,2048],['temperature',0,2],['top_p',0.01,1],['top_k',0,200],['min_p',0,1],['repetition_penalty',1,2]])if(!Number.isFinite(s.settings[k])||s.settings[k]<min||s.settings[k]>max)throw Error('Invalid Writer setting '+k);
  return s;
 }
 function createWriterStore(root){

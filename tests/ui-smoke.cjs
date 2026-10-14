@@ -27,7 +27,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
  try{
   await waitFor(async()=>(await fetch('http://127.0.0.1:8000/')).ok);
   browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});
-  const errors=[];debugPage=page;debugErrors=errors;page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
+  const errors=[];debugPage=page;debugErrors=errors;page.on('pageerror',e=>errors.push(e.message));page.on('response',async r=>{if(r.status()>=400&&r.url().includes('127.0.0.1:8001'))console.log('Bridge request failed:',r.url(),r.status(),await r.text().catch(()=>''));});page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
   await page.goto('http://127.0.0.1:8000/');await page.locator('#hero-shell').waitFor({timeout:120000});
   await page.locator('#hero-welcome').waitFor({state:'visible'});
   await waitFor(async()=>await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')}));

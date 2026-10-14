@@ -90,3 +90,22 @@ test('Portable folder detection chooses only complete embedded Python and ComfyU
   assert.equal(runtime.status().running,false);
  }finally{fs.rmSync(home,{recursive:true,force:true})}
 });
+
+test('Managed ComfyUI mounts previously downloaded model weights instead of relocating them',()=>{
+ const home=root();
+ try{
+  const {heroExtraModelPaths}=require('../manager/ComfyRuntime.cjs');
+  const previous=path.join(home,'PreviouslyDownloaded','models'),managed=path.join(home,'ComfyUI-Portable','ComfyUI','models');
+  fs.mkdirSync(previous,{recursive:true});fs.mkdirSync(managed,{recursive:true});
+  fs.mkdirSync(path.join(home,'ImageModels'),{recursive:true});
+  fs.writeFileSync(path.join(home,'comfy-model-hub.json'),JSON.stringify({modelRoot:previous}));
+  const yaml=heroExtraModelPaths(home,{models:managed});
+  assert.ok(fs.existsSync(yaml));
+  const content=fs.readFileSync(yaml,'utf8');
+  assert.match(content,/hero_tavern_downloads:\n/);
+  assert.match(content,/diffusion_models: diffusion_models\n/);
+  assert.match(content,/hero_tavern_legacy:\n/);
+  assert.ok(!content.includes('\\\\n'),'The YAML must use real line separators, not escaped newlines');
+  assert.ok(fs.existsSync(previous),'Previous model directory must be preserved');
+ }finally{fs.rmSync(home,{recursive:true,force:true})}
+});

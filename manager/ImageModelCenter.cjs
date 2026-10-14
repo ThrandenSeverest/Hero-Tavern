@@ -38,7 +38,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  async function status(){
   // Fresh installs already know their managed Portable folder. Discover it before
   // inspecting files, otherwise all downloaded weights appear missing until manually configured.
-  if(!comfy.models.snapshot().settings.modelRoot&&runtime.installed()?.models){
+  if(runtime.status().mode==='managed'&&runtime.installed()?.models&&comfy.models.snapshot().settings.modelRoot!==runtime.installed().models){
    try{configureRoot({preferManaged:true})}catch{}
   }
   const [catalog]=await Promise.all([comfy.catalog()]);
@@ -95,14 +95,29 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Select FLUX, Z-Image or SDXL for a downloadable ComfyUI model.');
   if(confirm!==true)throw Error('Confirm downloading the model and all of its dependencies.');
   if(operation||comfy.models.snapshot().download)throw Error('A model download is already running.');
-  const folder=configureRoot();
+  const folder=configureRoot({preferManaged:runtime.status().mode==='managed'});
   operation={id};lastDownload=null;
   // Keep this background promise observed. HTTP responds immediately so UI can poll/cancel.
   Promise.resolve().then(()=>comfy.models.downloadPack({id,confirm:true}))
    .then(async x=>{
+    // Download success must not be mistaken for ComfyUI model readiness.
+    // Managed ComfyUI caches its model inventory until restarted.
+    if(runtime.status().mode==='managed'&&runtime.installed()?.models&&runtime.status().running){
+     if(typeof runtime.stop!=='function'||typeof runtime.start!=='function')throw Error('Restart managed ComfyUI to index downloaded weights.');
+     await runtime.stop();await runtime.start();
+     const deadline=Date.now()+120000;
+     while(!await comfy.available()){
+      if(Date.now()>deadline||runtime.status().error)throw Error(runtime.status().error||'Timed out restarting ComfyUI after model download.');
+      await new Promise(resolve=>setTimeout(resolve,1500));
+     }
+    }
+    if(typeof comfy.diagnosePack==='function'&&await comfy.available()){
+     const report=await comfy.diagnosePack(id);
+     if(!report.ok)throw Error('Downloaded weights not ready: '+[...(report.missingFiles||[]),...(report.missingNodes||[])].join(', ')+'. '+(report.advice||''));
+    }
      if(id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint)
       await studio.action('/studio/configure',{comfyCheckpoint:'sd_xl_base_1.0.safetensors'});
-     lastDownload={ok:true,packId:id,finishedAt:new Date().toISOString(),message:'Model files saved to '+x.modelRoot+'. If ComfyUI was already running, restart it to discover new files.'};
+     lastDownload={ok:true,packId:id,finishedAt:new Date().toISOString(),message:'Verified model files at '+x.modelRoot+'. Reloaded managed ComfyUI when running.'};
     })
    .catch(e=>{lastDownload={ok:false,packId:id,finishedAt:new Date().toISOString(),message:e.message}})
    .finally(()=>{operation=null});
@@ -159,7 +174,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
   const check=()=>{if(job.cancelled)throw Error('Setup cancelled. Downloaded files are preserved.');};
   Promise.resolve().then(async()=>{
    check();if(!runtime.installed()&&!await comfy.available()){job.phase='installing ComfyUI engine';await runtime.installPortable({confirm:true});}
-   check();job.phase='detecting model folder';configureRoot();await installQwenGGUFNode(job);
+   check();job.phase='detecting model folder';configureRoot({preferManaged:runtime.status().mode==='managed'});await installQwenGGUFNode(job);
    job.phase='downloading model and dependencies';await comfy.models.downloadPack({id,confirm:true});
    check();if(id==='sdxl'&&!studio.snapshot().settings.comfyCheckpoint)await studio.action('/studio/configure',{comfyCheckpoint:'sd_xl_base_1.0.safetensors'});
    if(runtime.installed()){
@@ -167,7 +182,7 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
     job.phase='waiting for engine';const deadline=Date.now()+120000;
     while(!await comfy.available()){check();if(Date.now()>deadline||runtime.status().error)throw Error(runtime.status().error||'Engine startup timed out. Check Logs/comfy-engine.log.');await new Promise(r=>setTimeout(r,1500));}
    }
-   check();job.phase='checking model readiness';const report=await comfy.diagnosePack(id);if(!report.ok)throw Error(report.advice||'Model dependencies are not ready.');
+   check();job.phase='checking model readiness';const report=await comfy.diagnosePack(id);if(!report.ok)throw Error('Model not ready: '+[...(report.missingFiles||[]),...(report.missingNodes||[])].join(', ')+'. '+(report.advice||''));
    await select({id,scope:'global'});lastSetup={ok:true,packId:id,message:'Engine and '+id+' are ready for Image Studio, Tavern and Adventure.'};
   }).catch(e=>{lastSetup={ok:false,packId:id,message:e.message}}).finally(()=>{setupJob=null});
   return {started:true,packId:id};

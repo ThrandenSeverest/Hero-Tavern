@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {createTTS,splitSpeech}=require('../manager/TTSService.cjs');
 test('narration and quoted speech remain separate',()=>{const out=splitSpeech('*She smiles.* "Hello there!" *She waves.*',{speaker:'Mira'});assert.deepEqual(out.map(x=>x.kind),['narration','dialogue','narration']);assert.equal(out[1].speaker,'Mira');});
 test('no visible model thinking reaches the synthesizer',()=>{const out=splitSpeech('<think>secret decisions</think> "Welcome"');assert.equal(JSON.stringify(out).includes('secret'),false);});
-test('local profiles validate voice settings and input paths',()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-tts-'));try{const svc=createTTS(root);assert.equal(svc.status().settings.engine,'flash');assert.throws(()=>svc.configure({engine:'external'}));assert.equal(svc.configure({engine:'qwen',variant:'custom-1.7'}).settings.engine,'qwen');assert.throws(()=>svc.removeVoice({name:'../outside.wav'}));assert.equal(svc.readAudio('/tts/audio/../../bad.wav'),null);svc.stop();}finally{fs.rmSync(root,{recursive:true,force:true})}});
+test('local profiles validate voice settings and input paths',()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-tts-'));try{const svc=createTTS(root);assert.equal(svc.status().settings.engine,'qwen');assert.throws(()=>svc.configure({engine:'external'}));assert.equal(svc.configure({engine:'qwen',variant:'custom-1.7'}).settings.engine,'qwen');assert.throws(()=>svc.removeVoice({name:'../outside.wav'}));assert.equal(svc.readAudio('/tts/audio/../../bad.wav'),null);svc.stop();}finally{fs.rmSync(root,{recursive:true,force:true})}});
 
 const vm=require('node:vm'),{EventEmitter}=require('node:events');
 function fakeWindowsTTS(root,brokenAt=''){
@@ -105,7 +105,7 @@ test('real service routes profiles to exact model paths, combines response audio
   assert.equal(h.tasks.length,1);assert.equal(one.segments,1);assert.equal(h.tasks[0].variant,'custom-1.7');assert.equal(h.tasks[0].modelPath,path.join(root,'TTSModels','qwen','custom-1.7'));
   const mixed=await s.speakMessage({text:'*The door opens.* "Come inside."',assignment:{dialogueProfileId:a.id,narratorProfileId:b.id,narratorMode:'separate'}});
   assert.equal(mixed.segments,2);assert.equal(fs.readFileSync(s.readAudio(mixed.url)).readUInt32LE(40),16);
-  assert.equal(s.status().settings.engine,'flash');
+  assert.equal(s.status().settings.engine,'qwen');
   const cached=await s.speakMessage({text:'*Waves.* "Welcome."',assignment:{dialogueProfileId:a.id,narratorMode:'same'}});assert.equal(cached.cached,true);
   assert.equal(createTTS(root).status().profiles.length,2);
   s.deleteProfile({id:a.id});await assert.rejects(s.speakMessage({text:'Test',assignment:{dialogueProfileId:a.id}}),/TTS_CHARACTER_ROUTE_FAILED/);

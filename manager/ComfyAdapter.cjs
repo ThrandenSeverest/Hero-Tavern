@@ -234,7 +234,7 @@ function createComfyAdapter(root,{port=8188,fetchFn=globalThis.fetch,WebSocketCl
     const history=await (await request('/history/'+encodeURIComponent(job.id),{signal:job.controller.signal},12000)).json();
     const result=history[job.id];
     if(result){
-     if(result.status?.status_str==='error'||result.status?.status_str==='failed')throw Error('ComfyUI workflow failed: '+JSON.stringify(result.status?.messages||[]).slice(0,1400));
+     if(result.status?.status_str==='error'||result.status?.status_str==='failed'){const messages=result.status?.messages||[];const error=messages.find(x=>x[0]==='execution_error')?.[1]||{};if(error.node_type==='UnetLoaderGGUF'&&/unknown model architecture|model is not currently supported/i.test(error.exception_message||''))throw Error('The installed ComfyUI-GGUF loader cannot read this Qwen-Image 2.1 model architecture. Open Image models & setup → Repair Qwen 2.1 GGUF loader. Hero Tavern will install the compatible leejet version and preserve model weights. Details: '+String(error.exception_message||'').slice(0,350));throw Error('ComfyUI workflow failed at '+(error.node_type||'node')+(error.node_id?' #'+error.node_id:'')+': '+String(error.exception_message||JSON.stringify(messages)).slice(0,850));}
      outputs=result.outputs?.[spec.saveId]?.images;
      if(Array.isArray(outputs)&&outputs.length)break;
      if(result.status?.completed)throw Error('ComfyUI completed without returning an image.');

@@ -10,7 +10,54 @@ function createStoryStore(root,{tavernPath=path.join(root,'SillyTavern')}={}){
  const read=(file,fallback)=>fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')):S.clone(fallback);
  // Recover interrupted multi-file commits before accepting operations.
  for(const name of fs.readdirSync(transactions)){const folder=path.join(transactions,name),journal=path.join(folder,'journal.json');if(!fs.existsSync(journal))continue;const j=read(journal,{});if(j.status==='prepared'){for(const entry of j.entries||[]){if(entry.existed)fs.copyFileSync(path.join(folder,entry.backup),entry.file);else if(fs.existsSync(entry.file))fs.unlinkSync(entry.file);}j.status='recovered';fs.writeFileSync(journal,json(j));}}
- function commit(changes){const folder=path.join(transactions,uuid());fs.mkdirSync(folder);const entries=changes.map((change,i)=>{contained(change.file,change.file.startsWith(dir+path.sep)?dir:change.file.startsWith(memories+path.sep)?memories:data);fs.mkdirSync(path.dirname(change.file),{recursive:true});const existed=fs.existsSync(change.file),backup=i+'.before',stage=path.join(folder,i+'.after');if(existed)fs.copyFileSync(change.file,path.join(folder,backup));fs.writeFileSync(stage,change.content);return {...change,existed,backup,stage};});const journal=path.join(folder,'journal.json');fs.writeFileSync(journal,json({status:'prepared',entries:entries.map(({file,existed,backup})=>({file,existed,backup}))}));try{for(const e of entries){const temp=e.file+'.hero-'+uuid();fs.copyFileSync(e.stage,temp);fs.renameSync(temp,e.file);}fs.writeFileSync(journal,json({status:'committed',entries:entries.map(({file,existed,backup})=>({file,existed,backup}))}));try{fs.rmSync(folder,{recursive:true,force:true})}catch(e){/* DiskCare can retry committed folders; original data is already durable. */}}catch(error){for(const e of entries){if(e.existed)fs.copyFileSync(path.join(folder,e.backup),e.file);else if(fs.existsSync(e.file))fs.unlinkSync(e.file);}fs.writeFileSync(journal,json({status:'rolled-back',entries:[]}));throw error;}}
+ function commit(changes){
+  // Native chats are primarily owned by SillyTavern. Avoid replacing their file
+  // when synchronized content is identical, especially during active chat writes.
+  const work=changes.filter(c=>!c.file.endsWith('.jsonl')||!fs.existsSync(c.file)||!fs.readFileSync(c.file).equals(Buffer.from(c.content)));
+  if(!work.length)return;
+  const folder=path.join(transactions,uuid());fs.mkdirSync(folder);
+  const entries=work.map((change,i)=>{
+   contained(change.file,change.file.startsWith(dir+path.sep)?dir:change.file.startsWith(memories+path.sep)?memories:data);
+   fs.mkdirSync(path.dirname(change.file),{recursive:true});
+   const existed=fs.existsSync(change.file),backup=i+'.before',stage=path.join(folder,i+'.after');
+   if(existed)fs.copyFileSync(change.file,path.join(folder,backup));
+   fs.writeFileSync(stage,change.content);
+   return {...change,existed,backup,stage};
+  });
+  const journal=path.join(folder,'journal.json'),meta=entries.map(({file,existed,backup})=>({file,existed,backup}));
+  fs.writeFileSync(journal,json({status:'prepared',entries:meta}));
+  const applied=[];
+  try{
+   for(const e of entries){
+    const isNative=e.file.endsWith('.jsonl');
+    const before=e.existed?fs.readFileSync(path.join(folder,e.backup)):null;
+    // Do not clobber a new SillyTavern message committed since the transaction began.
+    if(isNative&&e.existed&&!fs.readFileSync(e.file).equals(before))throw Error('Native chat changed during state synchronization; retry after the current SillyTavern save.');
+    const temp=e.file+'.hero-'+uuid();
+    fs.copyFileSync(e.stage,temp);
+    try{fs.renameSync(temp,e.file);}
+    catch(error){
+     // Windows sometimes permits writing through an existing chat handle but
+     // blocks renaming/replacing that handle. Keep our staged backup for recovery.
+     if(!isNative||!e.existed||!['EPERM','EACCES','EBUSY'].includes(error.code))throw error;
+     if(!fs.readFileSync(e.file).equals(before))throw Error('Native chat changed during locked-file replacement; retry without overwriting the new chat.');
+     fs.copyFileSync(temp,e.file);fs.rmSync(temp,{force:true});
+    }
+    applied.push(e);
+   }
+   fs.writeFileSync(journal,json({status:'committed',entries:meta}));
+   try{fs.rmSync(folder,{recursive:true,force:true});}catch{/* DiskCare can remove committed staging folders later. */}
+  }catch(error){
+   // Restore only files we actually changed, never a concurrently modified chat.
+   for(const e of applied.reverse())try{
+    if(!fs.existsSync(e.file)||!fs.readFileSync(e.file).equals(Buffer.from(e.content)))continue;
+    if(e.existed)fs.copyFileSync(path.join(folder,e.backup),e.file);
+    else fs.unlinkSync(e.file);
+   }catch{}
+   fs.writeFileSync(journal,json({status:'rolled-back',entries:[]}));
+   throw error;
+  }
+ }
  function index(){return read(indexFile,{schemaVersion:1,sessions:{},characters:{},profiles:{}})}
  function native(loc){const file=fileFor(loc);if(!fs.existsSync(file))throw Error('Save the native chat before opening Story controls.');const rows=fs.readFileSync(file,'utf8').trim().split(/\r?\n/).filter(Boolean).map(x=>JSON.parse(x));if(!rows.length||!rows[0].chat_metadata)throw Error('Unsupported native chat header. Existing file was left untouched.');return {file,header:rows[0],messages:rows.slice(1)}}
  function saveSession(session,extra=[]){session.updatedAt=Date.now();commit([{file:sessionFile(session.id),content:json(session)},...extra]);return session}

@@ -46,12 +46,15 @@ function modelCard(model){
  }
  const operations=element('div',null,'actions');
  if((['flux-klein','z-turbo','sdxl'].includes(model.id)||model.id.startsWith('qwen21-'))){
-  operations.append(action('Check workflow / dependencies',async()=>{
-   const report=await req('/image/model-center/diagnose',{id:model.id});
-   const message=report.ok?'✓ '+report.advice:
-      '⚠ '+report.advice+(report.missingNodes?.length?'\nMissing nodes: '+report.missingNodes.join(', '):'')+
-      (report.missingFiles?.length?'\nMissing models: '+report.missingFiles.join(', '):'');
-   alertError(Error(message));
+  operations.append(action('Start engine & check workflow',async()=>{
+   const output=errorEl();if(output)output.textContent='Starting installed ComfyUI (if offline) and checking '+model.label+'…';
+   const report=await req('/image/model-center/diagnose',{id:model.id,startManaged:true});
+   await refresh(true);
+   const message=(report.ok?'✓ ':'⚠ ')+report.advice+
+      (report.connected&&report.missingNodes?.length?'\nMissing nodes: '+report.missingNodes.join(', '):'')+
+      (report.connected&&report.missingFiles?.length?'\nMissing model files: '+report.missingFiles.join(', '):'')+
+      (report.logTail?'\nStartup log (last 20 lines):\n'+report.logTail:'');
+   if(output){output.style.whiteSpace='pre-wrap';output.style.color=report.ok?'#9dddb4':'#ffb4ad';output.textContent=message;}
   }));
  }
  if((['sdxl','flux-klein','z-turbo'].includes(model.id)||model.id.startsWith('qwen21-'))&&!model.installed&&!model.downloaded){
@@ -83,7 +86,7 @@ function render(state){
  last=state;
  const display=$('image-center-connection');display.replaceChildren();
  const connect=state.comfy.connected;
- display.append(element('strong',connect?'● Image engine ready':state.comfy.detected?'○ Image engine idle · starts automatically':'○ Download a model to prepare image generation'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'Choose Download on a model card. Hero Tavern prepares the required engine and model components automatically.','small'));
+ display.append(element('strong',connect?'● Image engine ready':state.comfy.detected?'○ ComfyUI Portable detected · currently offline':'○ ComfyUI not connected · install Portable or connect an external service'),element('p',state.comfy.modelsDirectory?'Model folder: '+state.comfy.modelsDirectory:'Choose Download on a model card. Hero Tavern prepares the required engine and model components automatically.','small'));
  if(state.comfy.error&&(state.comfy.running||state.comfy.mode==='external'||!/fetch failed|ECONNREFUSED|not connected/i.test(state.comfy.error)))display.append(element('p',state.comfy.error,'small'));
  const jobs=$('image-center-generation');jobs.replaceChildren();
  const run=state.activeGeneration;
@@ -108,8 +111,8 @@ function render(state){
   const value=scope==='global'?state.choices.global:(state.choices.overrides[scope]||'inherit');selector.value=value;
  }
  const help=$('image-center-restart-note');
- help.textContent=connect?'ComfyUI is online. Newly downloaded model files may require restarting the engine.':state.comfy.detected?'Managed Portable detected; click Start ComfyUI below.':'Use Install ComfyUI below or connect your existing installation.';
- $('image-center-start').disabled=connect||!state.comfy.detected;
+ help.textContent=connect?'ComfyUI is online. Newly downloaded model files may require restarting the engine.':state.comfy.detected?'Managed Portable detected but offline. Click Start ComfyUI, then check workflow nodes.':'No managed Portable installation detected. Install ComfyUI Portable or connect an existing instance; downloaded model weights alone cannot generate.';
+ $('image-center-start').disabled=connect||!state.comfy.detected||state.comfy.mode!=='managed';
  $('image-center-install').disabled=!!state.comfy.detected||!!state.install;
  $('image-center-restart').disabled=!state.comfy.detected||state.comfy.mode!=='managed'||!connect;
  $('image-center-model-path').placeholder=state.comfy.modelsDirectory||'C:\\AI\\ComfyUI\\models';
@@ -128,7 +131,7 @@ function makeUI(){
  original.hidden=true;
  const main=element('div',null,'card hero-unified-root');
  main.id='image-model-center';
- main.append(element('h2','Image models · managed engines'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. Downloading a model automatically installs its required engine and dependencies. No separate engine installation or manual launch is needed.','small'));
+ main.append(element('h2','Image models · managed engines'),element('p','One model system for Create, Tavern and Adventure. Download, track dependencies, and select a model here. ComfyUI Portable is a separate local runtime; downloading model weights does not install it. Use Install ComfyUI or the per-model repair action when it is missing.','small'));
  const status=element('div',null,'hero-unified-connection');status.id='image-center-connection';main.append(status);
  const choices=element('div',null,'controls');
  for(const [id,label] of [['global','Default model (Image Studio / native image API)'],['chat','Tavern chat image model'],['adventure','Adventure image model']]){
@@ -145,7 +148,7 @@ function makeUI(){
  }
  main.append(choices);
  const actions=element('div',null,'actions');
- const start=action('Start ComfyUI',async()=>{await req('/comfy/runtime/start',{});await refresh(true)});start.id='image-center-start';
+ const start=action('Start ComfyUI & verify',async()=>{const report=await req('/image/model-center/diagnose',{id:last?.choices.global&&last.choices.global!=='koboldcpp'?last.choices.global:'sdxl',startManaged:true});await refresh(true);if(!report.connected)throw Error(report.advice+(report.logTail?'\n'+report.logTail:''));});start.id='image-center-start';
  const install=action('Install ComfyUI Portable',async()=>{
   const oldInstall=$('hero-runtime-install');
   if(!oldInstall)throw Error('ComfyUI installation control is missing.');
@@ -157,15 +160,15 @@ function makeUI(){
   const current=await req('/studio/get');if(current.busy)throw Error('Finish generating before restarting.');
   await req('/comfy/runtime/stop',{});await req('/comfy/runtime/start',{});await refresh(true);
  });restart.id='image-center-restart';
- actions.append(action('Refresh model status',()=>refresh(true)));
- const engineActions=element('div',null,'actions');engineActions.append(install,start,restart);
+ actions.append(install,start,restart,action('Refresh model status',()=>refresh(true)));
+ const engineActions=element('div',null,'actions');
  const note=element('p','', 'small');note.id='image-center-restart-note';
  main.append(actions);
  const generation=element('div',null,'hero-unified-progress');generation.id='image-center-generation';main.append(generation);
  const models=element('div',null,'hero-unified-models');models.id='image-center-cards';
  main.append(models);
  const download=element('div',null,'hero-unified-progress');download.id='image-center-download';main.append(download);
- const advanced=element('details');const summary=element('summary','Advanced · external engines and troubleshooting');advanced.append(summary,engineActions,note);
+ const advanced=element('details');const summary=element('summary','Advanced · external engines and troubleshooting');advanced.append(summary,note);
  const location=element('div',null,'controls'),label=element('label','Model folder (only for an external ComfyUI installation)'),
  input=element('input');input.id='image-center-model-path';input.placeholder='C:\\AI\\ComfyUI\\models';
  label.append(input);location.append(label);

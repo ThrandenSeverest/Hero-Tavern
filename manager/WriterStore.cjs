@@ -22,7 +22,8 @@ function createWriterStore(root){
   const history=[...old.history,{id:crypto.randomUUID(),at:Date.now(),label:String(input.label||'Edit / autosave').slice(0,150),...Object.fromEntries(Object.keys(fields).map(k=>[k,old[k]]))}].slice(-100);
   return write({...old,...next,history,version:old.version+1,updatedAt:Date.now()});}
  function restore(id,revision,expected){const s=read(id),r=s.history.find(r=>r.id===revision);if(!r)throw Error('Revision not found.');return save(id,{...r,label:'Restore revision; later draft preserved'},expected)}
+ function remove(id){const filePath=file(id);if(!fs.existsSync(filePath))throw Error('Story not found.');const backup=path.join(dir,'..','Trash');fs.mkdirSync(backup,{recursive:true});const name=id+'-'+Date.now()+'.json';fs.renameSync(filePath,path.join(backup,name));return {deleted:true,backup:name};}
  function fork(id){const s=read(id);const result=create({...s,title:s.title+' · branch'});return write({...result,parentId:s.id,history:copy(s.history)})}
- return {create,read,save,restore,fork,list:()=>fs.readdirSync(dir).filter(n=>/^[a-f0-9-]{36}\.json$/.test(n)).map(n=>{const s=read(n.slice(0,-5));return {id:s.id,title:s.title,updatedAt:s.updatedAt,words:s.text.trim()?s.text.trim().split(/\s+/).length:0,parentId:s.parentId}}).sort((a,b)=>b.updatedAt-a.updatedAt)};
+ return {create,read,save,restore,fork,remove,list:()=>fs.readdirSync(dir).filter(n=>/^[a-f0-9-]{36}\.json$/.test(n)).map(n=>{const s=read(n.slice(0,-5));return {id:s.id,title:s.title,updatedAt:s.updatedAt,words:s.text.trim()?s.text.trim().split(/\s+/).length:0,parentId:s.parentId}}).sort((a,b)=>b.updatedAt-a.updatedAt)};
 }
 module.exports={createWriterStore,validate,DEFAULTS};

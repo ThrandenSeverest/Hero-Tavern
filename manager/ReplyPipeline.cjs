@@ -132,7 +132,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
                 stage('writer-planning');
-                const planningContext='<|im_start|>user\\n[Novel background]\\n'+String(body.hero_writer?.prompt||'').slice(0,2000)+'\\n[Latest manuscript]\\n'+String(body.hero_writer?.text||'').slice(-3500)+'\\nList three to six next-scene actions, never write the final passage here.<|im_end|>\\n<|im_start|>assistant\\n';
+                const planningContext='<|im_start|>user\n[Novel background]\n'+String(body.hero_writer?.prompt||'').slice(0,2000)+'\\n[Latest manuscript]\n'+String(body.hero_writer?.text||'').slice(-3500)+'\nList three to six next-scene actions, never write the final passage here.<|im_end|>\n<|im_start|>assistant\n';
                 const planningPrompt=replyPrompt(planningContext,'Privately outline the next fiction passage in 3-6 compact beats. Preserve established characters, viewpoint, continuity and scene pacing. End each beat at a natural action or dialogue boundary. Do not write the passage yet. /no_think');
                 const planned=filterReply(await sendChecked({prompt:planningPrompt,max_tokens:Math.min(256,Math.max(96,Math.floor(settings.maxReplyTokens/3))),temperature:0.4,stream:false}),{removeModelTokens:true,stopAtSpeaker:false});
                 if(planned)plan=planned.slice(0,1800);
@@ -143,9 +143,9 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             if(mode==='writer'){
                 // Actual continuation of the manuscript: append controls as a system
                 // message BEFORE the prose and never append another instruction AFTER it.
-                const marker='<|im_start|>assistant\\n',idx=body.prompt.lastIndexOf(marker);
+                const marker='<|im_start|>assistant\n',idx=body.prompt.lastIndexOf(marker);
                 if(idx<0)throw Error('Writer prompt has no manuscript continuation boundary.');
-                prompt=body.prompt.slice(0,idx)+'<|im_start|>system\\n'+extra+'<|im_end|>\\n'+body.prompt.slice(idx);
+                prompt=body.prompt.slice(0,idx)+'<|im_start|>system\n'+extra+'<|im_end|>\n'+body.prompt.slice(idx);
             }else prompt=replyPrompt(body.prompt,extra);
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
@@ -164,7 +164,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 if(/Qwen3/i.test(profile.Family||'')){
                     recoveryBodyPrompt=recoveryBodyPrompt.replace(/(<\|im_end\|>\s*<\|im_start\|>assistant\s*)$/i,'\n/no_think\n$1');
                 }
-                const retryPrompt=replyPrompt(recoveryBodyPrompt,extra+'\n[Output recovery: The previous attempt produced no visible answer. Disable thinking. Answer the latest task DIRECTLY. Never emit <think> tags, scratchpad, or analysis. For image-prompt tasks return only the visual prompt; for JSON tasks return only one complete JSON object. /no_think]');
+                const retryPrompt=mode==='writer'?prompt:replyPrompt(recoveryBodyPrompt,extra+'\n[Output recovery: The previous attempt produced no visible answer. Disable thinking. Answer the latest task DIRECTLY. Never emit <think> tags, scratchpad, or analysis. For image-prompt tasks return only the visual prompt; for JSON tasks return only one complete JSON object. /no_think]');
                 const capacity=Math.max(128,contextSize-await countTokens(retryPrompt)-64);
                 const retryTokens=Math.min(capacity,Math.max(replyTokens,['adventure-json','adventure-dm'].includes(mode)?2048:1024));
                 const retryRaw=await sendChecked({...request,prompt:retryPrompt,stream:false,max_tokens:retryTokens,temperature:0.45,top_p:0.9,min_p:0,top_k:20});
@@ -180,7 +180,9 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             if(writerMeta){
                 stage('repairing-writer-prose');
                 const rebuilt=await buildWriterContext({...body.hero_writer,repair:true},budget,countTokens);
-                const corrected=replyPrompt(rebuilt.prompt,extra+'\nThe output MUST be a passage from the novel, not an assistant reply, character description, outline or Markdown document.');
+                const boundary='<|im_start|>assistant\n',place=rebuilt.prompt.lastIndexOf(boundary);
+                if(place<0)throw Error('Writer correction lost its manuscript continuation.');
+                const corrected=rebuilt.prompt.slice(0,place)+'<|im_start|>system\n'+extra+'\nOnly continue the unfinished novel passage from the existing prose, never discuss the task.<|im_end|>\n'+rebuilt.prompt.slice(place);
                 text=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.min(settings.temperature,0.75)}),filters);
                 lastRun.writerRepair={trigger:writerMeta,success:!!text&&!isWriterNonProse(text)};
                 if(!text||isWriterNonProse(text))throw Error('The selected text model could not produce a prose continuation. The original manuscript remains saved. Open Model Testing → Text → Text to diagnose the model and check its prompt template.');

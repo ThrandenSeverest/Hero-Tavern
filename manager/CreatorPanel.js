@@ -19,7 +19,28 @@
  function renderCreatorTrackers(){const box=$('creator-trackers-list');if(!box)return;box.replaceChildren();for(const d of candidateTrackers()){
   const row=document.createElement('div');row.className='card';const label=document.createElement('strong');label.textContent=d.label||d.id;
   const info=document.createElement('p');info.className='small';info.textContent=(d.template||'Custom tracker')+' · '+d.type;
-  const remove=document.createElement('button');remove.type='button';remove.textContent='Remove from character';remove.onclick=()=>{removedTrackers.add((d.owner||'character:self')+':'+d.id);renderCreatorTrackers();$('character-result').textContent='Tracker removed from this character draft. Save the character to keep the change.'};
+  const remove=document.createElement('button');remove.type='button';remove.textContent='Remove from character';remove.onclick=async()=>{
+   const key=(d.owner||'character:self')+':'+d.id;
+   removedTrackers.add(key);renderCreatorTrackers();
+   if(!loaded){$('character-result').textContent='Tracker removed from draft. Save the new character to keep the change.';return;}
+   remove.disabled=true;
+   try{
+    const previous=loaded.extensions?.hero_tavern||{};
+    const next={...previous,trackers:candidateTrackers()};
+    // Write the reusable character profile immediately. Never require a second
+    // Save click and never accidentally save other unsaved character-field edits.
+    await window.HeroStoryPanel.send('profile',{profile:next});
+    loaded.extensions={...(loaded.extensions||{}),hero_tavern:next};
+    if(d.template&&!next.trackers.some(t=>t.template===d.template)){
+     const preset=[...document.querySelectorAll('[data-creator-preset]')].find(e=>e.dataset.creatorPreset===d.template);
+     if(preset)preset.checked=false;
+    }
+    removedTrackers.clear();expandedTemplates.clear();renderCreatorTrackers();
+    $('character-result').textContent='Tracker deleted from character template and saved. Open a new chat to verify it stays removed.';
+   }catch(e){
+    removedTrackers.delete(key);renderCreatorTrackers();showError(e);
+   }
+  };
   row.append(label,info,remove);box.append(row);
  }if(!box.children.length)box.textContent='No starting trackers. Select a preset above to add one.'}
  function profile(){const current=window.HeroStoryPanel.view;return {schemaVersion:1,lorebookName:$('lore-native-name').value.trim()||undefined,trackers:candidateTrackers(),lore:rewriteSelf(current?.session.lore||loaded?.extensions?.hero_tavern?.lore||[]),episodes:rewriteSelf(episodes)}}

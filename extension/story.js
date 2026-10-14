@@ -109,6 +109,18 @@ export async function initStory({getContext,frame,show}){
   const head=document.createElement('div');head.className='hero-track-head';
   const title=document.createElement('strong');title.textContent='✦ Live story state';head.append(title);
   const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
+  const analysis=view.session.lastAnalysis;
+  if(analysis){const health=document.createElement('span');health.className='hero-track-meta';
+   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns';
+   health.title='Check the Prompt Inspector for the full tracker update history';head.append(health);}
+  const pending=view.session.events.filter(e=>e.status==='pending');
+  if(pending.length){const review=document.createElement('button');review.textContent='Review '+pending.length+' state changes';
+   review.onclick=()=>{show('trackers');sync().catch(notify)};head.append(review);}
+  const refresh=document.createElement('button');refresh.textContent='Update now';
+  refresh.onclick=async()=>{refresh.disabled=true;refresh.textContent='Extracting…';
+   try{const v=await sync();view=await rpc('/story/analyze',{id:v.session.id});publish()}
+   catch(error){notify(error);refresh.disabled=false;refresh.textContent='Retry update'}};
+  head.append(refresh);
   const edit=document.createElement('button');edit.textContent='Manage trackers';edit.onclick=()=>{show('trackers');sync().catch(notify)};head.append(edit);
   const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.setAttribute('aria-expanded',String(trackerStrip.dataset.collapsed!=='true'));collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);
   trackerStrip.append(head);
@@ -125,13 +137,71 @@ export async function initStory({getContext,frame,show}){
    if(d.type==='injuries')for(const injury of value){const p=document.createElement('p');p.textContent=injury.location+' — '+injury.severity+', '+injury.status+'; pain '+injury.pain+'/10. '+['cause','symptoms','limitations','treatment','scar'].map(k=>k+': '+injury[k]).join('; ');details.append(p);}
    for(const detail of [d.description,d.rules?.[String(value)],d.instructions,d.changeRules].filter(Boolean)){const p=document.createElement('p');p.textContent=detail;details.append(p);}
    const actions=document.createElement('div');actions.className='hero-track-actions';const change=document.createElement('button');change.textContent='Edit value';change.onclick=async()=>{
-    try{const raw=prompt('New '+d.label+' (JSON for lists, relationships and quests)',JSON.stringify(value));if(raw===null)return;let next;
+    try{const raw=prompt('New '+d.label+(d.type==='record'||d.type==='injuries'||d.type==='quest'||d.type==='relationship'?' (advanced full state)':''),JSON.stringify(value));if(raw===null)return;let next;
      if(d.type==='number')next=Number(raw);else if(d.type==='boolean')next=raw==='true';else if(['list','relationship','timer','quest','injuries','record'].includes(d.type))next=JSON.parse(raw);else next=raw.replace(/^"|"$/g,'');
      if(d.type==='enum'&&!d.allowedValues.includes(next))throw Error('Allowed: '+d.allowedValues.join(', '));
      const current=await sync(),source=current.messages.at(-1);if(!source)throw Error('Send a message before editing a live state value.');
      const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'Manual state update from chat'}]});view=result;publish();
     }catch(e){notify(e)}
-   };actions.append(change);const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
+   };actions.append(change);
+   // Quick local corrections use typed controls; ordinary edits need no JSON.
+   const pushManual=async next=>{const current=await sync(),source=current.messages.at(-1);
+    if(!source)throw Error('Start a chat first.');
+    const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'User corrected tracker value'}]});view=result;publish();};
+   if(d.type==='number'){
+    for(const [symbol,step] of [['−',-1],['+',1]]){
+     const button=document.createElement('button');button.textContent=symbol;button.title='Change '+d.label+' by '+step;
+     button.onclick=()=>pushManual(Math.max(d.min,Math.min(d.max,value+step))).catch(notify);actions.append(button);
+    }
+   }
+   if(d.type==='boolean'){
+    const button=document.createElement('button');button.textContent='Toggle';button.onclick=()=>pushManual(!value).catch(notify);actions.append(button);
+   }
+   if(d.type==='list'){
+    const add=document.createElement('button');add.textContent='+ Item';add.onclick=async()=>{
+     const item=prompt('New entry for '+d.label);if(item?.trim())await pushManual([...new Set([...value,item.trim()])]);
+    };actions.append(add);
+    const drop=document.createElement('button');drop.textContent='− Item';drop.onclick=async()=>{
+     const item=prompt('Remove an entry from '+d.label+'\n'+value.join(' · '));if(item?.trim())await pushManual(value.filter(x=>x!==item.trim()));
+    };actions.append(drop);
+   }
+   if(d.type==='record'||d.type==='relationship'||d.type==='quest'||d.type==='timer'){
+    const fieldButton=document.createElement('button');fieldButton.textContent='Edit field';
+    fieldButton.onclick=async()=>{
+     const fields=Object.keys(value||{}),field=prompt('Field to change in '+d.label+'\n'+fields.join(' · '),fields[0]||'');
+     if(!field||!fields.includes(field))return;
+     const old=value[field],raw=prompt('New value for '+field+'\n(For lists, use Add or Remove separately)',old===null?'':String(old));
+     if(raw===null)return;
+     let parsed=raw;
+     if(typeof old==='number'){parsed=Number(raw);if(!Number.isFinite(parsed))throw Error('Enter a number');}
+     if(typeof old==='boolean')parsed=raw.toLowerCase()==='true';
+     if(old===null)parsed=/^-?\d+(\.\d+)?$/.test(raw)?Number(raw):raw;
+     if(Array.isArray(old)){const chosen=prompt('Enter a single new entry to append to '+field);if(chosen?.trim())parsed=[...old,chosen.trim()];else return;}
+     await pushManual({...value,[field]:parsed});
+    };actions.append(fieldButton);
+   }
+   if(d.type==='injuries'){
+    const wound=document.createElement('button');wound.textContent='+ Injury';
+    wound.onclick=async()=>{
+     const location=prompt('Injured body part / location');if(!location?.trim())return;
+     const cause=prompt('Confirmed cause of injury');if(!cause?.trim())return;
+     const severity=prompt('Severity: minor / moderate / severe / critical','minor');
+     if(!['minor','moderate','severe','critical'].includes(severity))throw Error('Choose a supported severity');
+     const pain=Number(prompt('Pain from 0 to 10','3'));
+     if(!Number.isFinite(pain)||pain<0||pain>10)throw Error('Pain must be 0–10');
+     const id='manual_'+Date.now().toString(36);
+     const entry={id,location:location.trim(),cause:cause.trim(),severity,status:'fresh',pain,symptoms:'',limitations:'',treatment:'',scar:''};
+     await pushManual([...value,entry]);
+    };actions.append(wound);
+   }
+   const auto=document.createElement('button');auto.textContent=d.updateMode==='automatic'?'Auto: ON':d.updateMode==='manual'?'Auto: OFF':'Approval required';
+   auto.title='Automatic changes use evidence from chat; approval mode records proposals for review';
+   auto.onclick=async()=>{
+    const mode=d.updateMode==='automatic'?'approval':'automatic';
+    const result=await run('definition-edit',{key:d.owner+':'+d.id,updates:{updateMode:mode}});
+    view=result;publish();
+   };actions.append(auto);
+   const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
    const evidence=view.context?.provenance?.filter(e=>e.key===d.owner+':'+d.id).at(-1);if(evidence){const source=document.createElement('small');source.textContent='Last change: '+evidence.reason;details.append(source);}
    details.append(actions);tile.append(details);grid.append(tile);
   }
@@ -139,9 +209,32 @@ export async function initStory({getContext,frame,show}){
  }
  function updateMessageMenus(){for(const node of document.querySelectorAll('#chat .mes')){if(node.querySelector('.hero-message-menu'))continue;const index=Number(node.getAttribute('mesid'));if(!Number.isInteger(index))continue;const menu=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Story actions';menu.className='hero-message-menu';menu.append(summary);for(const [label,action]of [['Bookmark',async()=>{const label=prompt('Bookmark name','Before the next scene');if(label)await run('bookmark',{index,label})}],['Branch Here',()=>run('fork',{mode:'branch',atIndex:index})],['Rollback to Here',()=>rewind(index)],['View State Here',async()=>{const p=await run('preview',{index}),{box}=dialog('State at this message'),pre=document.createElement('pre');const v=await rpc('/story/state-at',{id:view.session.id,index});const visible=new Set(v.definitions.filter(d=>d.visibility!=='hidden').map(d=>d.owner+':'+d.id));pre.textContent=JSON.stringify(Object.fromEntries(Object.entries(v.state).filter(([k])=>visible.has(k))),null,2)+'\nReversals from current state:\n'+p.changes.map(x=>x.key+' → '+JSON.stringify(x.to)).join('\n');box.append(pre)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=e=>{e.preventDefault();Promise.resolve(action()).catch(notify)};menu.append(b);}node.append(menu);}}
  let currentGeneration='normal';c().eventSource.on(c().eventTypes.GENERATION_STARTED,type=>{currentGeneration=type;});
- c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration)||data.api_type!=='koboldcpp')return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
+ c().eventSource.on(c().eventTypes.GENERATE_AFTER_DATA,async(data,dryRun)=>{if(dryRun||!selected()||['quiet','impersonate'].includes(currentGeneration))return;const v=await sync();if(data.hero_context){data.hero_context.id=v.session.id;data.hero_context.sessionId=v.session.id;}else data.hero_context={id:v.session.id,sessionId:v.session.id,messages:c().chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes})),generationType:currentGeneration};const char=c().characters?.[c().characterId],cardData=char?.data||char||{};
+ data.hero_context.character={
+   name:String(cardData.name||char?.name||'').slice(0,180),
+   description:String(cardData.description||'').slice(0,4400),
+   personality:String(cardData.personality||'').slice(0,2000),
+   scenario:String(cardData.scenario||'').slice(0,1500),
+   mes_example:String(cardData.mes_example||'').slice(0,1000)
+ };
+ if(actionInstruction)data.hero_context.oneReply=actionInstruction;});
  let generating=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});
- const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{if(generating){schedule();return;}if(syncing||!selected())return;syncing=true;try{const v=await sync();if(v.session.definitions.some(d=>d.enabled!==false&&d.updateMode!=='manual')){try{view=await rpc('/story/analyze',{id:v.session.id});publish()}catch(e){window.toastr?.info('Tracker state was preserved. '+e.message,'State analysis')}}}catch(e){notify(e)}finally{syncing=false}},500)};
+ const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{
+  if(generating){schedule();return;}
+  if(syncing||!selected())return;
+  syncing=true;
+  try{
+   let v=await sync();
+   if(v.session.definitions.some(d=>d.enabled!==false&&d.updateMode!=='manual')){
+    for(let pass=0;pass<8;pass++){
+     const n=v.session.analyzedSources.length;
+     try{v=await rpc('/story/analyze',{id:v.session.id});view=v;publish();}
+     catch(error){window.toastr?.warning('Tracker update failed; saved state was preserved. '+error.message,'Tracker diagnostics');break;}
+     if(v.session.analyzedSources.length===n||v.session.analyzedSources.length>=v.messages.length)break;
+    }
+   }
+  }catch(error){notify(error)}finally{syncing=false}
+ },500)};
  for(const name of ['CHAT_CHANGED','GENERATION_ENDED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_RECEIVED','MESSAGE_SENT'])if(c().eventTypes[name])c().eventSource.on(c().eventTypes[name],schedule);
  const observer=new MutationObserver(()=>updateMessageMenus());if(document.querySelector('#chat'))observer.observe(document.querySelector('#chat'),{childList:true});
  window.HeroStory={sync,run,get view(){return view},newDialog,rewind};

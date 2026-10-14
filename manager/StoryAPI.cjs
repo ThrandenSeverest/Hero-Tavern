@@ -38,16 +38,34 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
   if(op==='export')return store.exportArchive(data.id,data);
   if(op==='import')return store.importArchive(data.packet);
   if(op==='analyze'){
-   let view=store.view(data.id);for(const d of view.session.definitions.filter(d=>d.template==='Health & Injuries'&&d.enabled!==false))if(!view.session.definitions.some(x=>x.owner===d.owner&&x.type==='injuries'))view=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
-   const s=view.session,head=S.hash(view.messages.map(S.signature)),pending=view.messages.filter(m=>!s.analyzedSources.includes(S.signature(m))).slice(-2);
-   const eligible=s.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual'&&view.context.trackers.some(t=>t.key===S.keyOf(d)));
-   if(!eligible.length||!pending.length)return view;
+   let v=store.view(data.id);
+   for(const d of v.session.definitions.filter(d=>d.template==='Health & Injuries'&&d.enabled!==false))
+    if(!v.session.definitions.some(x=>x.owner===d.owner&&x.type==='injuries'))
+     v=store.definitions(data.id,[{...S.TEMPLATE_DATA[0][1].find(x=>x.type==='injuries'),owner:d.owner,template:'Health & Injuries',enabled:true}]);
+   const s=v.session,head=S.hash(v.messages.map(S.signature));
+   const eligible=s.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
+   const pending=v.messages.filter(m=>!m.is_system&&!s.analyzedSources.includes(S.signature(m))).slice(-8).slice(0,2);
+   if(!eligible.length||!pending.length)return v;
    if(!ready())throw Error('Load the reply model before analyzing tracker changes.');
-   const prompt='Return JSON only: {"changes":[{"key":"exact tracker key","value":"typed value","sourceMessageId":"id","evidence":"exact quote from that message","reason":"short causal reason","ambiguous":false}]}. Propose only established changes, not hypotheticals or poetic description. Do not invent injuries, healing, elapsed time, possessions or knowledge. For record values return the full structured object, preserving unchanged fields and recent event history. Update narrative detail even when the numeric level stays the same. Record only actual meals/actions, not plans; do not invent timestamps or portions. For injuries values return the full array, retaining every previous record and its stable id, location and cause. Each record has id, location, cause, severity (minor/moderate/severe/critical), status (fresh/treated/healing/healed/scarred), pain (0–10), symptoms, limitations, treatment, scar. Add injuries from explicit events; update care, symptoms and recovery separately; keep healed and scarred records. Bandaging is not healing. Use declared owners; never conflate characters. Return changes:[] if there is no reliable evidence.\nDefinitions: '+JSON.stringify(eligible)+'\nCurrent confirmed state: '+JSON.stringify(Object.fromEntries(eligible.map(d=>[S.keyOf(d),view.context.state[S.keyOf(d)]])))+'\nNew finalized messages: '+JSON.stringify(pending.map(m=>({id:m.extra.heroMessageId,name:m.name,avatar:m.original_avatar,text:m.mes})));
-   try{const patch=await generateJSON(prompt,signal,'state','changes');
-    const current=store.view(data.id);if(S.hash(current.messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
-    const resultView=store.eventPatch(data.id,patch.changes,{expectedHead:head});resultView.session.analyzedSources=[...new Set([...resultView.session.analyzedSources,...pending.map(S.signature)])];store.saveSession(resultView.session);return store.view(data.id);
-   }catch(e){const current=store.get(data.id);current.failures.push({at:Date.now(),message:e.message,head});current.failures=current.failures.slice(-30);store.saveSession(current);throw e;}
+   const {parseCommands,trackerInstructions}=require('./TrackerDelta.cjs');
+   try{
+    const p=trackerInstructions(eligible,v.context.state,pending);
+    const response=await pipeline.generate({
+      prompt:'<|im_start|>system\nYou extract factual tracker transitions. Output UPDATE lines only, never JSON or roleplay. /no_think<|im_end|>\n<|im_start|>user\n'+p+'<|im_end|>\n<|im_start|>assistant\n',
+      stream:false,max_tokens:Math.min(1400,Math.max(350,eligible.length*90)),temperature:0.1,stop:['<|im_end|>']
+    },signal,{mode:'utility'});
+    const parsed=parseCommands(String(response.choices?.[0]?.text||''),eligible,pending,v.context.state);
+    if(!parsed.changes.length&&!parsed.issues.length&&!/^NONE\b/i.test(String(response.choices?.[0]?.text||'').trim()))throw Error('Tracker extractor did not follow the update protocol. No state was modified.');
+    if(parsed.issues.length&&!parsed.changes.length)throw Error('Tracker extractor returned invalid operations: '+parsed.issues.slice(0,2).join(' | '));
+    if(parsed.changes.length){const current=store.view(data.id);if(S.hash(current.messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');v=store.eventPatch(data.id,parsed.changes,{expectedHead:head});}
+    const persisted=store.get(data.id);
+    persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...pending.map(S.signature)])].slice(-1500);
+    persisted.lastAnalysis={at:Date.now(),processed:pending.length,changes:parsed.changes.length,errors:parsed.issues.slice(-5)};
+    store.saveSession(persisted);return store.view(data.id);
+   }catch(e){
+    const current=store.get(data.id);current.failures.push({at:Date.now(),message:e.message,head});current.failures=current.failures.slice(-30);
+    current.lastAnalysis={at:Date.now(),failed:true,error:e.message};store.saveSession(current);throw e;
+   }
   }
   if(op==='helper'){
    if(!['trackers','lore','episodes','character'].includes(data.kind)||typeof data.brief!=='string'||data.brief.length>200000)throw Error('Enter a description or source text (1–200000 characters), and choose Trackers, Lore or Episodes.');

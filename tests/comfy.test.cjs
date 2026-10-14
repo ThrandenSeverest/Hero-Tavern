@@ -48,3 +48,17 @@ test('ComfyUI adapter executes a stub local workflow and retains source images',
   await adapter.freeMemory({confirm:true});
  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Disconnected ComfyUI diagnosis never pretends every Qwen node is missing',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-comfy-offline-'));
+ try{
+  const adapter=createComfyAdapter(root,{fetchFn:async()=>{throw Error('ECONNREFUSED')}});
+  const report=await adapter.diagnosePack('qwen21-q5km');
+  assert.equal(report.status,'offline');
+  assert.equal(report.connected,false);
+  assert.deepEqual(report.missingNodes,[]);
+  assert.deepEqual(report.missingFiles,[]);
+  assert.ok(report.requiredNodesNotChecked.includes('TextEncodeQwenImage21'));
+  assert.match(report.advice,/offline|cannot be tested/i);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

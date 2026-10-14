@@ -364,6 +364,13 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.method==='GET'&&/^\/images\/output\/[0-9]+-[a-f0-9]+\.png$/.test(req.url)){if(['http://127.0.0.1:8000','http://localhost:8000'].includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin')}const file=path.join(images.outputs,path.basename(req.url));if(fs.existsSync(file)){res.writeHead(200,{'Content-Type':'image/png'});fs.createReadStream(file).pipe(res)}else{res.writeHead(404);res.end()}return;}
         if(req.method==='GET'&&req.url.startsWith('/tts/audio/')){const file=tts.readAudio(req.url);if(!file){json(404,{error:'Audio not found'});return;}res.writeHead(200,{'Content-Type':'audio/wav','Access-Control-Allow-Origin':'http://127.0.0.1:8000','Vary':'Origin'});fs.createReadStream(file).pipe(res);return;}
         if (req.headers['x-hero-token'] !== token) { json(403, { error: 'Invalid session token.' }); return; }
+        if(req.method==='GET'&&req.url==='/diagnostics/trackers'){
+          const sessions=story.list({archived:true}).slice(0,25).map(entry=>{
+            try{const session=story.get(entry.id);return {id:session.id,title:session.title,trackers:session.definitions.length,automatic:session.definitions.filter(d=>d.enabled!==false&&d.updateMode==='automatic').length,lastAnalysis:session.lastAnalysis||null,recentFailures:(session.failures||[]).slice(-3).map(e=>({at:e.at,message:e.message}))};}
+            catch(e){return {id:entry.id,title:entry.title,error:e.message};}
+          });
+          json(200,{sessions,count:sessions.length});return;
+        }
         if(req.method==='GET'&&req.url==='/tts/status'){json(200,tts.status());return;}
         if(req.method==='GET'&&req.url==='/model-tests/presets'){json(200,modelTests.presets());return;}
         if(req.method==='GET'&&req.url==='/model-tests/history'){json(200,modelTests.history());return;}

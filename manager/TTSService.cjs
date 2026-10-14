@@ -27,7 +27,7 @@ function planSpeech(text,dialogue,narrator){
  return merged.flatMap(({text,voice})=>{const out=[];while(text.length>600){let n=text.lastIndexOf(' ',600);if(n<1)n=600;out.push({text:text.slice(0,n),...voice});text=text.slice(n).trimStart()}if(text)out.push({text,...voice});return out;});
 }
 function createTTS(root){
- const file=path.join(root,'tts-settings.json');let settings={engine:'flash',variant:'custom-0.6',device:'cpu',language:'Auto',speaker:'Ryan',narratorSpeaker:'Ryan',enabled:false,autoPlay:false,dialogueReference:'',narratorReference:'',referenceText:'',narratorReferenceText:'',style:''};
+ const file=path.join(root,'tts-settings.json');let settings={engine:'qwen',variant:'custom-0.6',device:'cpu',language:'Auto',speaker:'Ryan',narratorSpeaker:'Ryan',enabled:false,autoPlay:false,dialogueReference:'',narratorReference:'',referenceText:'',narratorReferenceText:'',style:''};
  try{settings={...settings,...JSON.parse(fs.readFileSync(file,'utf8'))}}catch{}
  let child=null,pending=new Map(),sequence=0,install=null,installOutput='',fault='',busy=false,downloader=null,downloadOutput='',downloadError='',downloadKind='';
  let installStage='idle',installStartedAt=0,installChangedAt=0,downloadStartedAt=0,downloadChangedAt=0,setupRequested=null;
@@ -55,7 +55,7 @@ function createTTS(root){
  }
  function preflight(voice){
   const caps=capabilities(voice.engine,voice.variant);
-  if(caps.referenceAudio&&!voice.reference)throw speechError('TTS_REFERENCE_REQUIRED','Select an imported WAV or use Qwen CustomVoice / VoiceDesign.');
+  if(caps.referenceAudio&&!voice.reference)throw speechError('TTS_REFERENCE_REQUIRED',(voice.engine==='flash'?'Chatterbox Flash':'Qwen voice cloning')+' requires a reference WAV. Import a WAV in Voice models or assign a Qwen CustomVoice/VoiceDesign profile from Character Voice (no WAV required).');
   if(voice.reference&&!/^[a-z0-9_-]+\.wav$/i.test(voice.reference))throw speechError('TTS_BAD_REFERENCE_AUDIO','Invalid reference filename.');
   if(voice.reference&&!fs.existsSync(path.join(voices,voice.reference)))throw speechError('TTS_BAD_REFERENCE_AUDIO','Reference WAV is missing. Reassign it.');
   if(caps.referenceTranscript&&!voice.referenceText.trim())throw speechError('TTS_TRANSCRIPT_REQUIRED','Enter the exact words spoken in the reference sample.');

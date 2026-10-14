@@ -34,3 +34,38 @@ test('unanswered player turn is not analyzed after a failed or empty assistant g
   const api=createStoryAPI(f.store,{generate:async()=>{calls++;return {choices:[{text:'{"operations":[]}'}]}}});await api.action('/story/analyze',{id:v.session.id});assert.equal(calls,0);
  }finally{f.cleanup()}
 });
+
+test('Windows native chat rename lock uses verified staged copy without discarding messages',()=>{
+ const f=fixture(),rename=fs.renameSync;
+ try{
+  const original=f.store.view(f.session.id);
+  let denied=0;
+  fs.renameSync=(from,to)=>{
+   if(to===f.file&&String(from).includes('.hero-')){denied++;throw Object.assign(Error('Windows sharing violation'),{code:'EPERM'});}
+   return rename(from,to);
+  };
+  const extra={name:'Lyra',is_user:false,mes:'The ranger takes a new silver key.',extra:{}};
+  const updated=f.save([...original.messages,extra]);
+  assert.ok(denied>=1);
+  assert.equal(updated.messages.at(-1).mes,extra.mes);
+  assert.ok(updated.messages.at(-1).extra.heroMessageId);
+  assert.ok(fs.readFileSync(f.file,'utf8').includes(extra.mes));
+ }finally{fs.renameSync=rename;f.cleanup();}
+});
+test('Concurrent changes to a SillyTavern chat are not overwritten by a stale tracker sync',()=>{
+ const f=fixture(),rename=fs.renameSync;
+ try{
+  const current=f.store.view(f.session.id),other='The newest chat line must survive external saves.';
+  const extra={name:'Lyra',is_user:false,mes:'Unpersisted new message',extra:{}};
+  fs.renameSync=(from,to)=>{
+   if(to===f.file&&String(from).includes('.hero-')){
+    const bytes=fs.readFileSync(to,'utf8');
+    fs.writeFileSync(to,bytes+'\n'+JSON.stringify({name:'Lyra',is_user:false,mes:other,extra:{}})+'\n');
+    throw Object.assign(Error('Windows sharing violation'),{code:'EPERM'});
+   }
+   return rename(from,to);
+  };
+  assert.throws(()=>f.save([...current.messages,extra]),/Native chat changed during locked-file replacement/);
+  assert.ok(fs.readFileSync(f.file,'utf8').includes(other),'External chat modifications must not be rolled back');
+ }finally{fs.renameSync=rename;f.cleanup();}
+});

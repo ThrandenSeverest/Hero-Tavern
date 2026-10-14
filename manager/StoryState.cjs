@@ -78,7 +78,7 @@ function activeContext(session,messages,query='',cap=24){
  const lines=selected.map(x=>x.label+(x.unit?' ('+x.unit+')':'')+': '+JSON.stringify(x.value).slice(0,340)+(x.description?' — '+x.description.slice(0,90):'')+(x.rule?' | Behavior: '+x.rule:''));
  let remaining=2600;const injected=[];for(const line of lines){if(remaining<80)break;injected.push(line.slice(0,remaining));remaining-=line.length;}
  const loreBlock=lore.filter(e=>e.active).map(e=>'[Lore '+e.id+'] '+e.text).join('\n').slice(0,2000);
- return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Current confirmed scene and character state; guide behavior naturally, never recite values]\n'+injected.join('\n')+'\n'+loreBlock};
+ return {state,trackers:selected,omitted,lore,provenance:session.events.filter(e=>e.status==='confirmed').map(e=>({key:e.key,sourceMessageId:e.sourceMessageId,reason:e.reason})),text:'[Confirmed story state — current scene and character; guide behavior naturally, never recite values]\n'+injected.join('\n')+'\n'+loreBlock};
 }
 function propose(session,messages,patch,{manual=false,approve=false}={}){
  if(!Array.isArray(patch)||patch.length>100)throw Error('State analysis must return at most 100 changes.');const state=stateAt(session,messages),events=[];

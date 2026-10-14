@@ -5,7 +5,9 @@ const {chromium}=require('../.ci/browser/node_modules/playwright');
 const {configure}=require('../manager/ConfigureTavern.cjs');
 const {createBridge}=require('../manager/ModelBridge.cjs');
 const repo=path.resolve(__dirname,'..'),st=path.join(repo,'.ci/SillyTavern'),root=path.join(repo,'.ci/Hero Tavern UI '+Date.now());
-async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}let detail='';try{const html=await(await fetch('http://127.0.0.1:8001/')).text(),token=/const token='([^']+)'/.exec(html)?.[1];detail=JSON.stringify(await(await fetch('http://127.0.0.1:8001/status',{headers:{'X-Hero-Token':token}})).json())}catch{}throw Error('Timed out waiting for UI/engine: '+detail)}
+let debugPage=null,debugErrors=[];
+async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()<end){try{if(await check())return}catch{}await new Promise(r=>setTimeout(r,250))}let detail='';try{const html=await(await fetch('http://127.0.0.1:8001/')).text(),token=/const token='([^']+)'/.exec(html)?.[1];detail=JSON.stringify(await(await fetch('http://127.0.0.1:8001/status',{headers:{'X-Hero-Token':token}})).json())}catch{}
+if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();return {onlineStatus:c.onlineStatus,engineChip:document.querySelector('#hero-engine-chip')?.textContent,api:document.querySelector('#main_api')?.value,type:document.querySelector('#textgen_type')?.value,url:document.querySelector('#koboldcpp_api_url_text')?.value,frameLoaded:document.querySelector('#hero-model-frame')?.contentWindow!==null};});detail='Browser: '+JSON.stringify(browser)+'; JS errors: '+JSON.stringify(debugErrors.slice(-15))+'; Bridge: '+detail;}catch(e){detail+='; Browser diagnostic failed: '+e.message}}}throw Error('Timed out waiting for UI/engine: '+detail)}
 (async()=>{
  // This is the disposable cloned UI fixture, never a user's installed profile.
  fs.rmSync(path.join(st,'data'),{recursive:true,force:true});
@@ -25,7 +27,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
  try{
   await waitFor(async()=>(await fetch('http://127.0.0.1:8000/')).ok);
   browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
+  const errors=[];debugPage=page;debugErrors=errors;page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')console.log('Browser error:',m.text())});
   await page.goto('http://127.0.0.1:8000/');await page.locator('#hero-shell').waitFor({timeout:120000});
   await page.locator('#hero-welcome').waitFor({state:'visible'});
   await waitFor(async()=>await page.evaluate(()=>{const title=document.querySelector('.hero-welcome-title');const r=title.getBoundingClientRect();return !!document.elementFromPoint(r.left+20,r.top+20)?.closest('#hero-welcome')}));
@@ -87,7 +89,7 @@ async function waitFor(check,ms=120000){const end=Date.now()+ms;while(Date.now()
   await page.locator('.hero-nav[data-hero="trackers"]').click();const modelFrame=page.frames().find(f=>new URL(f.url()).port==='8001'&&new URL(f.url()).pathname==='/');
   await waitFor(async()=>await modelFrame.evaluate(()=>!!window.HeroStoryPanel?.view));
   await panel.locator('#tracker-presets label').filter({hasText:'Health & Injuries'}).locator('input').check();
-  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.length===2));
+  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.type==='number'&&d.id==='health')&&HeroStoryPanel.view.session.definitions.some(d=>d.type==='injuries')));
   const originalId=await page.evaluate(()=>HeroStory.view.session.id);
   const stateProof=await page.evaluate(async()=>{let v=await HeroStory.sync();const wound=v.session.definitions.find(d=>d.type==='injuries'),key=wound.owner+':'+wound.id;v=await HeroStory.run('patch',{patch:[{key,value:[{id:'shoulder-arrow',location:'left shoulder',cause:'arrow',severity:'moderate',status:'fresh',pain:6,symptoms:'pain',limitations:'limited arm movement',treatment:'none',scar:''}],sourceMessageId:v.messages.at(-1).extra.heroMessageId}]});const damaged=v.context.state[key];const branch=await HeroStory.run('fork',{mode:'branch',atIndex:0});const before=branch.context.state[key];await HeroStory.run('open',{id:v.session.id});const fresh=await HeroStory.run('fork',{mode:'fresh'});const reset=fresh.context.state[key];await HeroStory.run('open',{id:v.session.id});return {damaged,before,reset};});
   if(stateProof.damaged?.[0]?.status!=='fresh'||stateProof.reset?.length!==0||stateProof.before?.length)throw Error('Native branch/fresh tracker isolation failed: '+JSON.stringify(stateProof));

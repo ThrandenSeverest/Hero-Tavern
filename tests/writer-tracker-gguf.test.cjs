@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {isWriterNonProse}=require('../manager/ReplyPipeline.cjs');
-const {writerEvent}=require('../manager/WriterAPI.cjs');
+const {writerEvent,createWriterAPI}=require('../manager/WriterAPI.cjs');
 const S=require('../manager/StoryState.cjs');
 test('Writer rejects acknowledgement and review instead of saving them as prose',()=>{
  for(const s of ['OKAY NOW I UNDERSTAND WHAT AM I SUPPOSED TO DO','Okay now I understand! I will write the scene.','Sure, here is your novel continuation.','I understand the task. Let me begin.','Here is my revised story:','Review: The story could use...'])assert.ok(isWriterNonProse(s),'should reject '+s);
@@ -25,4 +25,20 @@ test('custom measurements are not timers, 24h story clock has strict validation'
 test('managed Qwen loader uses compatible fork and checks Qwen-Image 2.1 architecture',()=>{
  const c=fs.readFileSync(path.join(__dirname,'../manager/ImageModelCenter.cjs'),'utf8');
  assert.ok(c.includes('leejet/ComfyUI-GGUF'));assert.ok(c.includes('qwen_image21'));assert.ok(c.includes('backup'));
+});
+
+test('Writer Say/Do must change saved manuscript and model input before continuation',async()=>{
+ const os=require('node:os'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'hero-writer-action-'));const calls=[];
+ const api=createWriterAPI(dir,{generate:async(body)=>{calls.push(body.hero_writer);return {choices:[{text:'The guard flinches and steps aside.'}],usage:{},writerContext:{}};},abort(){}});
+ try{
+  const initial=await api.action('/writer/api/create',{story:{prompt:'A guard blocks the gate.',text:'A guard stands before you.'}});
+  const spoken=await api.action('/writer/api/generate-apply',{id:initial.id,expectedVersion:initial.version,operation:'say',start:0,end:0,instruction:'Let me through!'});
+  assert.match(spoken.story.text,/You say, “Let me through!”/);
+  assert.match(calls[0].text,/You say, “Let me through!”/);
+  assert.match(spoken.story.text,/guard flinches/);
+  const acted=await api.action('/writer/api/generate-apply',{id:initial.id,expectedVersion:spoken.story.version,operation:'do',start:0,end:0,instruction:'I push the gate open'});
+  assert.match(acted.story.text,/You push the gate open\./);
+  assert.match(calls[1].text,/You push the gate open\./);
+  assert.ok(acted.story.text.indexOf('Let me through!')<acted.story.text.indexOf('push the gate'));
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });

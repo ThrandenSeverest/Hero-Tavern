@@ -30,7 +30,7 @@ function renderPassages(){
   const card=document.createElement('section');card.className='writer-passage '+(g.kind==='manual'?'manual':'generated');card.dataset.generationId=g.id||'';
   const head=document.createElement('div');head.className='writer-passage-head';const label=document.createElement('strong');label.textContent=(g.kind==='manual'?'Manual passage':'AI generation #'+(regions.findIndex(x=>x.id===g.id)+1))+(g.operation?' · '+g.operation:'')+' · '+(g.text.trim().split(/\\s+/).filter(Boolean).length)+' words';head.append(label);
   const textarea=document.createElement('textarea');textarea.value=g.text;textarea.setAttribute('aria-label',g.kind==='manual'?'Edit manually written passage':'Edit AI-generated passage');textarea.spellcheck=true;textarea.style.fontSize=$('font').value+'px';let previousValue=g.text;textarea.oninput=()=>{
-   const current=$('manuscript').value;if(current.slice(g.start,g.end)!==g.text)return;
+   const current=$('manuscript').value;if(current.slice(g.start,g.start+previousValue.length)!==previousValue)return;
    $('manuscript').value=current.slice(0,g.start)+textarea.value+current.slice(g.end);
    changed();
   };

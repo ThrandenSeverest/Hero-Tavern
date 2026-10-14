@@ -217,7 +217,10 @@ Open Hero Tavern first, then click Models to download Qwen in the chat UI.
 Manage-Models.cmd remains available for advanced/custom downloads.
 Start-Chat.cmd: open SillyTavern immediately; AI loads separately.
 Hero Tavern desktop shortcut starts the same launcher.
-Keep the launcher window open; press Enter there to stop both servers.
+Use the red Exit Hero Tavern button in the app sidebar to stop all managed servers.
+Alternatively press Enter in the launcher window. Closing the browser tab alone only hides the UI.
+If the launcher was closed abruptly, the next launch checks a PID-verified session journal
+and can recover leftover Hero Tavern processes without touching unrelated applications.
 
 Fresh profiles use Text Completion / KoboldCpp at http://127.0.0.1:5001.
 Click Connect in SillyTavern if requested.

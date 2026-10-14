@@ -106,12 +106,22 @@ try {
     try { $locked = $mutex.WaitOne(0) }
     catch [System.Threading.AbandonedMutexException] { $locked = $true }
     if (-not $locked) {
-        if (Test-Port 8000) {
+        # Do not open a random service on port 8000; verify the active session
+        # belongs to this exact installation before reusing its browser tab.
+        $portable = Get-ChildItem (Join-Path $root 'Runtime') -Filter node.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+        $owned = $false
+        if ($portable -and (Test-Path -LiteralPath $journal) -and (Test-Port 8000)) {
+            try {
+                $session = Get-Content -LiteralPath $journal -Raw | ConvertFrom-Json -ErrorAction Stop
+                $owned = [string]::Equals([string]$session.root,$root,[StringComparison]::OrdinalIgnoreCase) -and (Test-ManagedProcess $session.tavern 'tavern' $portable)
+            } catch { }
+        }
+        if ($owned) {
             Start-Process 'http://127.0.0.1:8000/'
-            Write-Host 'Hero Tavern is already running. Opened its current chat.' -ForegroundColor Green
+            Write-Host 'Existing verified Hero Tavern window opened.' -ForegroundColor Green
             return
         }
-        throw 'Hero Tavern launcher is already running. Close the existing launcher first.'
+        throw 'Hero Tavern launcher is busy or another service owns port 8000; refusing to reuse an unverified server.'
     }
     New-Item -ItemType Directory -Force $logs | Out-Null
     $node = Get-ChildItem (Join-Path $root 'Runtime') -Filter node.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName

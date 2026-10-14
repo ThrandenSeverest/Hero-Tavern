@@ -68,6 +68,32 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
     download:download?{kind:'model',...download}:operation?{kind:'model',phase:'starting',packId:operation.id,bytes:0,total:0}:null,
     lastDownload,setup:setupJob&&{packId:setupJob.id,phase:setupJob.phase,startedAt:setupJob.startedAt},lastSetup,install:managed.install||null,createdAt:new Date().toISOString()};
  }
+ async function diagnose({id,startManaged=false}={}){
+  if(!['flux-klein','z-turbo','sdxl',...QWEN_IDS].includes(id))throw Error('Select an image model before checking its workflow.');
+  const before=await comfy.available();
+  const managed=runtime.status(),detected=runtime.installed();
+  let startedManaged=false;
+  if(!before&&startManaged&&managed.mode==='managed'&&detected){
+   if(typeof runtime.start!=='function')throw Error('Managed ComfyUI launcher is not available.');
+   await runtime.start();startedManaged=true;
+   const deadline=Date.now()+90000;
+   let online=false;
+   do{
+    if(await comfy.available()){online=true;break}
+    if(runtime.status().error)break;
+    await new Promise(resolve=>setTimeout(resolve,1200));
+   }while(Date.now()<deadline);
+   if(!online){
+    const error=runtime.status().error||'Managed ComfyUI did not respond within 90 seconds.';
+    const log=path.join(root,'Logs','comfy-engine.log');
+    let tail='';try{tail=fs.readFileSync(log,'utf8').split(/\\r?\\n/).slice(-20).join('\\n').slice(-3500)}catch{}
+    return {ok:false,connected:false,status:'startup-failed',packId:id,missingNodes:[],missingFiles:[],error,startedManaged,logTail:tail,
+     advice:'ComfyUI was found but could not start: '+error+' Check Logs/comfy-engine.log. Do not reinstall image weights until the startup error is resolved.'};
+   }
+  }
+  const report=await comfy.diagnosePack(id);
+  return {...report,startedManaged,portableDetected:!!detected,managedMode:managed.mode};
+ }
  async function select({id,scope='global',inherit=false}={}){
   if(!SCOPES.includes(scope))throw Error('Unknown image-use location');
   if(inherit&&scope!=='global'){prefs[scope]=null;save();return {choices:{...prefs},selected:choice(scope)}}
@@ -189,6 +215,6 @@ function createImageModelCenter(root,{studio,comfy,runtime,images}){
  }
  function cancelDownload(){if(setupJob)setupJob.cancelled=true;runtime.cancelInstall?.();return comfy.models.cancel()}
 
- return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot,setup};
+ return {status,select,choice,forGeneration,startDownload,cancelDownload,configureRoot,setup,diagnose};
 }
 module.exports={createImageModelCenter,IDS,SCOPES};

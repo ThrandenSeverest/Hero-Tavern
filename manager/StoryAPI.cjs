@@ -100,15 +100,18 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
      const definition=eligible.find(d=>S.keyOf(d)===candidate.key);
      const at=indexById.get(candidate.sourceMessageId);
      if(!definition||at===undefined||at<firstIndex(definition)){diagnostics.errors.push('Skipped event for an inactive tracker: '+candidate.key);continue;}
+     try{S.propose(session,v.messages,[candidate]);}catch(error){diagnostics.errors.push('Rejected '+candidate.key+' from '+candidate.sourceMessageId+': '+error.message);continue;}
      seen.add(identifier);updates.push(candidate);
     }
     if(parsed.issues.length)diagnostics.errors.push(...parsed.issues.slice(0,8));
     diagnostics.partial=diagnostics.errors.length>0;
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(updates.length){
+     const before=session.events.length;
      v=store.eventPatch(data.id,updates,{expectedHead:head});
-     diagnostics.changes=updates.length;
-     for(const change of updates){const type=eligible.find(d=>S.keyOf(d)===change.key)?.type||'unknown';diagnostics.changeTypes[type]=(diagnostics.changeTypes[type]||0)+1;}
+     const applied=v.session.events.slice(before);
+     diagnostics.changes=applied.length;
+     for(const change of applied){const type=eligible.find(d=>S.keyOf(d)===change.key)?.type||'unknown';diagnostics.changeTypes[type]=(diagnostics.changeTypes[type]||0)+1;}
     }
     const persisted=store.get(data.id);
     // A failed/partial extraction never consumes its source signatures.

@@ -58,3 +58,16 @@ test('Qwen reference edits must use text-encoder native latent and never preserv
  assert.equal(sampler.cfg,1);
  assert.equal(sampler.scheduler,'simple');
 });
+
+test('Qwen non-1024 generation uses native 64-channel latent scaling, not an incompatible SD empty latent',()=>{
+ const pack=QWEN_PACKS.find(p=>p.id==='qwen21-q5km');
+ const g=recipeGraph(pack,{prompt:'Two knights standing in a castle',negative_prompt:'',operation:'txt2img',width:768,height:768,steps:25,cfg_scale:1,seed:14,batch_size:1});
+ const entries=Object.entries(g.graph);
+ assert.ok(!entries.some(([,node])=>node.class_type==='EmptyLatentImage'));
+ const latent=entries.find(([,node])=>node.class_type==='LatentUpscale');
+ assert.ok(latent);assert.equal(latent[1].inputs.width,768);assert.equal(latent[1].inputs.height,768);
+ const encoded=entries.find(([,node])=>node.class_type==='TextEncodeQwenImage21');
+ assert.deepEqual(latent[1].inputs.samples,[encoded[0],2]);
+ const sample=entries.find(([,node])=>node.class_type==='KSampler');
+ assert.deepEqual(sample[1].inputs.latent_image,[latent[0],0]);
+});

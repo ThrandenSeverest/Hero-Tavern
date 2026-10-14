@@ -49,7 +49,7 @@ const initHeroTavern = async () => {
         const selectors={characters:'#rightNavDrawerIcon',world:'#WIDrawerIcon',settings:'#user-settings-button .drawer-toggle'};
         if(selectors[name])document.querySelector(selectors[name])?.click();
     };
-    for(const [name,label] of [['chat','Tavern'],['voices','Voices'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['comfy-workflows','ComfyUI Workflows'],['storage','Storage'],['models','Models'],['vision','Image analyzer'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
+    for(const [name,label] of [['chat','Tavern'],['model-tests','Model Testing'],['voices','Voices'],['assistant','Ассистент'],['history','Chats'],['trackers','Trackers'],['lore','Lorebooks'],['characters','Characters'],['world','World info'],['adventure','Adventure'],['writer','Writer'],['creator','Character studio'],['memory','Chat memory'],['images','Image Studio'],['comfy-workflows','ComfyUI Workflows'],['storage','Storage'],['models','Models'],['vision','Image analyzer'],['hardware','Hardware'],['generation','Generation'],['diagnostics','Diagnostics'],['settings','Preferences']]){
         const b=document.createElement('button');b.className='hero-nav'+(name==='chat'?' active':'');b.dataset.hero=name;b.textContent=label;b.onclick=()=>show(name);rail.insertBefore(b,rail.lastElementChild);
     }
     document.body.append(rail,header,workspace,welcome);

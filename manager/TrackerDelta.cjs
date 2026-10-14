@@ -14,11 +14,15 @@ function parseCommands(raw,definitions,messages,state){
  let rows,recognized=0;
  if(clean.startsWith('{')){
   try{
-   const packet=JSON.parse(clean);if(!Array.isArray(packet.operations)||packet.operations.length>100)throw Error('Expected operations array (maximum 100)');
-   rows=packet.operations.map(op=>{
-    if(!op||typeof op!=='object')throw Error('Operation must be an object');
-    const key=op.key??op.trackerId,verb=String(op.verb??op.op??'').toUpperCase(),id=op.sourceMessageId??op.evidence?.messageId,evidence=typeof op.evidence==='string'?op.evidence:op.evidence?.quote;
-    if(typeof key!=='string'||typeof id!=='string'||typeof evidence!=='string'||!Object.hasOwn(op,'value'))throw Error('Operation needs key, verb, value, sourceMessageId and evidence');
+   const packet=JSON.parse(clean);
+   // Accept both legacy operations and a much simpler complete-value delta format.
+   // Every change still requires exact evidence and passes StoryState validation.
+   const changes=Array.isArray(packet.changes)?packet.changes:packet.operations;
+   if(!Array.isArray(changes)||changes.length>100)throw Error('Expected changes or operations array (maximum 100)');
+   rows=changes.map(op=>{
+    if(!op||typeof op!=='object')throw Error('Change must be an object');
+    const key=op.key??op.trackerId??op.tracker,verb=String(op.verb??op.op??'SET').toUpperCase(),id=op.sourceMessageId??op.messageId??op.evidence?.messageId,evidence=typeof op.evidence==='string'?op.evidence:op.evidence?.quote;
+    if(typeof key!=='string'||typeof id!=='string'||typeof evidence!=='string'||!Object.hasOwn(op,'value'))throw Error('Change needs key, value, sourceMessageId and verbatim evidence');
     if(op.path&&op.path!=='/value')throw Error('Use FIELD for a single record field or SET at /value');
     return ['UPDATE',key,verb,typeof op.value==='string'?op.value:JSON.stringify(op.value),id,evidence];
    });recognized=rows.length||1;
@@ -34,17 +38,18 @@ function parseCommands(raw,definitions,messages,state){
    const parts=Array.isArray(row)?row:row.trim().split(/\s+::\s+/);
    if(parts.length<6)throw Error('Provide key, verb, value, message ID and evidence');
    const [,key,verbRaw,payload,id,...rest]=parts,verb=verbRaw.toUpperCase(),evidence=rest.join(' :: ');
-   const d=known.get(key),message=byId.get(id);
+   const d=known.get(key)||definitions.find(item=>item.id===key&&definitions.filter(candidate=>candidate.id===key).length===1),message=byId.get(id);
+   const resolvedKey=d?keyOf(d):key;
    if(!d||d.enabled===false||d.updateMode==='manual')throw Error('Unknown or manual-only tracker '+key);
    if(!message||!evidence||!String(message.mes||message.text||'').includes(evidence))throw Error('Evidence is not an exact quote from '+id);
-   const previous=working[key];if(previous===undefined)throw Error('Tracker is not available in this chat');
+   const previous=working[resolvedKey];if(previous===undefined)throw Error('Tracker is not available in this chat');
    let value=copy(previous);
    if(['INCREASE','DECREASE'].includes(verb)){
     if(d.type!=='number')throw Error('Increment/decrement requires number tracker');
     const delta=num(payload);if(delta<=0)throw Error('Change must be positive');
     value=Math.max(d.min,Math.min(d.max,value+(verb==='INCREASE'?delta:-delta)));
    }else if(verb==='SET'){
-    if(!['number','boolean','enum','text','clock','record','quest','timer','relationship'].includes(d.type))throw Error('SET unsupported for this type; use FIELD or ADD');
+    if(!['number','boolean','enum','text','clock','record','quest','timer','relationship','list','injuries'].includes(d.type))throw Error('SET unsupported for this tracker type');
     value=scalar(payload);
     if(d.type==='record'){const shape=(old,next)=>{if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Record SET needs an object');for(const key of Object.keys(old)){if(!Object.hasOwn(next,key))throw Error('Preserve unchanged record field '+key)}for(const key of Object.keys(next)){if(!Object.hasOwn(old,key)||['__proto__','constructor','prototype'].includes(key))throw Error('Unknown record field '+key);if(old[key]!==null&&typeof old[key]==='object'&&!Array.isArray(old[key]))shape(old[key],next[key]);else if(old[key]!==null&&(Array.isArray(old[key])?!Array.isArray(next[key]):typeof old[key]!==typeof next[key]))throw Error('Wrong type for record field '+key)}};shape(previous,value);}
    }else if(verb==='ADD'||verb==='REMOVE'){
@@ -68,7 +73,7 @@ function parseCommands(raw,definitions,messages,state){
     if(d.type!=='injuries')throw Error('WOUND requires injury tracker');
     const [location,severity,cause,pain='5',symptoms='',limitations='']=payload.split(/\s*\|\s*/).map(x=>x.trim());
     if(!location||!cause)throw Error('Wound needs body location and cause');
-    const code='wound_'+require('node:crypto').createHash('sha256').update(key+id+location+cause).digest('hex').slice(0,12);
+    const code='wound_'+require('node:crypto').createHash('sha256').update(resolvedKey+id+location+cause).digest('hex').slice(0,12);
     if(value.some(x=>x.id===code))continue;
     value.push({id:code,location,cause,severity:severity||'minor',status:'fresh',pain:num(pain),symptoms,limitations,treatment:'',scar:''});
    }else if(verb==='TREAT'){
@@ -78,8 +83,8 @@ function parseCommands(raw,definitions,messages,state){
     if(status)found.status=status;if(treatment)found.treatment=treatment;if(pain)found.pain=num(pain);
    }else throw Error('Unknown operation '+verb);
    validateValue(d,value);if(JSON.stringify(value)===JSON.stringify(previous))continue;
-   output.push({key,value,sourceMessageId:id,evidence,reason:verb+' from observed turn'});
-   working[key]=value;
+   output.push({key:resolvedKey,value,sourceMessageId:id,evidence,reason:verb+' from observed turn'});
+   working[resolvedKey]=value;
   }catch(error){issues.push((Array.isArray(row)?row.join(' :: '):row).slice(0,200)+': '+error.message);}
  }
  return {changes:output,issues,recognized};
@@ -139,10 +144,9 @@ function explicitClockChanges(definitions,messages,state){return explicitStateCh
 function trackerInstructions(definitions,state,messages,contextMessages=[]){
  const allowed=definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
  const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,current:state[keyOf(d)]}));
- return 'You are a factual state transition extractor, not a storyteller. Return exactly one JSON object with an operations array. No Markdown or explanations. If nothing changes return {"operations":[]}.\n'+
- 'Each operation has exactly these fields: {"key":"an exact key from the manifest","verb":"SET","value":"new value or operation payload","sourceMessageId":"an exact message ID","evidence":"an exact verbatim quote proving THIS change"}.\n'+
- 'Allowed verbs: INCREASE, DECREASE (positive numeric value); SET (typed scalar or complete structured record); ADD, REMOVE (one list item); FIELD (string field=value, field+=item or field-=item); WOUND (location|severity|cause|pain|symptoms|limitations); TREAT (woundId|status|treatment|pain).\n'+
- 'Only change trackers directly affected by the quoted event. A visitor entering does not change contents, hunger or injuries. Do not reset or empty objects without an explicit emptying event. Preserve all unchanged fields and their types. Never invent exact numeric levels; use modest deltas within maxDelta unless an exact value is explicitly stated. Record lists use JSON arrays, booleans use true/false. Hypotheticals, plans and intentions are not completed events. Leave unrelated trackers out.\n'+
- 'Tracker manifest:\n'+JSON.stringify(entries)+'\nEarlier context (read-only; never cite these as source IDs):\n'+JSON.stringify(contextMessages.map(m=>({speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,2400)})))+'\nMessages eligible for evidence-backed changes:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
+ return 'You are a factual state transition extractor, not a storyteller. Return ONLY one JSON object. Format: {"changes":[{"key":"exact manifest key","value":"the NEW complete value, preserving its JSON type","sourceMessageId":"exact source ID","evidence":"EXACT verbatim quote from that source proving the event"}]}. If no established change, return {"changes":[]}. Do not add Markdown or analysis.\\n'+
+ 'For number trackers value is a number, for booleans a boolean, for lists a complete string array, for structured records a complete JSON object with ALL unchanged fields retained, for injuries a complete array that never erases established wounds, and for other trackers their matching typed value. Existing {"operations":[{"key":"...","verb":"INCREASE|DECREASE|SET|ADD|REMOVE|FIELD|WOUND|TREAT","value":"...","sourceMessageId":"...","evidence":"..."}]} is also accepted if easier for incremental updates.\\n'+
+ 'Only include real changes, directly proven by one of the eligible source messages. Do not guess hidden emotional states or arbitrary numeric levels, change unrelated fields, reverse proven injuries, or treat plans/hypotheticals as completed actions. Preserve all previously established facts and unchanged fields; modest numeric changes must respect maxDelta and the permitted range.\\n'+
+ 'Tracker manifest:\\n'+JSON.stringify(entries)+'\\nEarlier context (read-only; never cite these as source IDs):\\n'+JSON.stringify(contextMessages.map(m=>({speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,2400)})))+'\\nMessages eligible for evidence-backed changes:\\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
 }
 module.exports={parseCommands,trackerInstructions,explicitClockChanges,explicitStateChanges};

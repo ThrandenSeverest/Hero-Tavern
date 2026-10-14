@@ -28,7 +28,7 @@ const ALIASES={'flux-2-klein-4b.safetensors':['flux-2-klein-4b-fp8.safetensors']
 function findInstalledName(file,lists){
  const choices=[file.name,...(ALIASES[file.name]||[])];
  return (lists[file.group]||[]).find(name=>typeof name==='string'&&
-  choices.some(wanted=>name===wanted||name.endsWith('/'+wanted)||name.endsWith('\\'+wanted)))||null;
+  choices.some(wanted=>name.replace(/\\/g,'/').split('/').at(-1)===wanted))||null;
 }
 function resolvePackFiles(pack,lists){
  return Object.fromEntries((pack.files||[]).map(file=>[file.group,findInstalledName(file,lists)]));
@@ -67,15 +67,17 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   if(fs.existsSync(output)&&fs.lstatSync(output).isSymbolicLink())throw Error('Model file symlink refused.');
   return output;
  }
+ // Check real model files, not empty placeholders or .part files.
  function localStatus(){
   const lists={};for(const group of GROUPS){
-   let names=[];const folder=settings.modelRoot?path.join(settings.modelRoot,group):'';
+   const names=[],folder=settings.modelRoot?path.join(settings.modelRoot,group):'';
    try{
     if(folder&&fs.existsSync(folder)&&!fs.lstatSync(folder).isSymbolicLink()){
      const items=fs.readdirSync(folder,{withFileTypes:true});
-     names=items.filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>x.name);
+     const keep=(name,full)=>{try{if(fs.statSync(full).size>=1048576)names.push(name)}catch{}};
+     for(const entry of items.filter(x=>x.isFile()&&!x.isSymbolicLink()))keep(entry.name,path.join(folder,entry.name));
      for(const sub of items.filter(x=>x.isDirectory()&&!x.isSymbolicLink()).slice(0,50)){
-      try{names.push(...fs.readdirSync(path.join(folder,sub.name),{withFileTypes:true}).filter(x=>x.isFile()&&!x.isSymbolicLink()).map(x=>sub.name+'/'+x.name))}catch{}
+      try{for(const item of fs.readdirSync(path.join(folder,sub.name),{withFileTypes:true}).filter(x=>x.isFile()&&!x.isSymbolicLink()))keep(sub.name+'/'+item.name,path.join(folder,sub.name,item.name))}catch{}
      }
     }
    }catch{}
@@ -83,6 +85,7 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
   }
   return composeStatus(lists);
  }
+
  function snapshot(){
   return {settings:{...settings},catalog:PACKS.map(x=>({...x})),download:download&&{packId:download.packId,file:download.file,bytes:download.bytes+(download.part&&fs.existsSync(download.part)?fs.statSync(download.part).size:0),total:download.total,phase:download.phase,part:download.part},lastError};
  }
@@ -144,6 +147,8 @@ function createModelHub(root,{fetchFn=globalThis.fetch,spawnFn=spawn}={}){
     fs.renameSync(job.part,e.location);
     job.bytes+=e.meta.size;
    }
+   const verified=localStatus().find(p=>p.id===id);
+   if(!verified?.installed)throw Error('Download completed but model pack is incomplete on disk: '+(verified?.missing||[]).join(', '));
    settings.selected=id;save();job.phase='complete';lastError='';return {installed:true,packId:id,modelRoot:settings.modelRoot};
   }catch(e){lastError=e.message;throw e}finally{download=null}
  }

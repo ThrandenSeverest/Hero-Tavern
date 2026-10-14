@@ -65,7 +65,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const eligibleFor=m=>eligible.filter(d=>sourceIndex(m)>=firstIndex(d));
    const direct=explicitStateChanges(eligible,selected,v.context.state);
    const contextBefore=v.messages.slice(Math.max(0,sourceIndex(selected[0])-5),sourceIndex(selected[0])).filter(m=>!m.is_system);
-   const diagnostics={at:Date.now(),recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length};
+   const diagnostics={at:Date.now(),head,recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length};
    try{
     let parsed={changes:[],issues:[],recognized:0};
     if(ready()){

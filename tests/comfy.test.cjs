@@ -72,7 +72,7 @@ test('Qwen GGUF is discovered through the GGUF loader inventory even when core d
     route==='/models/unet_gguf'?['qwen-image-2.1-Q5_K_M.gguf']:
     route==='/models/text_encoders'?['qwen3vl_8b_int8_convrot.safetensors']:
     route==='/models/vae'?['qwen_image_2.1_vae_bf16.safetensors']:
-    route==='/object_info'?Object.fromEntries(['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','KSampler','VAEDecode','SaveImage'].map(k=>[k,{}])):
+    route==='/object_info'?Object.fromEntries(['UnetLoaderGGUF','CLIPLoader','VAELoader','TextEncodeQwenImage21','LatentUpscale','RepeatLatentBatch','KSampler','VAEDecode','SaveImage'].map(k=>[k,{}])):
     route==='/object_info/KSampler'?{KSampler:{input:{required:{}}}}:[];
    return new Response(JSON.stringify(data),{status:200});
   }});

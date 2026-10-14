@@ -83,7 +83,7 @@ export async function initStory({getContext,frame,show}){
  toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else{show(op);sync().catch(notify)}};
  function dialog(title){const bg=document.createElement('div');bg.className='hero-story-dialog';const box=document.createElement('section'),h=document.createElement('h2');h.textContent=title;box.append(h);bg.append(box);document.body.append(bg);const close=document.createElement('button');close.textContent='Cancel';close.onclick=()=>bg.remove();box.append(close);return {bg,box,close};}
  async function openLeadingPrompt(){
-  if(!selected()||c().groupId){window.toastr?.info('Select a single character to edit their leading prompt.');return;}
+  if(c().groupId||!c().characters?.[c().characterId]||Number(c().characterId)<0){window.toastr?.info('Select a single character to edit their leading prompt.');return;}
   const character=c().characters?.[c().characterId],ext=character?.data?.extensions?.hero_tavern||character?.extensions?.hero_tavern||{};
   const {bg,box}=dialog('Character leading prompt · '+(character?.name||'Selected character'));
   const description=document.createElement('p');description.textContent='Persistent guidance for this character: story theme, pacing, point of view, behavior rules or things the AI should keep in mind. This is added to every chat generation. It does not create a tracker or automatically update state.';
@@ -101,7 +101,7 @@ export async function initStory({getContext,frame,show}){
     const updated={...currentProfile,leadingPrompt:value.slice(0,4000)};
     await c().writeExtensionField(c().characterId,'hero_tavern',updated);
     if(current.data){current.data.extensions={...(current.data.extensions||{}),hero_tavern:updated}}
-    if(view?.session?.characterId)await rpc('/story/profile',{characterId:view.session.characterId,profile:updated});
+    if(view?.session?.characterId&&view.session.location?.avatar===character.avatar)await rpc('/story/profile',{characterId:view.session.characterId,profile:updated});
     status.textContent='Saved for '+(current.name||'this character')+'. It will apply to the next reply.';
     setTimeout(()=>{if(bg.isConnected)bg.remove()},450);
    }catch(error){status.textContent='Save failed: '+error.message;save.disabled=false;clear.disabled=false;}

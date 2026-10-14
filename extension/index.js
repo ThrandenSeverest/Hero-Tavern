@@ -114,7 +114,7 @@ const initHeroTavern = async () => {
       const root=document.documentElement,values={
         '--hero-content-font':uiPrefs.font+'px','--hero-shell-font':uiPrefs.ui+'px',
         '--hero-pane-opacity':String(uiPrefs.panels/100),'--hero-chat-opacity':String(uiPrefs.chat/100),
-        '--hero-pane-blur':uiPrefs.blur+'px','--hero-custom-rail':uiPrefs.rail+'px',
+        '--hero-pane-blur':uiPrefs.blur+'px','--hero-custom-rail':(innerWidth<=900?76:uiPrefs.rail)+'px',
         '--hero-rail':(innerWidth<=900?'76px':uiPrefs.rail+'px'),
         '--hero-accent':uiPrefs.accent,'--hero-background-display':uiPrefs.background?'block':'none'
       };

@@ -22,3 +22,21 @@ test('image edits do not inherit global style and prompt refinement explicitly p
  try{await s.action('/studio/generate',{prompt:'Change coat',sourceName:'a.png',operation:'img2img',refine:false});assert.equal(generated.prompt,'Change coat');
  const refined=await s.action('/studio/refine',{prompt:'Change coat',operation:'inpaint'});assert.match(instruction,/Describe only the requested changes/);assert.equal(refined.prompt,'Change coat to silver.');}finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+// Playwright traverses open shadow roots, so a shadow `#status` still collides
+// with Writer's own `#status` when using frame.locator('#status').
+test('shared tools IDs are uniquely namespaced and cannot shadow Writer locators',()=>{
+ const drawer=fs.readFileSync(path.join(__dirname,'../manager/SharedTools.js'),'utf8');
+ const writer=fs.readFileSync(path.join(__dirname,'../manager/Writer.html'),'utf8');
+ const ids=[...drawer.matchAll(/\bid="([a-z][\w-]*)"/g)].map(m=>m[1]);
+ const writerIds=new Set([...writer.matchAll(/\bid="([a-z][\w-]*)"/g)].map(m=>m[1]));
+ assert.ok(ids.length>10, 'All shared controls should be verified');
+ assert.equal(new Set(ids).size,ids.length,'Duplicate IDs within the drawer');
+ for(const id of ids){
+  assert.match(id,/^hero-tools-/,'Unscoped ID can collide with a Playwright locator: '+id);
+  assert.ok(!writerIds.has(id),'Drawer ID collides with Writer: '+id);
+ }
+ assert.ok(writerIds.has('status'),'Writer status selector must remain intact');
+ assert.match(drawer,/ui\.getElementById\('hero-tools-'\+id\)/);
+ assert.match(drawer,/id="hero-tools-status"/);
+});

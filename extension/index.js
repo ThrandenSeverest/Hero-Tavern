@@ -96,7 +96,7 @@ const initHeroTavern = async () => {
       if(heroSpeaking)return;
       const state=await heroVoiceSettings().catch(()=>null);if(!state?.settings?.enabled)return;
       const raw=element.querySelector('.mes_text')?.innerText||'';
-      const cleaned=raw.replace(/<think>[\\s\\S]*?<\\/think>/gi,'').trim();if(!cleaned)return;
+      const cleaned=raw.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();if(!cleaned)return;
       const id=String(element.getAttribute('mesid')||element.dataset.mesid||'')+'|'+cleaned;
       if(!force&&id===heroLastSpoken)return;
       const who=element.querySelector('.name_text')?.textContent?.trim()||context?.()?.name2||'Character';

@@ -33,8 +33,8 @@
   currentController.abort();
  };
  const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text'};
- const base=()=>{
-  const model=$('model-test-model').value;
+ const base=(chosenModel)=>{
+  const model=chosenModel||$('model-test-model').value;
   const opts=model==='sdxl'?{steps:28,cfg_scale:6,sampler_name:'DPM++ 2M Karras',scheduler:'karras'}:model==='flux-klein'?{steps:4,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:model==='z-turbo'?{steps:9,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:{steps:25,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'};
   return {modelTest:true,testTimeoutMs:205000,prompt:'',modelPack:model,negative_prompt:'',operation:'txt2img',width:768,height:768,seed:-1,preset:'raw',refine:false,releaseGPU:true,batch_size:1,lora:[],sourceName:'',referenceName:'',maskData:'',comfyCheckpoint:$('hero-comfy-checkpoint')?.value||'',...opts};
  };
@@ -70,8 +70,8 @@
  }
  async function run(kind,override){
   if(active&&override?.direct)throw Error('Another model test is in progress.');
-  const started=Date.now(),model=$('model-test-model').value,progress=label=>notify(label+' · '+model+' · bounded test (Stop available). Image tests unload text automatically; it reloads at the next chat request.');
-  let report={kind,model,status:'passed',prompt:'',settings:{},elapsedMs:0};
+  const started=Date.now(),model=override?.model||$('model-test-model').value,progress=label=>notify(label+' · '+model+' · bounded test (Stop available). Image tests unload text automatically; it reloads at the next chat request.');
+  let report={kind,model,status:'passed',prompt:'',settings:{},elapsedMs:0,suiteId:override?.suiteId||null};
   try{
    if(kind==='text2text'){
     progress('Running local text-instruction test');
@@ -81,7 +81,7 @@
    }else if(kind==='text2image'){
     progress('Generating image '+(override?.second?'B':'A')+' with repeatable prompt');
     const prompt=override?.second?presets.text2image.secondPrompt:presets.text2image.prompt;
-    const input={...base(),prompt,operation:'txt2img'};
+    const input={...base(model),prompt,operation:'txt2img'};
     const r=await callTest('/studio/generate',input,kind,210000);
     sourceImage=getFilename(r.url);$('model-test-source').value=sourceImage;
     report={...report,prompt,settings:{...input,seed:r.seed,modelPack:model,mode:'txt2img'},imageName:sourceImage,model:r.modelPack||model};
@@ -92,7 +92,7 @@
     if(!source)throw Error('Select a gallery PNG, or run Text → Image first.');
     progress('Editing explicit reference image');
     const prompt=presets.image2image.prompt;
-    const input={...base(),prompt,operation:'img2img',sourceName:source,denoise:0.7,batch_size:1};
+    const input={...base(model),prompt,operation:'img2img',sourceName:source,denoise:0.7,batch_size:1};
     const r=await api('/studio/generate',input);
     const imageName=getFilename(r.url);report={...report,prompt,settings:{...input,seed:r.seed},imageName,model:r.modelPack||model};
    }else if(kind==='image2text'){
@@ -110,7 +110,7 @@
   try{const result=await record(report);notify((result.status==='passed'?'PASS':'CHECK')+' · '+kindNames[kind]+' · '+(result.elapsedMs/1000).toFixed(1)+' sec'+(result.error?' · '+result.error:''));return result;}
   catch(e){notify('Could not save test report: '+e.message);return {...report,error:report.error||e.message};}
  }
- const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-all','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
+ const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
  async function guarded(fn){if(active)return;stopRequested=false;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
  $('model-test-run-all').onclick=()=>guarded(async()=>{
   const suite=[];
@@ -130,6 +130,27 @@
   }
   const counts={passed:0,failed:0,warning:0,skipped:0};for(const s of suite)counts[s.status]=(counts[s.status]||0)+1;
   notify((stopRequested?'Suite stopped safely. ':'Safe model test suite finished: ')+JSON.stringify(counts)+'. View individual results and timings below.');
+ });
+ // Run the same two fixed prompts consecutively for every available installed pack.
+ // No automatic model downloads and no simultaneous inference jobs.
+ $('model-test-compare-installed').onclick=()=>guarded(async()=>{
+  const status=await api('/comfy/status');
+  const installed=(status.packs||[]).filter(p=>p.installed&&p.id&&p.id!=='koboldcpp');
+  if(!installed.length)throw Error('No installed ComfyUI image models. Install one in All AI models first.');
+  const runId='compare-'+Date.now(),results=[];
+  for(let i=0;i<installed.length;i++){
+   if(stopRequested)break;
+   const pack=installed[i];
+   notify('Comparing model '+(i+1)+'/'+installed.length+': '+pack.name);
+   for(const second of [false,true]){
+    if(stopRequested)break;
+    const item=await run('text2image',{model:pack.id,second,suiteId:runId});
+    results.push(item);
+    if(item?.status==='failed'&&/cancelled|timed out/i.test(item.error||'')){stopRequested=true;break;}
+   }
+  }
+  const summary=results.reduce((groups,item)=>{const m=groups[item.model]??={passed:0,warning:0,failed:0,skipped:0,seconds:0};m[item.status]=(m[item.status]||0)+1;m.seconds+=Math.round((item.elapsedMs||0)/1000);return groups},{});
+  notify((stopRequested?'Comparison stopped. ':'Sequential comparison complete. ')+JSON.stringify(summary)+' · per-model images and timings below.');
  });
  for(const kind of ['text2text','text2image','image2image','image2text'])$('model-test-run-'+kind).onclick=()=>guarded(()=>run(kind));
  $('model-test-refresh').onclick=()=>guarded(refresh);

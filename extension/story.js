@@ -376,7 +376,7 @@ export async function initStory({getContext,frame,show}){
     for(let pass=0;pass<8;pass++){
      const n=v.session.analyzedSources.length;
      try{v=await rpc('/story/analyze',{id:v.session.id});view=v;publish();}
-     catch(error){window.toastr?.warning('Tracker update failed; saved state was preserved. '+error.message,'Tracker diagnostics');break;}
+     catch(error){window.toastr?.warning('Tracker update failed; saved state was preserved. '+error.message,'Tracker diagnostics');setTimeout(schedule,16000);break;}
      if(v.session.analyzedSources.length===n||v.session.analyzedSources.length>=v.messages.length)break;
     }
    }

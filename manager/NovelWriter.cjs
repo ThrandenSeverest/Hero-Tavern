@@ -73,9 +73,9 @@ function visibleProse(raw,prefix){
 }
 function proseIssue(out,already){
  const t=s(out).trim();if(!t)return 'empty/hidden output';
- if(/^(?:okay|sure|certainly|here is|i will|i need to|as requested)\b/i.test(t))return 'assistant commentary';
+ if(/^(?:okay|sure|certainly|here is|i will|i need to|i understand|as requested)\b/i.test(t))return 'assistant commentary';
  if(/^(?:#{1,4}\s*|\*\*)?(?:chapter summary|character profile|scene breakdown|story plan|review)\s*[:\n]/i.test(t))return 'outline instead of fiction';
- const first=t.toLowerCase().replace(/\s+/g,' ').slice(0,160),old=s(already).toLowerCase().replace(/\s+/g,' ');
+ const first=t.toLowerCase().replace(/\s+/g,' ').slice(0,96),old=s(already).toLowerCase().replace(/\s+/g,' ');
  if(first.length>=75&&old.includes(first))return 'repeated existing scene';
  return '';
 }

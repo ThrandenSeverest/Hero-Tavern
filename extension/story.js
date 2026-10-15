@@ -117,7 +117,13 @@ export async function initStory({getContext,frame,show}){
  async function openCharacterVoice(){
   const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
   const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};
-  const {box}=dialog('Voice · '+character.name),state=await rpc('/tts/status');
+  const {box}=dialog('Voice · '+character.name);
+  // /tts/status accepts GET, but rpc() defaults data={} (POST).
+  let statusError='';
+  const state=await rpc('/tts/status',null).catch(error=>{
+   statusError=error.message||String(error);
+   return {profiles:[],voices:[],settings:{device:'cpu'}};
+  });
   const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Qwen CustomVoice uses built-in voices without a WAV; VoiceDesign uses a description; Flash and cloning models need an imported WAV. Voice models must be installed first.';
   const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
   dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
@@ -129,6 +135,7 @@ export async function initStory({getContext,frame,show}){
   const text=document.createElement('textarea');text.value='*The door opens.* “Welcome to the tavern.”';
   const audio=document.createElement('audio');audio.controls=true;
   const status=document.createElement('p');status.setAttribute('role','status');
+  if(statusError)status.textContent='Voice service unavailable: '+statusError+'. Voice controls remain editable; retry speech installation later.';
   const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
   // A native Character Voice editor, not a link to an unrelated settings screen.
   const engine=document.createElement('select');engine.id='hero-character-voice-engine';

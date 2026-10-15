@@ -155,11 +155,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
             let prompt;
             if(mode==='writer'){
-                // Actual continuation of the manuscript: append controls as a system
-                // message BEFORE the prose and never append another instruction AFTER it.
-                const marker='<|im_start|>assistant\n',idx=body.prompt.lastIndexOf(marker);
-                if(idx<0)throw Error('Writer prompt has no manuscript continuation boundary.');
-                prompt=body.prompt.slice(0,idx)+'<|im_start|>system\n'+extra+'<|im_end|>\n'+body.prompt.slice(idx);
+                prompt=replyPrompt(body.prompt,extra);
             }else prompt=replyPrompt(body.prompt,extra);
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
@@ -238,11 +234,26 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                     const revised=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.max(0.65,Math.min(1,settings.temperature)),rep_pen:Math.max(1.13,settings.repetition_penalty)}),filters);
                     const still=writerRepetitionIssue(revised,body.hero_writer?.text);
                     lastRun.writerProgressRepair={reason:issue,success:!!revised&&!still&&!isWriterNonProse(revised)};
-                    if(!revised||still||isWriterNonProse(revised))throw Error('Writer continued repeating established manuscript events. The draft was preserved; choose Next Scene, edit the active beat, or try another prose model.');
+                    if(!revised||still||isWriterNonProse(revised))throw Error('Writer continued repeating established manuscript events. The draft was preserved; adjust pacing or try another prose model.');
                     text=revised;
                 }
             }
-            if(!text)throw new Error('The model returned only hidden reasoning or an empty reply. Try again or adjust Generation settings.');
+            if(mode==='writer'&&text){
+                 const directive=/\[(?:continue|write|next scene|narrate|scene:|instruction:)[^\]\n]{0,180}\]/i;
+                 const words=text.trim().split(/\s+/).filter(Boolean).length;
+                 const short=words<45&&replyTokens>=256&&['continue','advance'].includes(body.hero_writer?.operation||'continue');
+                 if(directive.test(text)||short){
+                     stage('repairing-writer-length');
+                     const rebuilt=await buildWriterContext({...body.hero_writer,repair:true},budget,countTokens);
+                     const corrected=replyPrompt(rebuilt.prompt,extra+'\nWrite connected literary paragraphs, carrying the story to a concrete consequence. Never write square-bracket instructions.');
+                     const revised=filterReply(await sendChecked({...request,prompt:corrected,stream:false,temperature:Math.max(0.65,Math.min(0.92,settings.temperature))}),filters);
+                     const revisedWords=revised.trim().split(/\s+/).filter(Boolean).length;
+                     lastRun.writerLengthRepair={originalWords:words,revisedWords};
+                     if(revised&&!directive.test(revised)&&!isWriterNonProse(revised)&&!writerRepetitionIssue(revised,body.hero_writer?.text)&&(!short||revisedWords>=45))text=revised;
+                     else throw Error('Writer returned an incomplete or instructional passage. Original manuscript preserved. Try another text model or increase output tokens.');
+                 }
+             }
+             if(!text)throw new Error('The model returned only hidden reasoning or an empty reply. Try again or adjust Generation settings.');
             let usage;if(budgeted){try{usage={prompt_tokens:await countTokens(prompt),completion_tokens:await countTokens(text,false),context_size:contextSize};}catch(error){lastRun.metricsWarning=errorDetails(error);}}
             return {id:'hero-'+Date.now(),object:'text_completion',model:body.model||'local-model',usage,...(mode==='writer'?{writerContext:lastRun.writerContext}:{}),choices:[{index:0,text,finish_reason:'stop'}]};
         } catch(error){lastRun.error=errorDetails(error);lastRun.failedStage=lastRun.stage;throw error;} finally {lastRun.elapsedMs=Date.now()-lastRun.started;lastRun.finished=Date.now();signal?.removeEventListener('abort',abort);active=null;stage('idle');}

@@ -53,10 +53,10 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await panel.locator('#models-open-tts').click();
   await panel.locator('#tts-download').waitFor({state:'visible'});
   if(!await panel.locator('#tts-model-downloads').count())throw Error('TTS download status missing.');
-  // Real bridge + model-specific controls: presets never require a reference WAV.
+  // Real bridge + model-specific controls: CustomVoice supports an optional style, never a reference WAV.
   await panel.locator('#tts-engine').selectOption('qwen');
   await panel.locator('#tts-variant').selectOption('custom-0.6');
-  if(await panel.locator('#tts-ref-text').isVisible()||await panel.locator('#tts-style').isVisible())throw Error('Preset 0.6B exposes unsupported clone/style controls');
+  if(await panel.locator('#tts-ref-text').isVisible()||!await panel.locator('#tts-style').isVisible()||!await panel.locator('#tts-speaker').isVisible())throw Error('CustomVoice 0.6B must show speaker and optional mood without clone transcript');
   await panel.locator('#tts-variant').selectOption('design-1.7');
   if(!await panel.locator('#tts-style').isVisible()||await panel.locator('#tts-speaker').isVisible())throw Error('VoiceDesign has wrong controls');
   await panel.locator('#tts-style').fill('A warm adult storyteller voice');

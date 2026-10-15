@@ -13,6 +13,7 @@ function splitSpeech(raw,{speaker='Character',narrator='Narrator'}={}){
  push();return segments.filter(x=>x.text);
 }
 const KOKORO_VOICES=['af_heart','af_bella','af_nicole','af_sarah','am_adam','am_michael','am_echo','bf_emma','bf_isabella','bm_george','bm_lewis'];
+const KOKORO_DEPS_VERSION='kokoro-0.9.4-transformers-4.49.0-cu128-v2';
 const VARIANTS=['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'];
 function capabilities(engine,variant){
  if(!['flash','qwen','kokoro'].includes(engine)||(engine==='qwen'&&!VARIANTS.includes(variant))||(engine==='flash'&&variant!=='flash'&&!VARIANTS.includes(variant))||(engine==='kokoro'&&variant!=='kokoro'))throw Error('Unsupported speech engine/model');
@@ -32,7 +33,7 @@ function createTTS(root){
  try{settings={...settings,...JSON.parse(fs.readFileSync(file,'utf8'))}}catch{}
  let child=null,pending=new Map(),sequence=0,install=null,installOutput='',fault='',busy=false,downloader=null,downloadOutput='',downloadError='',downloadKind='';
  let installStage='idle',installStartedAt=0,installChangedAt=0,downloadStartedAt=0,downloadChangedAt=0,setupRequested=null;
- let diskCache={at:0,bytes:0,files:0},lastSynthesis=null,workerEngine='',messageBusy=false;
+ let diskCache={at:0,bytes:0,files:0},lastSynthesis=null,workerEngine='',messageBusy=false,workerLog='';
  const profileFile=path.join(root,'voice-profiles.json'),logFile=path.join(root,'Logs','tts-jobs.jsonl');
  let profiles={};try{profiles=JSON.parse(fs.readFileSync(profileFile,'utf8'))}catch(e){if(e.code!=='ENOENT')throw Error('Voice profiles could not be read; preserved file: '+e.message)}
  const jobLog=[];
@@ -92,17 +93,18 @@ function createTTS(root){
  };
  const nextAction=()=>fault?'Repair dependencies; '+fault:downloadError?'Retry model download. '+downloadError:install?'Wait for dependency installation to finish':downloader?'Wait for model weights to finish downloading':!fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed'))?'Install Python dependencies':!installedWeight(settings.engine,settings.variant)?'Download the selected voice weights':'Generate a speech preview to verify synthesis';
  const voices=path.join(root,'Voices'),cache=path.join(root,'TTSCache');fs.mkdirSync(voices,{recursive:true});fs.mkdirSync(cache,{recursive:true});
+ const runtimeHealthy=engine=>{const marker=path.join(root,'TTSRuntime',engine,'.installed');if(!fs.existsSync(marker))return false;if(engine!=='kokoro')return true;try{return fs.readFileSync(marker,'utf8').includes(KOKORO_DEPS_VERSION)}catch{return false}};
  const executable=(engine=settings.engine)=>{const dir=path.join(root,'TTSRuntime',engine);return process.platform==='win32'?path.join(dir,'Scripts','python.exe'):path.join(dir,'bin','python');};
  const weightsDir=(engine,variant)=>path.join(root,'TTSModels',engine,engine==='flash'?'flash':variant);
  const installedWeight=(engine,variant)=>fs.existsSync(path.join(weightsDir(engine,variant),'.hero-downloaded'));
  const currentKind=()=>settings.engine==='flash'?'flash':settings.engine==='kokoro'?'kokoro':settings.variant;
  const status=()=>{
-  const ready=fs.existsSync(executable())&&fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed'));
+  const ready=fs.existsSync(executable())&&runtimeHealthy(settings.engine);
   const weightsReady=installedWeight(settings.engine,settings.variant);
   const storage=downloader?bytesOnDisk(weightsDir(settings.engine,settings.variant)):{bytes:0,files:0};
   return {settings,capabilities:capabilities(settings.engine,settings.variant),profiles:Object.values(profiles),jobLog,lastSynthesis,ready,weightsReady,downloadedModels:{flash:installedWeight('flash','flash'),kokoro:installedWeight('kokoro','kokoro'),...Object.fromEntries(['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(variant=>[variant,installedWeight('qwen',variant)]))},
    running:!!child,busy:busy||messageBusy,installing:!!install,installStage,installStartedAt,installChangedAt,
-   installOutput:installOutput.slice(-12000),downloading:!!downloader,downloadKind,downloadStartedAt,downloadChangedAt,
+   installOutput:installOutput.slice(-12000),workerLog:workerLog.slice(-9000),downloading:!!downloader,downloadKind,downloadStartedAt,downloadChangedAt,
    downloadOutput:downloadOutput.slice(-12000),downloadError,error:fault,lastSynthesis,
    setupQueued:!!setupRequested,phase:install?'dependencies:'+installStage:downloader?'weights':fault?'error':ready&&weightsReady?'ready':'idle',
    nextAction:nextAction(),downloadedBytes:storage.bytes,downloadedFiles:storage.files,
@@ -147,7 +149,7 @@ function createTTS(root){
   const isWindows=process.platform==='win32'&&!process.env.HERO_TTS_PYTHON;
   const pythonExe=isWindows?path.join(target,'Scripts','python.exe'):path.join(target,process.platform==='win32'?'Scripts':'bin',process.platform==='win32'?'python.exe':'python');
   const done=()=>{
-   fs.writeFileSync(path.join(target,'.installed'),new Date().toISOString());
+   fs.writeFileSync(path.join(target,'.installed'),(engine==='kokoro'?KOKORO_DEPS_VERSION+'\n':'')+new Date().toISOString());
    install=null;installStage='complete';installChangedAt=Date.now();
    appendInstall('Dependency installation completed. Python runtime ready.\n');
    if(setupRequested?.engine===settings.engine&&setupRequested?.variant===settings.variant){
@@ -172,7 +174,8 @@ function createTTS(root){
   };
   const installPackages=()=>{
    appendInstall('\nStep 2/3: Installing '+engine+' packages into '+pythonExe+'…\n');
-   const packages=engine==='flash'?['chatterbox-flash','soundfile','huggingface_hub']:engine==='kokoro'?['kokoro>=0.9.4','soundfile','huggingface_hub']:['qwen-tts','soundfile','huggingface_hub'];
+   // Kokoro imports transformers.AlbertModel and must not take unbounded Transformers upgrades.
+   const packages=engine==='flash'?['chatterbox-flash','soundfile','huggingface_hub']:engine==='kokoro'?['kokoro==0.9.4','transformers==4.49.0','misaki[en]==0.9.4','soundfile','huggingface_hub>=0.25,<1']:['qwen-tts','soundfile','huggingface_hub'];
    const command=isWindows?path.join(root,'TTSRuntime','uv.exe'):pythonExe;
    // uv pip directly manages environments without needing "python -m pip".
    const args=isWindows?['pip','install','--python',pythonExe,'--upgrade',...packages]:['-m','pip','install','--upgrade',...packages];
@@ -181,7 +184,11 @@ function createTTS(root){
     appendInstall('\nStep 2/3: Installing PyTorch CUDA 12.8 wheels for the RTX 5070…\n');
     const wheels=['torch==2.7.1','torchaudio==2.7.1','torchvision==0.22.1'];
     const gpuArgs=isWindows?['pip','install','--python',pythonExe,'--upgrade',...wheels,'--index-url','https://download.pytorch.org/whl/cu128']:['-m','pip','install','--upgrade',...wheels,'--index-url','https://download.pytorch.org/whl/cu128'];
-    runChild(command,gpuArgs,'cuda',done);
+    runChild(command,gpuArgs,'cuda',()=>{
+      if(engine!=='kokoro'){done();return;}
+      appendInstall('\nChecking Kokoro, AlbertModel, Torch and Torchvision imports before enabling the engine…\n');
+      runChild(pythonExe,['-u',path.join(root,'TTSWorker.py'),'--check-dependencies','kokoro'],'verify-imports',done);
+     });
    });
   };
   if(!isWindows){
@@ -251,9 +258,10 @@ function createTTS(root){
   if(child&&workerEngine!==engine)stop();if(child)return child;
   if(!fs.existsSync(executable(engine)))throw speechError('TTS_ENGINE_NOT_INSTALLED','Install '+engine+' in Voice Models.');
   if(!installedWeight(engine,variant))throw speechError('TTS_WEIGHTS_MISSING','Download '+engine+' '+variant+' in Voice Models.');
+  if(!runtimeHealthy(engine))throw speechError('TTS_DEPENDENCIES_OUTDATED','Kokoro requires an import-checked dependency repair (AlbertModel). Open Voice Library → Install + download / Repair Python dependencies. Existing voice weights are retained.');
   const proc=spawn(executable(engine),['-u',path.join(root,'TTSWorker.py')],{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1'}});child=proc;workerEngine=engine;fault='';
-  let buffer='';proc.stdout.on('data',d=>{buffer+=d.toString();let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n);buffer=buffer.slice(n+1);let item;try{item=JSON.parse(line)}catch{continue}const p=pending.get(item.id);if(!p)continue;pending.delete(item.id);item.ok?p.resolve(item):p.reject(Error(item.error||'Speech synthesis failed'));}});
-  proc.stderr.on('data',d=>{const text=d.toString();if(/Traceback|Error:|CUDA out of memory/i.test(text))fault=text.slice(-600)});
+  let buffer='';workerLog='';proc.stdout.on('data',d=>{buffer+=d.toString();let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n);buffer=buffer.slice(n+1);let item;try{item=JSON.parse(line)}catch{continue}const p=pending.get(item.id);if(!p)continue;pending.delete(item.id);if(item.ok)p.resolve(item);else{const error=Error(item.error||'Speech synthesis failed');error.traceback=String(item.traceback||'').slice(-9000);if(error.traceback)workerLog=(workerLog+'\n'+error.traceback).slice(-9000);p.reject(error);}}});
+  proc.stderr.on('data',d=>{const chunk=d.toString();workerLog=(workerLog+chunk).slice(-9000);if(/Traceback|Error:|CUDA out of memory/i.test(chunk))fault=workerLog.slice(-1500)});
   proc.on('error',e=>{if(child===proc){fault=e.message;stop()}});proc.on('exit',()=>{if(child!==proc)return;child=null;for(const p of pending.values())p.reject(Error('Speech engine exited. '+fault));pending.clear()});
   proc.stdin.on('error',e=>{if(child===proc){fault=e.message;stop()}});return proc;
  }
@@ -275,7 +283,7 @@ function createTTS(root){
    lastSynthesis={engine:task.engine,variant:task.variant,device:task.device,at:new Date().toISOString(),cached};
    logJob({jobId,event:'completed',messageId:input.messageId,engine:task.engine,variant:task.variant,device:task.device,characters:task.text.length,cached,elapsedMs:Date.now()-started});
    return {url:'/tts/audio/'+key+'.wav',cached,jobId};
-  }catch(e){logJob({jobId,event:'failed',messageId:input.messageId,engine:task?.engine||input.engine||settings.engine,variant:task?.variant||input.variant||settings.variant,error:e.message,elapsedMs:Date.now()-started});throw e}finally{busy=false;}
+  }catch(e){logJob({jobId,event:'failed',messageId:input.messageId,engine:task?.engine||input.engine||settings.engine,variant:task?.variant||input.variant||settings.variant,error:e.message,traceback:e.traceback?.slice(-5500)||undefined,elapsedMs:Date.now()-started});throw e}finally{busy=false;}
  }
  async function speakMessage(input){
   try{return await synthesizeMessage(input)}catch(e){logJob({event:'message_failed',messageId:input?.messageId,error:e.message});throw e}

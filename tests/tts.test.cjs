@@ -159,3 +159,23 @@ test('Kokoro voice profiles need no WAV and retain voice per character',()=>{
   t.stop();
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Kokoro pins versioned requirements and marks old unverified runtimes as needing repair',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../manager/TTSService.cjs'),'utf8');
+ const worker=fs.readFileSync(path.join(__dirname,'../manager/TTSWorker.py'),'utf8');
+ for(const token of ['kokoro==0.9.4','transformers==4.49.0','misaki[en]==0.9.4','verify-imports','--check-dependencies','TTS_DEPENDENCIES_OUTDATED'])assert.ok(source.includes(token),token);
+ assert.match(worker,/from transformers import AlbertModel, AlbertConfig/);
+ assert.match(worker,/from kokoro import KModel, KPipeline/);
+ assert.match(worker,/traceback\.format_exc\(\)\[-9000:\]/);
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'kokoro-dep-health-'));
+ try{
+  const svc=createTTS(root);svc.configure({engine:'kokoro',variant:'kokoro',language:'English'});
+  const d=path.join(root,'TTSRuntime','kokoro','bin');fs.mkdirSync(d,{recursive:true});
+  fs.writeFileSync(path.join(d,'python'),'fixture');
+  fs.writeFileSync(path.join(root,'TTSRuntime','kokoro','.installed'),'old-install');
+  assert.equal(svc.status().ready,false);
+  fs.writeFileSync(path.join(root,'TTSRuntime','kokoro','.installed'),'kokoro-0.9.4-transformers-4.49.0-cu128-v2\nverified');
+  assert.equal(svc.status().ready,true);
+  svc.stop();
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

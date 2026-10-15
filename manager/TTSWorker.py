@@ -165,6 +165,31 @@ def generate(data):
     sample_rate = 24000
     return {"audio": base64.b64encode(encoded).decode("ascii"), "sampleRate": int(sample_rate)}
 
+def check_dependencies(engine):
+    if engine != "kokoro":
+        raise ValueError("Unsupported dependency self-check engine")
+    import importlib.metadata
+    import torch
+    import torchvision
+    import transformers
+    from transformers import AlbertModel, AlbertConfig
+    from kokoro import KModel, KPipeline
+    from misaki import en
+    version = importlib.metadata.version("transformers")
+    if version != "4.49.0":
+        raise RuntimeError(f"Kokoro needs transformers==4.49.0; installed {version}")
+    if not hasattr(AlbertModel, "__init__") or not hasattr(en, "G2P"):
+        raise RuntimeError("Kokoro dependencies did not import correctly")
+    print(json.dumps({"ok": True, "engine": "kokoro", "transformers": version, "torch": torch.__version__, "torchvision": torchvision.__version__}), flush=True)
+
+if len(sys.argv) >= 3 and sys.argv[1] == "--check-dependencies":
+    try:
+        check_dependencies(sys.argv[2])
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+
 for line in sys.stdin:
     try:
         task = json.loads(line)
@@ -177,5 +202,5 @@ for line in sys.stdin:
     except Exception as error:
         traceback.print_exc(file=sys.stderr)
         reply = {"id": task.get("id") if "task" in locals() else None,
-                 "ok": False, "error": str(error)}
+                 "ok": False, "error": f"{type(error).__name__}: {error}", "traceback": traceback.format_exc()[-9000:]}
     print(json.dumps(reply, ensure_ascii=False), flush=True)

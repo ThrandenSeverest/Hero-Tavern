@@ -49,14 +49,14 @@ test('Qwen generated images follow text and use correct distilled sampler indepe
  assert.equal(input(a,'KSampler').latent_image[0],Object.entries(a.graph).find(([id,node])=>node.class_type==='TextEncodeQwenImage21')[0]);
  assert.notDeepEqual(a.graph,b.graph,'two text prompts must produce different ComfyUI conditioning graphs');
 });
-test('Qwen low-strength edits encode the source with matching VAE and discard stale SDXL CFG',()=>{
+test('Qwen reference edits use the native reference-conditioned latent and discard stale SDXL CFG',()=>{
  const pack=QWEN_PACKS.find(p=>p.id==='qwen21-q5km');
  const g=recipeGraph(pack,{prompt:'Change the coat to black',negative_prompt:'',operation:'img2img',steps:25,cfg_scale:5,seed:234}, {source:'reference.png'});
  const encoded=Object.entries(g.graph).find(([,node])=>node.class_type==='TextEncodeQwenImage21');
  const sampler=Object.values(g.graph).find(node=>node.class_type==='KSampler').inputs;
- const sourceLatent=Object.entries(g.graph).find(([,node])=>node.class_type==='VAEEncode');
- assert.ok(sourceLatent);assert.deepEqual(sampler.latent_image,[sourceLatent[0],0]);
- assert.deepEqual(sourceLatent[1].inputs.vae,encoded[1].inputs.vae);
+ assert.ok(!Object.values(g.graph).some(node=>node.class_type==='VAEEncode'));
+ assert.deepEqual(sampler.latent_image,[encoded[0],2]);
+ assert.equal(encoded[1].inputs['images.image_1'][0],Object.entries(g.graph).find(([,node])=>node.class_type==='LoadImage')[0]);
  assert.equal(sampler.cfg,1);
  assert.equal(sampler.scheduler,'simple');
 });

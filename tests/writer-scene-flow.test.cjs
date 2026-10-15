@@ -54,6 +54,7 @@ test('Next Scene operation advances chronology instead of replacing or restartin
   assert.equal(calls[0].operation,'advance');
   assert.match(result.story.text,/Mira reached the inn\. The guard blocked/);
   assert.equal(result.story.generations[0].operation,'advance');
+  assert.equal(result.story.beatIndex,0,'without planned beats next scene does not invent a step');
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 
@@ -106,4 +107,16 @@ test('Writer interface contains planning/beat controls and can advance scenes wi
  assert.match(html,/api\('plan-beats'/);
  assert.match(html,/beatIndex:Math\.min/);
  assert.match(html,/generate\('advance'\)|'continue','advance','insert'/);
+});
+
+test('Next Scene advances a planned beat after commit, but a regenerated passage keeps the beat',async()=>{
+ const root=temp();
+ try{
+  const api=createWriterAPI(root,{generate:async()=>({choices:[{text:'The watchman lowers his spear and allows Mira through.'}]})});
+  const s=await api.action('/writer/api/create',{story:{text:'Mira arrives at the gate.',beats:['The watchman blocks entry.','A bell rings across the city.'],beatIndex:0}});
+  const next=await api.action('/writer/api/generate-apply',{id:s.id,expectedVersion:s.version,operation:'advance'});
+  assert.equal(next.story.beatIndex,1);
+  const regen=await api.action('/writer/api/regenerate',{id:s.id,expectedVersion:next.story.version,operation:'advance',generationId:next.generation.id});
+  assert.equal(regen.story.beatIndex,1);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
 });

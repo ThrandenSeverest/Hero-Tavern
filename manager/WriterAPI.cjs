@@ -104,7 +104,12 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const {reconcileGenerations}=require('./WriterStore.cjs');
    const segments=reconcileGenerations(original.text,nextText,prevSegments);
    segments.push({id:existing?.id||crypto.randomUUID(),at:Date.now(),start:before.length,end:before.length+prose.length,text:prose,operation,instruction:op==='regenerate'?(existing?.instruction||''):String(data.instruction||'').slice(0,2000)});
-   const saved=store.save(original.id,{text:nextText,generations:segments,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
+   // "Next Scene" is an explicit scene-advance command, not another
+   // rewrite of the current beat. Move to the following beat only after
+   // the prose is actually committed. Regeneration must not skip beats.
+   const nextBeatIndex=op==='generate-apply'&&operation==='advance'
+    ?Math.min((original.beats||[]).length,original.beatIndex+1):original.beatIndex;
+   const saved=store.save(original.id,{text:nextText,generations:segments,beatIndex:nextBeatIndex,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
    return {story:saved,generation:saved.generations.find(g=>g.id===(existing?.id||segments.at(-1)?.id))||null,replacement:{start:before.length,text:prose},usage:result.usage,context:result.writerContext};
    }finally{active=null;signal?.removeEventListener('abort',abort);}
   }

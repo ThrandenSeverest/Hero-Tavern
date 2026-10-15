@@ -12,7 +12,7 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   // Normalize that automatically instead of breaking generation outside Image Studio.
   const requestedCfg=Number(params.cfg_scale??1);
   if(!Number.isFinite(requestedCfg)||requestedCfg<=0)throw Error('Invalid Qwen image guidance');
-  const effectiveCfg=requestedCfg>2?1:requestedCfg;
+  const effectiveCfg=requestedCfg>2||requestedCfg<1?1:requestedCfg;
   if(Number(params.steps??25)<1)throw Error('Qwen Image 2.1 steps must be positive.');
   if(!['txt2img','img2img','inpaint'].includes(mode))throw Error('Qwen Image supports generation and local editing. Use SDXL for upscaling.');
   if(mode!=='txt2img'&&!source)throw Error('Select a gallery image for Qwen editing.');
@@ -34,7 +34,11 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   // Qwen-Image 2.1 uses the model-specific latent returned by TextEncodeQwenImage21
   // (output 2). A generic EmptyLatentImage has SD-style channels and corrupts
   // or collapses non-1024 images. Resize this native latent instead.
-  let latent=sourceNode?n('VAEEncode',{pixels:sourceNode,vae}):[encoded[0],2];
+  // TextEncodeQwenImage21 output 2 is Qwen's own 64-channel latent,
+  // already aligned to the reference image and its reference resolution.
+  // Encoding the reference separately with a generic VAEEncode led to
+  // shifted/corrupt image edits and mismatched dimensions.
+  let latent=[encoded[0],2];
   if(!sourceNode&&(width!==1024||height!==1024))latent=n('LatentUpscale',{samples:latent,upscale_method:'bilinear',width,height,crop:'disabled'});
   if((params.batch_size||1)>1)latent=n('RepeatLatentBatch',{samples:latent,amount:params.batch_size});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
@@ -44,7 +48,7 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   let output=result;
   if(mode==='inpaint'){const masked=editMask(n,mask,params);output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
   const saved=n('SaveImage',{images:output,filename_prefix:'HeroTavern_Qwen21'});
-  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg>2?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,sampler:'euler',scheduler:'simple'}:null};
+  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg!==effectiveCfg?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,sampler:'euler',scheduler:'simple'}:null};
  }
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';

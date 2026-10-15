@@ -118,12 +118,10 @@ export async function initStory({getContext,frame,show}){
   const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
   const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};
   const {box}=dialog('Voice · '+character.name);
-  // /tts/status accepts GET, but rpc() defaults data={} (POST).
-  let statusError='';
-  const state=await rpc('/tts/status',null).catch(error=>{
-   statusError=error.message||String(error);
-   return {profiles:[],voices:[],settings:{device:'cpu'}};
-  });
+  // Render the character voice editor immediately: a busy/missing ModelBridge
+  // must never hide the settings behind a pending /tts/status request.
+  const state={profiles:[],voices:[],settings:{device:'cpu'}};
+
   const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Qwen CustomVoice uses built-in voices without a WAV; VoiceDesign uses a description; Flash and cloning models need an imported WAV. Voice models must be installed first.';
   const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
   dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
@@ -135,7 +133,7 @@ export async function initStory({getContext,frame,show}){
   const text=document.createElement('textarea');text.value='*The door opens.* “Welcome to the tavern.”';
   const audio=document.createElement('audio');audio.controls=true;
   const status=document.createElement('p');status.setAttribute('role','status');
-  if(statusError)status.textContent='Voice service unavailable: '+statusError+'. Voice controls remain editable; retry speech installation later.';
+
   const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
   // A native Character Voice editor, not a link to an unrelated settings screen.
   const engine=document.createElement('select');engine.id='hero-character-voice-engine';
@@ -181,6 +179,33 @@ export async function initStory({getContext,frame,show}){
   const save=document.createElement('button');save.textContent='Save character voice';save.onclick=async()=>{try{if(c().characters?.[index]!==character)throw Error('Character selection changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};status.textContent='Saved on character card.'}catch(e){status.textContent='Save failed: '+e.message}};
   const setup=document.createElement('button');setup.textContent='Open Voice Library / create voice';setup.onclick=()=>{box.parentElement.remove();show('voices')};
   box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),label('Voice engine ',engine),label('Hardware ',device),label('Preset speaker ',speaker),label('Mood / description ',mood),label('Reference WAV ',wav),label('Transcript ',transcript),label('Import WAV ',upload),importWav,quick,install,text,preview,audio,save,setup,status);updateVoice();
+  // Prefill the controls from cached character settings; fetch the global
+  // voice catalog *after* the modal exists and never replace an edited choice.
+  const refresh=document.createElement('button');refresh.textContent='Refresh installed voices';
+  refresh.onclick=()=>loadVoiceCatalog();
+  box.append(refresh);
+  const loadVoiceCatalog=async()=>{
+   refresh.disabled=true;
+   const priorDialogue=dialogue.value||ext.voice?.dialogueProfileId||'',priorNarrator=narrator.value||ext.voice?.narratorProfileId||'',priorWav=wav.value;
+   status.textContent='Checking installed voices…';
+   try{
+    const result=await rpc('/tts/status',null);
+    const items=(result.profiles||[]).filter(p=>p&&p.id);
+    for(const select of [dialogue,narrator]){
+     const wanted=select===dialogue?priorDialogue:priorNarrator;
+     select.replaceChildren(new Option('Inherit global settings',''),...items.map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));
+     if(wanted&&!items.some(p=>p.id===wanted))select.add(new Option('Previously assigned · missing profile ('+wanted+')',wanted));
+     select.value=wanted;
+    }
+    wav.replaceChildren(new Option('Choose imported WAV',''),...(result.voices||[]).map(name=>new Option(name,name)));
+    wav.value=priorWav;
+    if(!device.dataset.changed&&result.settings?.device)device.value=result.settings.device;
+    status.textContent='Voice library loaded. Choose a model and save this character’s voice.';
+   }catch(error){status.textContent='Voice library unavailable: '+(error.message||error)+'. Built-in CustomVoice and VoiceDesign settings remain available.';}
+   finally{refresh.disabled=false;}
+  };
+  device.onchange=()=>device.dataset.changed='true';
+  loadVoiceCatalog();
  }
  const style=document.createElement('style');style.textContent='#hero-session-toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#202939;border-bottom:1px solid #3a4960;flex-shrink:0;font:12px system-ui}#hero-session-name{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#hero-session-toolbar button,.hero-message-menu button{background:#27354a;border:1px solid #455874;color:#dce8f6;border-radius:6px;padding:5px 8px;cursor:pointer}.hero-message-menu{font:11px system-ui;margin:6px 0;display:flex;gap:5px;flex-wrap:wrap}.hero-story-dialog{position:fixed;inset:0;z-index:2500;background:#080c12cc;display:grid;place-items:center}.hero-story-dialog>section{background:#1e2939;color:#e6edf7;border:1px solid #53627b;border-radius:14px;padding:24px;width:min(680px,90vw);max-height:85vh;overflow:auto}.hero-story-dialog button,.hero-story-dialog input,.hero-story-dialog select,.hero-story-dialog textarea{font:inherit;background:#253247;color:#e6edf7;border:1px solid #53627b;border-radius:8px;padding:10px;margin:6px 3px}.hero-story-dialog textarea{width:90%;min-height:100px}.hero-story-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere}';document.head.append(style);
  toolbar.onclick=e=>{const op=e.target.dataset.story;if(!op)return;if(op==='new')newDialog().catch(notify);else if(op==='leading')openLeadingPrompt().catch(notify);else if(op==='voice')openCharacterVoice().catch(notify);else{show(op);sync().catch(notify)}};

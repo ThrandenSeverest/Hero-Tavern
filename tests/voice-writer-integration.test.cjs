@@ -11,6 +11,13 @@ test('Character Voice stays renderable when TTS status is slow',()=>{
  assert.match(source,/Voice service is slow or offline/);
  assert.ok(source.indexOf("dialog('Voice · '")<source.indexOf("rpc('/tts/status')"));
 });
+test('Image Studio embeds official native ComfyUI editor without creating another runtime',()=>{
+ const panel=fs.readFileSync(path.join(__dirname,'../manager/ModelPanel.html'),'utf8');
+ assert.match(panel,/id="hero-comfy-graph-frame"/);
+ assert.match(panel,/const nativeComfyURL='http:\/\/127\.0\.0\.1:8188\//);
+ assert.match(panel,/frame\.src=nativeComfyURL/);
+ assert.match(panel,/frame\.removeAttribute\('src'\)/);
+});
 test('Writer next-scene advances one beat ONLY after successful save',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-scene-next-'));
  try{

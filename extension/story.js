@@ -113,7 +113,7 @@ export async function initStory({getContext,frame,show}){
  }
 
  const voiceButton=document.createElement('button');voiceButton.textContent='Character Voice';voiceButton.id='hero-character-voice';
- voiceButton.onclick=()=>openCharacterVoice().catch(notify);(characterDrawer||toolbar).prepend(voiceButton);
+ voiceButton.onclick=()=>openCharacterVoice().catch(error=>{const box=document.querySelector('.hero-story-dialog > section');if(box){const detail=document.createElement('p');detail.setAttribute('role','alert');detail.textContent='Character Voice could not open: '+error.message+'. Open Voices for model status and Diagnostics for startup errors.';box.append(detail)}notify(error)});(characterDrawer||toolbar).prepend(voiceButton);
  async function openCharacterVoice(){
   const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
   const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};

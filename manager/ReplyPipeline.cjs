@@ -6,15 +6,19 @@ const {buildWriterContext,reduceLongContext}=require('./WriterContext.cjs');
 const {writerRepetitionIssue}=require('./WriterFlow.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
-const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
+const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,samplerPreset:'manual',samplerModes:{},rep_pen_range:1024,presence_penalty:0,frequency_penalty:0,dry_multiplier:0,dry_base:1.75,dry_allowed_length:2,dry_penalty_last_n:1024,xtc_probability:0,xtc_threshold:0.15,dynatemp_range:0,dynatemp_exponent:1,mirostat:0,mirostat_tau:5,mirostat_eta:0.1,sampler_seed:0,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
 function validateSettings(input = {}) {
     const value = {};
     for (const key of Object.keys(DEFAULTS)) value[key] = input[key] === undefined ? DEFAULTS[key] : input[key];
+    if(!['manual','model','creative','precise'].includes(value.samplerPreset))throw Error('Invalid sampler preset.');
+    if(!value.samplerModes||typeof value.samplerModes!=='object'||Array.isArray(value.samplerModes))throw Error('Invalid per-mode sampler presets.');
+    if(Object.entries(value.samplerModes).some(([mode,preset])=>!['chat','writer','adventure','assistant','state'].includes(mode)||!['manual','model','creative','precise'].includes(preset)))throw Error('Invalid mode sampler preset.');
+    value.samplerModes={...value.samplerModes};
     if(!['same','different'].includes(value.planningSource))throw Error('Choose the reply model or a separate planning model.');
     if (!['off','separate'].includes(value.thinkingMode)) throw new Error('Choose disabled thinking or separate planning.');
     if (!['mixed','dialogue'].includes(value.replyStyle)) throw new Error('Choose dialogue with narration or dialogue only.');
-    for (const [key,min,max] of [['top_k',0,200],['repetitionSensitivity',0.7,0.98],['temperature',0,2],['top_p',0.01,1],['min_p',0,1],['repetition_penalty',1,2],['maxReplyTokens',32,4096],['memoryTokens',128,1024],['recentMessages',2,100],['planningTokens',32,1024]]) {
-        if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < min || value[key] > max || ((key.endsWith('Tokens')||key==='recentMessages') && !Number.isInteger(value[key]))) throw new Error('Invalid '+key+' value.');
+    for (const [key,min,max] of [['top_k',0,200],['repetitionSensitivity',0.7,0.98],['temperature',0,2],['top_p',0.01,1],['min_p',0,1],['repetition_penalty',1,2],['rep_pen_range',0,65536],['presence_penalty',-2,2],['frequency_penalty',-2,2],['dry_multiplier',0,5],['dry_base',1,4],['dry_allowed_length',0,32],['dry_penalty_last_n',0,65536],['xtc_probability',0,1],['xtc_threshold',0,1],['dynatemp_range',0,2],['dynatemp_exponent',0.01,10],['mirostat',0,2],['mirostat_tau',0.1,20],['mirostat_eta',0.01,1],['sampler_seed',0,999999],['maxReplyTokens',32,4096],['memoryTokens',128,1024],['recentMessages',2,100],['planningTokens',32,1024]]) {
+        if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] < min || value[key] > max || ((key.endsWith('Tokens')||['recentMessages','rep_pen_range','dry_allowed_length','dry_penalty_last_n','mirostat','sampler_seed','top_k'].includes(key)) && !Number.isInteger(value[key]))) throw new Error('Invalid '+key+' value.');
     }
     for (const key of ['removeModelTokens','stopAtSpeaker','dedupeParagraphs','repairMetaReplies','memoryEnabled','avoidRepetition']) if (typeof value[key] !== 'boolean') throw new Error('Invalid filter setting.');
     if (typeof value.instructions !== 'string' || value.instructions.length > 4000) throw new Error('Writing instructions must be at most 4000 characters.');
@@ -29,6 +33,46 @@ function saveSettings(root, input) {
     const value = validateSettings(input), file = path.join(root,'generation.json');
     fs.writeFileSync(file+'.tmp',JSON.stringify(value,null,2)+'\n');fs.renameSync(file+'.tmp',file);return value;
 }
+
+/**
+ * Resolve API-native KoboldCpp sampling once, before inference. Manual is
+ * deliberately the default: upgraded installs retain their old behavior.
+ * Model/creative/precise are opt-in and mode-scoped, never silent retries.
+ */
+function samplerFor(settings,profile={},mode='chat',request={}){
+    const group=mode.startsWith('adventure')?'adventure':['state','character','summary'].includes(mode)?'state':mode==='utility'?'assistant':mode;
+    const preset=settings.samplerModes?.[group]||settings.samplerPreset||'manual';
+    const identity=[profile.Family,profile.Label,profile.File,profile.LocalFile].filter(Boolean).join(' ').toLowerCase();
+    const qwen35=/qwen[-_ ]?3[._-]?5/.test(identity);
+    const qwen3=!qwen35&&/qwen[-_ ]?3/.test(identity);
+    const base={
+      temperature:settings.temperature,top_p:settings.top_p,top_k:settings.top_k,min_p:settings.min_p,
+      rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty,
+      rep_pen_range:settings.rep_pen_range,presence_penalty:settings.presence_penalty,
+      frequency_penalty:settings.frequency_penalty,dry_multiplier:settings.dry_multiplier,
+      dry_base:settings.dry_base,dry_allowed_length:settings.dry_allowed_length,
+      dry_penalty_last_n:settings.dry_penalty_last_n,xtc_probability:settings.xtc_probability,
+      xtc_threshold:settings.xtc_threshold,dynatemp_range:settings.dynatemp_range,
+      dynatemp_exponent:settings.dynatemp_exponent,mirostat:settings.mirostat,
+      mirostat_tau:settings.mirostat_tau,mirostat_eta:settings.mirostat_eta
+    };
+    if(preset==='model'){
+      // Qwen official non-thinking sampling; third-party abliterated fine-tunes
+      // may require manual tuning. Catalog sampler is the user's model preset.
+      if(qwen3||qwen35)Object.assign(base,{temperature:0.7,top_p:0.8,top_k:20,min_p:0,rep_pen:1,repetition_penalty:1,presence_penalty:qwen35?1.5:0,frequency_penalty:0,dry_multiplier:0,xtc_probability:0,dynatemp_range:0,mirostat:0});
+      if(profile.Sampler)for(const key of ['temperature','top_p','top_k','min_p','repetition_penalty','presence_penalty','frequency_penalty'])if(Number.isFinite(profile.Sampler[key])){base[key]=profile.Sampler[key];if(key==='repetition_penalty')base.rep_pen=profile.Sampler[key];}
+    }else if(preset==='creative'){
+      Object.assign(base,{temperature:0.85,top_p:0.95,top_k:40,min_p:0.02,rep_pen:1.02,repetition_penalty:1.02,rep_pen_range:256,presence_penalty:0,frequency_penalty:0,dry_multiplier:0.6,dry_base:1.75,dry_allowed_length:2,dry_penalty_last_n:1024,xtc_probability:0,dynatemp_range:0,mirostat:0});
+    }else if(preset==='precise'){
+      Object.assign(base,{temperature:0.25,top_p:0.9,top_k:20,min_p:0,rep_pen:1,repetition_penalty:1,rep_pen_range:0,presence_penalty:0,frequency_penalty:0,dry_multiplier:0,xtc_probability:0,dynatemp_range:0,mirostat:0});
+    }
+    // Preserve compatibility with the existing structured adventure pipeline.
+    if(['adventure-json','adventure-dm'].includes(mode))Object.assign(base,{temperature:0.35,top_p:0.9,top_k:20,min_p:0});
+    if(mode==='utility'&&Number.isFinite(request.temperature))base.temperature=request.temperature;
+    if(settings.sampler_seed>0)base.sampler_seed=settings.sampler_seed;
+    return {preset,group,parameters:base};
+}
+
 function instructions(settings) {
     return ['[Hero Tavern reply instructions]', 'Write only the next character reply. Stay in the scene and in character. Never describe how you will write, mention narrator roles, or give writer/assistant commentary. Never include private analysis, planning, reasoning headings, or think tags.',
         settings.replyStyle==='dialogue'?'Write spoken dialogue only. Do not narrate actions or internal thoughts.':'Dialogue and scene narration are allowed; model reasoning is not part of the story.',
@@ -164,7 +208,9 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
             if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:renderPrompt(inspected,profile),template:profile.Template,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
-            const request={...body,prompt,disableNativeThinking:true,writerContinuation:mode==='writer',stream:!!body.stream,max_tokens:replyTokens,temperature:mode==='utility'&&Number.isFinite(body.temperature)?body.temperature:['adventure-json','adventure-dm'].includes(mode)?0.35:settings.temperature,top_p:['adventure-json','adventure-dm'].includes(mode)?0.9:settings.top_p,top_k:['adventure-json','adventure-dm'].includes(mode)?20:settings.top_k,min_p:['adventure-json','adventure-dm'].includes(mode)?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
+            const sampling=samplerFor(settings,profile,mode,body);
+            lastRun.sampling={preset:sampling.preset,group:sampling.group,modelFamily:profile.Family||'unknown',parameters:sampling.parameters};
+            const request={...body,prompt,disableNativeThinking:true,writerContinuation:mode==='writer',stream:!!body.stream,max_tokens:replyTokens,...sampling.parameters};
             const raw=await sendChecked(request);
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);
@@ -271,4 +317,4 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
     }
     return {generate,handle,abort,runSnapshot};
 }
-module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,isWriterNonProse,createPipeline};
+module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,samplerFor,replyPrompt,completionText,isWriterNonProse,createPipeline};

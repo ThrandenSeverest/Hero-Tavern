@@ -189,7 +189,8 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.getByRole('button',{name:'Cancel',exact:true}).last().click();
 
   // Generate through the actual chat event path, not only a manual API request.
-  await page.locator('#hero-character-leading-prompt').click();
+  await page.locator('.hero-nav[data-hero="chat"]').click();
+  await page.locator('#hero-leading-prompt-button').click();
   await page.locator('#hero-leading-prompt-field').fill('Scene theme: slow-burning mystery; remain terse and suspicious.');
   await page.locator('#hero-leading-prompt-save').click();
   await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();return c.characters[c.characterId]?.data?.extensions?.hero_tavern?.leadingPrompt?.includes('slow-burning mystery')}));

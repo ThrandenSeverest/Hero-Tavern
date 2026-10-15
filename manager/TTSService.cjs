@@ -15,7 +15,7 @@ function splitSpeech(raw,{speaker='Character',narrator='Narrator'}={}){
 const VARIANTS=['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'];
 function capabilities(engine,variant){
  if(!['flash','qwen'].includes(engine)||(engine==='qwen'&&!VARIANTS.includes(variant))||(engine==='flash'&&variant!=='flash'&&!VARIANTS.includes(variant)))throw Error('Unsupported speech engine/model');
- return {presetSpeakers:engine==='qwen'&&variant.startsWith('custom'),referenceAudio:engine==='flash'||variant.startsWith('clone'),referenceTranscript:engine==='qwen'&&variant.startsWith('clone'),voiceDesign:engine==='qwen'&&variant==='design-1.7',textStyleInstruction:engine==='qwen'&&['custom-1.7','design-1.7'].includes(variant),maxTextCharacters:600};
+ return {presetSpeakers:engine==='qwen'&&variant.startsWith('custom'),referenceAudio:engine==='flash'||variant.startsWith('clone'),referenceTranscript:engine==='qwen'&&variant.startsWith('clone'),voiceDesign:engine==='qwen'&&variant==='design-1.7',textStyleInstruction:engine==='qwen'&&['custom-0.6','custom-1.7','design-1.7'].includes(variant),maxTextCharacters:600};
 }
 function speechError(code,message){const error=Error(code+': '+message);error.code=code;return error;}
 function planSpeech(text,dialogue,narrator){

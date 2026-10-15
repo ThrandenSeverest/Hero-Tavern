@@ -13,8 +13,10 @@
  panel.append(heading,help,actions,state,output);host.insertBefore(panel,host.children[1]||null);
  let last=null,busy=false;
  const req=async(url,data)=>{
-  const res=await fetch(url,{method:data===undefined?'GET':'POST',headers:{'X-Hero-Token':'__TOKEN__','Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
-  const json=await res.json();if(!res.ok)throw Error(json.error||'HTTP '+res.status+' on '+url);return json;
+  let res;try{res=await fetch(url,{method:data===undefined?'GET':'POST',headers:{'X-Hero-Token':'__TOKEN__','Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)})}
+  catch(error){throw Error('Local ModelBridge is unreachable. Restart Hero Tavern and check Diagnostics → startup logs. '+error.message)}
+  let json;try{json=await res.json()}catch{throw Error('ModelBridge returned an invalid response (HTTP '+res.status+'). Check Diagnostics → startup logs.')}
+  if(!res.ok)throw Error(json.error||'HTTP '+res.status+' on '+url);return json;
  };
  const tag=(name,text)=>{const x=document.createElement(name);x.textContent=text;return x;};
  const stateText={missing:'Missing dependencies',installed:'Installed, not tested',online:'Backend online, not end-to-end verified',verified:'Test passed',warning:'Needs repair',unverified:'Requires an actual workflow test'};

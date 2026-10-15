@@ -91,8 +91,8 @@ def generate(data):
                     if supported and speaker.lower() not in [x.lower() for x in supported]:
                         raise ValueError("TTS_SPEAKER_UNSUPPORTED: Choose one of " + ", ".join(supported))
                 kwargs = dict(text=text, language=language, speaker=speaker)
-                # Only the 1.7B custom voice variant supports style instructions.
-                if variant == "custom-1.7" and style:
+                # Both CustomVoice sizes accept an optional style instruction.
+                if style:
                     kwargs["instruct"] = style
                 wavs, sample_rate = m.generate_custom_voice(**kwargs)
             elif variant.startswith("clone"):

@@ -120,7 +120,7 @@ export async function initStory({getContext,frame,show}){
   const {box}=dialog('Voice · '+character.name);
   // Render the character voice editor immediately: a busy/missing ModelBridge
   // must never hide the settings behind a pending /tts/status request.
-  const state={profiles:[],voices:[],settings:{device:'cpu'}};
+  const state={profiles:[],voices:[],settings:{device:'cpu'}};let voiceCatalog=null;
 
   const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Qwen CustomVoice uses built-in voices without a WAV; VoiceDesign uses a description; Flash and cloning models need an imported WAV. Voice models must be installed first.';
   const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
@@ -140,7 +140,7 @@ export async function initStory({getContext,frame,show}){
   for(const [id,title] of [['qwen:custom-0.6','Qwen CustomVoice 0.6B · no WAV'],['qwen:custom-1.7','Qwen CustomVoice 1.7B · no WAV'],['qwen:design-1.7','Qwen VoiceDesign 1.7B · voice description'],['qwen:clone-0.6','Qwen Base 0.6B · WAV + transcript'],['qwen:clone-1.7','Qwen Base 1.7B · WAV + transcript'],['flash:flash','Chatterbox Flash · WAV']])engine.add(new Option(title,id));
   const speaker=document.createElement('select');speaker.id='hero-character-voice-speaker';
   for(const name of ['Ryan','Vivian','Serena','Aiden','Dylan','Eric','Ono_Anna','Sohee','Uncle_Fu'])speaker.add(new Option(name,name));
-  const mood=document.createElement('textarea');mood.rows=2;mood.placeholder='Mood / timbre / speaking style supported by VoiceDesign and CustomVoice 1.7B';
+  const mood=document.createElement('textarea');mood.rows=2;mood.placeholder='Mood / timbre / speaking style supported by VoiceDesign and both CustomVoice sizes';
   const transcript=document.createElement('input');transcript.placeholder='Exact transcript of reference WAV';
   const wav=document.createElement('select');wav.add(new Option('Choose imported WAV',''));
   for(const item of state.voices||[])wav.add(new Option(item,item));
@@ -160,8 +160,9 @@ export async function initStory({getContext,frame,show}){
    const chosen=engine.value,reference=chosen.startsWith('flash:')||chosen.includes(':clone-');
    wav.parentElement.hidden=!reference;upload.parentElement.hidden=!reference;importWav.hidden=!reference;
    transcript.parentElement.hidden=!chosen.includes(':clone-');
-   mood.parentElement.hidden=!(chosen.includes(':design-')||chosen==='qwen:custom-1.7');
+   mood.parentElement.hidden=!(chosen.includes(':design-')||chosen.includes(':custom-'));
    speaker.parentElement.hidden=!chosen.includes(':custom-');
+   if(voiceCatalog){const [backend,variant]=chosen.split(':');status.textContent=voiceCatalog.downloadedModels?.[backend==='flash'?'flash':variant]?'Selected voice weights are installed. Preview to verify sound.':'Selected voice weights are missing. Click Install selected model + dependencies, then Preview.';}
   };
   const quick=document.createElement('button');quick.id='hero-character-voice-quick';quick.textContent='Create & assign selected voice';
   quick.onclick=async()=>{quick.disabled=true;try{const voice=voiceOptions(),name=character.name+' · '+voice.engine+' '+voice.variant+' '+(voice.speaker||'');
@@ -175,10 +176,16 @@ export async function initStory({getContext,frame,show}){
    status.textContent=state.alreadyInstalled?'Weights and runtime are installed. Run Preview to test actual speech.':'Installation started. Progress and errors are shown in Voice Library; your character voice assignment remains saved.';
   }catch(e){status.textContent=e.message}finally{install.disabled=false}};
   engine.onchange=updateVoice;
+  const previewDraft=document.createElement('button');previewDraft.id='hero-character-voice-preview-draft';previewDraft.textContent='Preview selected voice settings';
+  previewDraft.onclick=async()=>{previewDraft.disabled=true;status.textContent='Testing the selected voice model…';try{
+   const voice=voiceOptions(),result=await rpc('/tts/speak',{...voice,text:text.value.replace(/[*“”«»]/g,'').slice(0,400)});
+   audio.src=origin+result.url;status.textContent='Selected '+voice.variant+' voice generated. Save a voice profile and assign it below to use it in chat.';
+   await audio.play().catch(()=>{status.textContent+=' Press Play to listen.'});
+  }catch(e){status.textContent='Selected voice preview failed: '+e.message+'. Check Voice Library for installed weights and speech job log.'}finally{previewDraft.disabled=false}};
    const preview=document.createElement('button');preview.textContent='Preview character + narrator';preview.onclick=async()=>{preview.disabled=true;status.textContent='Generating preview…';try{const result=await rpc('/tts/message',{text:text.value,assignment:assignment()});audio.src=origin+result.url;status.textContent='Ready · '+result.segments+' synthesis segment(s)';await audio.play().catch(()=>{status.textContent='Ready. Press Play.'})}catch(e){status.textContent=e.message}finally{preview.disabled=false}};
   const save=document.createElement('button');save.textContent='Save character voice';save.onclick=async()=>{try{if(c().characters?.[index]!==character)throw Error('Character selection changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};status.textContent='Saved on character card.'}catch(e){status.textContent='Save failed: '+e.message}};
   const setup=document.createElement('button');setup.textContent='Open Voice Library / create voice';setup.onclick=()=>{box.parentElement.remove();show('voices')};
-  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),label('Voice engine ',engine),label('Hardware ',device),label('Preset speaker ',speaker),label('Mood / description ',mood),label('Reference WAV ',wav),label('Transcript ',transcript),label('Import WAV ',upload),importWav,quick,install,text,preview,audio,save,setup,status);updateVoice();
+  box.append(help,label('Character voice ',dialogue),label('Narration ',mode),label('Narrator voice ',narrator),label('Voice engine ',engine),label('Hardware ',device),label('Preset speaker ',speaker),label('Mood / description ',mood),label('Reference WAV ',wav),label('Transcript ',transcript),label('Import WAV ',upload),importWav,quick,install,text,previewDraft,preview,audio,save,setup,status);updateVoice();
   // Prefill the controls from cached character settings; fetch the global
   // voice catalog *after* the modal exists and never replace an edited choice.
   const refresh=document.createElement('button');refresh.textContent='Refresh installed voices';
@@ -189,7 +196,7 @@ export async function initStory({getContext,frame,show}){
    const priorDialogue=dialogue.value||ext.voice?.dialogueProfileId||'',priorNarrator=narrator.value||ext.voice?.narratorProfileId||'',priorWav=wav.value;
    status.textContent='Checking installed voices…';
    try{
-    const result=await rpc('/tts/status',null);
+   const result=await rpc('/tts/status',null);voiceCatalog=result;
     const items=(result.profiles||[]).filter(p=>p&&p.id);
     for(const select of [dialogue,narrator]){
      const wanted=select===dialogue?priorDialogue:priorNarrator;
@@ -200,7 +207,7 @@ export async function initStory({getContext,frame,show}){
     wav.replaceChildren(new Option('Choose imported WAV',''),...(result.voices||[]).map(name=>new Option(name,name)));
     wav.value=priorWav;
     if(!device.dataset.changed&&result.settings?.device)device.value=result.settings.device;
-    status.textContent='Voice library loaded. Choose a model and save this character’s voice.';
+    updateVoice();
    }catch(error){status.textContent='Voice library unavailable: '+(error.message||error)+'. Built-in CustomVoice and VoiceDesign settings remain available.';}
    finally{refresh.disabled=false;}
   };
@@ -397,10 +404,11 @@ export async function initStory({getContext,frame,show}){
   };
   if(actionInstruction)data.hero_context.oneReply=actionInstruction;
  });
- let generating=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});
- const schedule=()=>{clearTimeout(scheduled);scheduled=setTimeout(async()=>{
+ let generating=false,rerunAfterSync=false;c().eventSource.on(c().eventTypes.GENERATION_STARTED,(_type,_options,dryRun)=>{if(!dryRun)generating=true});c().eventSource.on(c().eventTypes.GENERATION_ENDED,()=>{generating=false});
+ const schedule=()=>{if(syncing){rerunAfterSync=true;return;}clearTimeout(scheduled);scheduled=setTimeout(async()=>{
   if(generating){schedule();return;}
-  if(syncing||!selected())return;
+  if(syncing){rerunAfterSync=true;return;}
+  if(!selected())return;
   syncing=true;
   try{
    let v=await sync();
@@ -412,7 +420,7 @@ export async function initStory({getContext,frame,show}){
      if(v.session.analyzedSources.length===n||v.session.analyzedSources.length>=v.messages.length)break;
     }
    }
-  }catch(error){notify(error)}finally{syncing=false}
+  }catch(error){notify(error)}finally{syncing=false;if(rerunAfterSync){rerunAfterSync=false;schedule()}}
  },500)};
  for(const name of ['CHAT_CHANGED','GENERATION_ENDED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_RECEIVED','MESSAGE_SENT'])if(c().eventTypes[name])c().eventSource.on(c().eventTypes[name],schedule);
  const observer=new MutationObserver(()=>updateMessageMenus());if(document.querySelector('#chat'))observer.observe(document.querySelector('#chat'),{childList:true});

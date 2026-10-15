@@ -1,5 +1,5 @@
 (()=>{'use strict';const $=id=>document.getElementById(id);const token='__TOKEN__';
-async function api(route,data){const r=await fetch(route,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','X-Hero-Token':token},body:data?JSON.stringify(data):undefined});const obj=await r.json();if(!r.ok)throw Error(obj.error||'TTS failed');return obj;}
+async function api(route,data){let r;try{r=await fetch(route,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','X-Hero-Token':token},body:data?JSON.stringify(data):undefined})}catch(e){throw Error('Local voice service is unreachable. Restart Hero Tavern and check Diagnostics → startup logs. '+e.message)}let obj;try{obj=await r.json()}catch{throw Error('Voice service returned an invalid response (HTTP '+r.status+'). Check Diagnostics → startup logs.')}if(!r.ok)throw Error(obj.error||'Voice service failed (HTTP '+r.status+')');return obj;}
 const human=n=>n>1073741824?(n/1073741824).toFixed(2)+' GiB':n>1048576?(n/1048576).toFixed(1)+' MiB':n>1024?(n/1024).toFixed(1)+' KiB':n+' bytes';
 const ago=ts=>ts?Math.max(0,Math.round((Date.now()-ts)/1000)):0;
 const duration=s=>s>=3600?Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m':s>=60?Math.floor(s/60)+'m '+s%60+'s':s+'s';
@@ -30,9 +30,9 @@ async function refresh(){
  renderProfiles(s);return s;
 }
 function modelControls(){
- const flash=$('tts-engine').value==='flash',variant=$('tts-variant').value,clone=!flash&&variant.startsWith('clone'),preset=!flash&&variant.startsWith('custom'),style=!flash&&['custom-1.7','design-1.7'].includes(variant);
+ const flash=$('tts-engine').value==='flash',variant=$('tts-variant').value,clone=!flash&&variant.startsWith('clone'),preset=!flash&&variant.startsWith('custom'),style=!flash&&['custom-0.6','custom-1.7','design-1.7'].includes(variant);
  for(const [id,show] of [['tts-variant',!flash],['tts-language',!flash],['tts-speaker',preset],['tts-narrator',preset],['tts-dialogue-reference',flash||clone],['tts-narrator-reference',flash||clone],['tts-ref-text',clone],['tts-narrator-ref-text',clone],['tts-style',style]])$(id).closest('label').hidden=!show;
- $('tts-model-help').textContent=flash?'Flash uses a reference WAV; no mood instruction.':clone?'Base clones a WAV and requires its exact transcript.':variant==='design-1.7'?'VoiceDesign creates a voice from your description. No WAV required. Save a profile to reuse the description; identity can vary between generations.':variant==='custom-1.7'?'CustomVoice uses a built-in speaker. No WAV required. Style accepts mood instructions.':'CustomVoice 0.6B uses a built-in speaker. No WAV or mood instruction required.';
+ $('tts-model-help').textContent=flash?'Flash uses a reference WAV; no mood instruction.':clone?'Base clones a WAV and requires its exact transcript.':variant==='design-1.7'?'VoiceDesign creates a voice from your description. No WAV required. Save a profile to reuse the description; identity can vary between generations.':'CustomVoice uses a built-in speaker. No WAV required. An optional mood instruction works with both sizes.';
 }
 function renderProfiles(s){
  const select=$('tts-profile-list'),old=select.value;select.replaceChildren(new Option('Choose saved voice',''),...(s.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));select.value=old;

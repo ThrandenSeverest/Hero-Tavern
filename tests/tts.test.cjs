@@ -3,6 +3,7 @@ const {createTTS,splitSpeech}=require('../manager/TTSService.cjs');
 test('narration and quoted speech remain separate',()=>{const out=splitSpeech('*She smiles.* "Hello there!" *She waves.*',{speaker:'Mira'});assert.deepEqual(out.map(x=>x.kind),['narration','dialogue','narration']);assert.equal(out[1].speaker,'Mira');});
 test('no visible model thinking reaches the synthesizer',()=>{const out=splitSpeech('<think>secret decisions</think> "Welcome"');assert.equal(JSON.stringify(out).includes('secret'),false);});
 test('local profiles validate voice settings and input paths',()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-tts-'));try{const svc=createTTS(root);assert.equal(svc.status().settings.engine,'qwen');assert.throws(()=>svc.configure({engine:'external'}));assert.equal(svc.configure({engine:'qwen',variant:'custom-1.7'}).settings.engine,'qwen');assert.throws(()=>svc.removeVoice({name:'../outside.wav'}));assert.equal(svc.readAudio('/tts/audio/../../bad.wav'),null);svc.stop();}finally{fs.rmSync(root,{recursive:true,force:true})}});
+test('CustomVoice 0.6B preserves the supported style instruction in saved profiles',()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-tts-style-'));try{const svc=createTTS(root);const voice=svc.saveProfile({name:'Gentle',voice:{engine:'qwen',variant:'custom-0.6',speaker:'Ryan',style:'Speak gently'}}).profile.voice;assert.equal(voice.style,'Speak gently');assert.equal(svc.status().capabilities.textStyleInstruction,true);svc.stop();}finally{fs.rmSync(root,{recursive:true,force:true})}});
 
 const vm=require('node:vm'),{EventEmitter}=require('node:events');
 function fakeWindowsTTS(root,brokenAt=''){
@@ -118,8 +119,8 @@ test('model-specific preflight distinguishes preset, design, clone and Flash; fa
   await assert.rejects(s.speak({text:'Hello',engine:'qwen',variant:'design-1.7',style:''}),/TTS_STYLE_REQUIRED/);
   fs.writeFileSync(path.join(root,'Voices','sample.wav'),'reference');
   await assert.rejects(s.speak({text:'Hello',engine:'qwen',variant:'clone-0.6',reference:'sample.wav',referenceText:''}),/TTS_TRANSCRIPT_REQUIRED/);
-  await s.speak({text:'Hello',engine:'qwen',variant:'custom-0.6',reference:'missing.wav',style:'Unsupported'});
-  assert.equal(h.tasks.at(-1).style,'');assert.equal(h.tasks.at(-1).reference,'');
+  await s.speak({text:'Hello',engine:'qwen',variant:'custom-0.6',reference:'missing.wav',style:'Speak gently'});
+  assert.equal(h.tasks.at(-1).style,'Speak gently');assert.equal(h.tasks.at(-1).reference,'');
   h.setFail(true);await assert.rejects(s.speak({text:'Failure',engine:'qwen',variant:'custom-1.7'}),/fixture failure/);assert.equal(s.status().busy,false);
   h.setFail(false);await s.speak({text:'Recovered',engine:'qwen',variant:'custom-1.7'});
   await s.speak({text:'Flash',engine:'flash',reference:'sample.wav'});

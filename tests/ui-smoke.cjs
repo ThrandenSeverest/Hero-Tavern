@@ -179,7 +179,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.screenshot({path:path.join(repo,'.ci/hero-characters-qa.png')});
   // Real character screen must expose voice creation and model-specific controls.
   await page.locator('#hero-character-voice').click();
-  await page.locator('#hero-character-voice-engine').waitFor({state:'visible'});
+  await page.locator('#hero-character-voice-engine').waitFor({state:'visible',timeout:12000}).catch(async error=>{const state=await page.evaluate(()=>({dialogs:[...document.querySelectorAll('.hero-story-dialog')].map(x=>x.innerText.slice(0,1000)),characterId:window.HeroStory?.view?.session?.characterId,hasVoice:!!document.querySelector('#hero-character-voice-engine')}));throw Error('Voice editor did not render: '+JSON.stringify(state)+'; '+error.message)});
   await page.locator('#hero-character-voice-engine').selectOption('qwen:custom-0.6');
   if(!await page.locator('#hero-character-voice-speaker').isVisible())throw Error('Qwen CustomVoice speaker controls are missing');
   await page.locator('#hero-character-voice-quick').click();

@@ -30,9 +30,9 @@ async function refresh(){
  renderProfiles(s);return s;
 }
 function modelControls(){
- const flash=$('tts-engine').value==='flash',variant=$('tts-variant').value,clone=!flash&&variant.startsWith('clone'),preset=!flash&&variant.startsWith('custom'),style=!flash&&['custom-0.6','custom-1.7','design-1.7'].includes(variant);
- for(const [id,show] of [['tts-variant',!flash],['tts-language',!flash],['tts-speaker',preset],['tts-narrator',preset],['tts-dialogue-reference',flash||clone],['tts-narrator-reference',flash||clone],['tts-ref-text',clone],['tts-narrator-ref-text',clone],['tts-style',style]])$(id).closest('label').hidden=!show;
- $('tts-model-help').textContent=flash?'Flash uses a reference WAV; no mood instruction.':clone?'Base clones a WAV and requires its exact transcript.':variant==='design-1.7'?'VoiceDesign creates a voice from your description. No WAV required. Save a profile to reuse the description; identity can vary between generations.':'CustomVoice uses a built-in speaker. No WAV required. An optional mood instruction works with both sizes.';
+ const kokoro=$('tts-engine').value==='kokoro',flash=$('tts-engine').value==='flash',variant=$('tts-variant').value,clone=!flash&&variant.startsWith('clone'),preset=kokoro||!flash&&variant.startsWith('custom'),style=!flash&&!kokoro&&['custom-0.6','custom-1.7','design-1.7'].includes(variant);
+ for(const [id,show] of [['tts-variant',!flash&&!kokoro],['tts-language',!flash&&!kokoro],['tts-speaker',preset],['tts-narrator',preset],['tts-dialogue-reference',flash||clone&&!kokoro],['tts-narrator-reference',flash||clone&&!kokoro],['tts-ref-text',clone&&!kokoro],['tts-narrator-ref-text',clone&&!kokoro],['tts-style',style]])$(id).closest('label').hidden=!show;
+ $('tts-model-help').textContent=kokoro?'Kokoro 82M: fast natural English voices, no WAV needed. Uses fixed preset voices; mood is not configurable.':flash?'Flash uses a reference WAV; no mood instruction.':clone?'Base clones a WAV and requires its exact transcript.':variant==='design-1.7'?'VoiceDesign creates a voice from your description. No WAV required. Save a profile to reuse the description; identity can vary between generations.':'CustomVoice uses a built-in speaker. No WAV required. An optional mood instruction works with both sizes.';
 }
 function renderProfiles(s){
  const select=$('tts-profile-list'),old=select.value;select.replaceChildren(new Option('Choose saved voice',''),...(s.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));select.value=old;
@@ -41,7 +41,7 @@ function renderProfiles(s){
 function voiceStatus(s){
  lastState=s;
  $('tts-job-log').textContent=JSON.stringify(s.jobLog||[],null,2);
- const engine=s.settings.engine==='flash'?'Chatterbox Flash':'Qwen3-TTS '+s.settings.variant;
+ const engine=s.settings.engine==='flash'?'Chatterbox Flash':s.settings.engine==='kokoro'?'Kokoro 82M':'Qwen3-TTS '+s.settings.variant;
  const deps=s.installing?'IN PROGRESS':s.ready?'READY':s.error?'FAILED':'MISSING';
  const weights=s.downloading?'DOWNLOADING':s.weightsReady?'DOWNLOADED':s.downloadError?'FAILED':'MISSING';
  const verified=s.lastSynthesis?.engine===s.settings.engine&&(s.settings.engine==='flash'||s.lastSynthesis?.variant===s.settings.variant);const working=s.busy?'Synthesizing a speech preview…':verified?'Verified working · WAV generated '+s.lastSynthesis.at:s.running?'Speech engine running':s.ready&&s.weightsReady?'Both downloads present. Generate a speech preview to verify audio.':'Not ready to synthesize';
@@ -91,7 +91,7 @@ $('tts-delete-voice').onclick=()=>action(async()=>{if(!$('tts-voices').value)ret
 $('tts-test').onclick=()=>action(async()=>{const form=settingsFromForm();const v=await api('/tts/speak',{...form,text:$('tts-test-text').value,reference:form.dialogueReference});$('tts-audio').src=v.url;$('tts-feedback').textContent='Voice ready.';await $('tts-audio').play().catch(()=>{$('tts-feedback').textContent='Voice ready. Click Play.'})});
 const extra=document.createElement('div');extra.className='card';extra.innerHTML='<p id="tts-model-help"></p><h3>Voice Library</h3><p>Save a built-in speaker, a designed voice or a clone configuration, then assign it through Characters → Character Voice.</p><label>Profile name<input id="tts-profile-name" placeholder="Mira — warm voice"></label><button id="tts-profile-save">Save current voice as new profile</button><label>Saved profiles<select id="tts-profile-list"></select></label><button id="tts-profile-load">Edit selected voice</button><button id="tts-profile-update">Update selected voice</button><button id="tts-profile-delete">Delete selected profile</button><details><summary>Speech job debug log</summary><pre id="tts-job-log" style="white-space:pre-wrap"></pre></details>';
 $('tts-feedback').after(extra);
-for(const id of ['tts-engine','tts-variant'])$(id).addEventListener('change',modelControls);
+for(const id of ['tts-engine','tts-variant'])$(id).addEventListener('change',()=>{if($('tts-engine').value==='kokoro'){$('tts-variant').value='kokoro';$('tts-language').value='English';if(!/^([ab][fm]_)/.test($('tts-speaker').value))$('tts-speaker').value='af_heart';if(!/^([ab][fm]_)/.test($('tts-narrator').value))$('tts-narrator').value='af_heart';}else if($('tts-variant').value==='kokoro'){$('tts-variant').value='custom-0.6';}modelControls();});
 const profileData=()=>{const form=settingsFromForm();return {name:$('tts-profile-name').value,voice:{...form,reference:form.dialogueReference}}};
 $('tts-profile-save').onclick=()=>action(()=>api('/tts/profiles/save',profileData()));
 $('tts-profile-update').onclick=()=>action(async()=>{if(!$('tts-profile-list').value)throw Error('Select a profile');return api('/tts/profiles/save',{...profileData(),id:$('tts-profile-list').value})});

@@ -30,7 +30,16 @@ def load(engine, variant, device, model_path):
     if not model_path or not os.path.isfile(os.path.join(model_path, ".hero-downloaded")):
         raise FileNotFoundError("Download the selected TTS model weights from Voice Models first.")
     with redirect_stdout(sys.stderr):
-        if engine == "flash":
+        if engine == "kokoro":
+            from kokoro import KModel, KPipeline
+            import torch
+            model_file = os.path.join(model_path, "kokoro-v1_0.pth")
+            config_file = os.path.join(model_path, "config.json")
+            if not os.path.isfile(model_file) or not os.path.isfile(config_file):
+                raise FileNotFoundError("Kokoro weights/config missing; repair the model download.")
+            kmodel = KModel(repo_id="hexgrad/Kokoro-82M", config=config_file, model=model_file).to(device).eval()
+            model = {"model": kmodel, "pipelines": {"a": KPipeline(lang_code="a", model=kmodel), "b": KPipeline(lang_code="b", model=kmodel)}, "folder": model_path}
+        elif engine == "flash":
             from chatterbox_flash import ChatterboxFlashTTS
             model = ChatterboxFlashTTS.from_local(model_path, device=device)
         elif engine == "qwen":
@@ -65,7 +74,26 @@ def generate(data):
         raise ValueError("Speech segment must contain 1–600 characters.")
     with redirect_stdout(sys.stderr):
         m = load(engine, variant, device, data.get("modelPath"))
-        if engine == "flash":
+        if engine == "kokoro":
+            import numpy as np
+            import soundfile as sf
+            voice = str(data.get("speaker") or "af_heart")
+            if voice not in ("af_heart", "af_bella", "af_nicole", "af_sarah", "am_adam", "am_michael", "am_echo", "bf_emma", "bf_isabella", "bm_george", "bm_lewis"):
+                raise ValueError("TTS_SPEAKER_UNSUPPORTED: Choose a built-in Kokoro voice.")
+            voice_file = os.path.join(m["folder"], "voices", voice + ".pt")
+            if not os.path.isfile(voice_file):
+                raise FileNotFoundError("Kokoro voice missing from the downloaded model: " + voice)
+            pipeline = m["pipelines"][voice[0]]
+            clips = []
+            for result in pipeline(text, voice=voice_file):
+                if result.audio is not None:
+                    clips.append(result.audio.detach().cpu().numpy())
+            if not clips:
+                raise ValueError("TTS_EMPTY_OR_INVALID_WAV: Kokoro generated no speech")
+            out = io.BytesIO()
+            sf.write(out, np.concatenate(clips), 24000, format="WAV")
+            encoded = out.getvalue()
+        elif engine == "flash":
             voice_file = data.get("reference", "")
             if not voice_file:
                 raise ValueError("Chatterbox Flash requires an imported reference voice (WAV).")

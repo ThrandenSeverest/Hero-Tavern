@@ -12,10 +12,11 @@ function splitSpeech(raw,{speaker='Character',narrator='Narrator'}={}){
  }
  push();return segments.filter(x=>x.text);
 }
+const KOKORO_VOICES=['af_heart','af_bella','af_nicole','af_sarah','am_adam','am_michael','am_echo','bf_emma','bf_isabella','bm_george','bm_lewis'];
 const VARIANTS=['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'];
 function capabilities(engine,variant){
- if(!['flash','qwen'].includes(engine)||(engine==='qwen'&&!VARIANTS.includes(variant))||(engine==='flash'&&variant!=='flash'&&!VARIANTS.includes(variant)))throw Error('Unsupported speech engine/model');
- return {presetSpeakers:engine==='qwen'&&variant.startsWith('custom'),referenceAudio:engine==='flash'||variant.startsWith('clone'),referenceTranscript:engine==='qwen'&&variant.startsWith('clone'),voiceDesign:engine==='qwen'&&variant==='design-1.7',textStyleInstruction:engine==='qwen'&&['custom-0.6','custom-1.7','design-1.7'].includes(variant),maxTextCharacters:600};
+ if(!['flash','qwen','kokoro'].includes(engine)||(engine==='qwen'&&!VARIANTS.includes(variant))||(engine==='flash'&&variant!=='flash'&&!VARIANTS.includes(variant))||(engine==='kokoro'&&variant!=='kokoro'))throw Error('Unsupported speech engine/model');
+ return {presetSpeakers:(engine==='qwen'&&variant.startsWith('custom'))||engine==='kokoro',referenceAudio:engine==='flash'||variant.startsWith('clone'),referenceTranscript:engine==='qwen'&&variant.startsWith('clone'),voiceDesign:engine==='qwen'&&variant==='design-1.7',textStyleInstruction:engine==='qwen'&&['custom-0.6','custom-1.7','design-1.7'].includes(variant),maxTextCharacters:600};
 }
 function speechError(code,message){const error=Error(code+': '+message);error.code=code;return error;}
 function planSpeech(text,dialogue,narrator){
@@ -46,6 +47,10 @@ function createTTS(root){
   if(!caps.referenceAudio){voice.reference='';voice.referenceText='';}
   if(!caps.referenceTranscript)voice.referenceText='';
   if(!caps.presetSpeakers)voice.speaker='';
+  if(engine==='kokoro'){
+   if(!KOKORO_VOICES.includes(voice.speaker))voice.speaker='af_heart';
+   if(!['Auto','English'].includes(voice.language))throw speechError('TTS_LANGUAGE_UNSUPPORTED','Kokoro preset is English only; select Qwen for Russian or other languages.');
+  }
   if(!caps.textStyleInstruction)voice.style='';
   return voice;
  }
@@ -55,6 +60,7 @@ function createTTS(root){
   // Never demand an arbitrary WAV from a character that has no assigned voice
   // when a local no-reference CustomVoice model is already installed.
   if(capabilities(voice.engine,voice.variant).referenceAudio&&!voice.reference){
+   if(installedWeight('kokoro','kokoro'))return normalizeVoice({engine:'kokoro',variant:'kokoro',speaker:narrator?'af_heart':'am_adam',language:'English',reference:''});
    const variant=['custom-0.6','custom-1.7'].find(kind=>installedWeight('qwen',kind))||'custom-0.6';
    return normalizeVoice({engine:'qwen',variant,speaker:narrator?(settings.narratorSpeaker||'Ryan'):(settings.speaker||'Ryan'),reference:'',style:''});
   }
@@ -89,12 +95,12 @@ function createTTS(root){
  const executable=(engine=settings.engine)=>{const dir=path.join(root,'TTSRuntime',engine);return process.platform==='win32'?path.join(dir,'Scripts','python.exe'):path.join(dir,'bin','python');};
  const weightsDir=(engine,variant)=>path.join(root,'TTSModels',engine,engine==='flash'?'flash':variant);
  const installedWeight=(engine,variant)=>fs.existsSync(path.join(weightsDir(engine,variant),'.hero-downloaded'));
- const currentKind=()=>settings.engine==='flash'?'flash':settings.variant;
+ const currentKind=()=>settings.engine==='flash'?'flash':settings.engine==='kokoro'?'kokoro':settings.variant;
  const status=()=>{
   const ready=fs.existsSync(executable())&&fs.existsSync(path.join(root,'TTSRuntime',settings.engine,'.installed'));
   const weightsReady=installedWeight(settings.engine,settings.variant);
   const storage=downloader?bytesOnDisk(weightsDir(settings.engine,settings.variant)):{bytes:0,files:0};
-  return {settings,capabilities:capabilities(settings.engine,settings.variant),profiles:Object.values(profiles),jobLog,lastSynthesis,ready,weightsReady,downloadedModels:{flash:installedWeight('flash','flash'),...Object.fromEntries(['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(variant=>[variant,installedWeight('qwen',variant)]))},
+  return {settings,capabilities:capabilities(settings.engine,settings.variant),profiles:Object.values(profiles),jobLog,lastSynthesis,ready,weightsReady,downloadedModels:{flash:installedWeight('flash','flash'),kokoro:installedWeight('kokoro','kokoro'),...Object.fromEntries(['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(variant=>[variant,installedWeight('qwen',variant)]))},
    running:!!child,busy:busy||messageBusy,installing:!!install,installStage,installStartedAt,installChangedAt,
    installOutput:installOutput.slice(-12000),downloading:!!downloader,downloadKind,downloadStartedAt,downloadChangedAt,
    downloadOutput:downloadOutput.slice(-12000),downloadError,error:fault,lastSynthesis,
@@ -110,7 +116,7 @@ function createTTS(root){
    const engine=settings.engine,variant=settings.variant,kind=currentKind(),target=weightsDir(engine,variant);
    if(installedWeight(engine,variant))return {alreadyInstalled:true,kind,path:target};
    fs.mkdirSync(target,{recursive:true});
-   downloadOutput='Starting '+(engine==='flash'?'Chatterbox Flash':'Qwen3-TTS '+variant)+' model download…';downloadStartedAt=Date.now();downloadChangedAt=downloadStartedAt;diskCache.at=0;
+   downloadOutput='Starting '+(engine==='flash'?'Chatterbox Flash':engine==='kokoro'?'Kokoro 82M':'Qwen3-TTS '+variant)+' model download…';downloadStartedAt=Date.now();downloadChangedAt=downloadStartedAt;diskCache.at=0;
    downloadError='';downloadKind=kind;
    downloader=spawn(executable(),['-u',path.join(root,'TTSModelDownload.py'),kind,target],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1',HF_HUB_ENABLE_HF_TRANSFER:'0'}});
    const current=downloader,log=data=>appendDownload(data.toString());
@@ -126,7 +132,7 @@ function createTTS(root){
    downloadError='Download interrupted; partial files can be resumed safely.';downloadChangedAt=Date.now();setupRequested=null;return {cancelled:true};
  }
 
- const configure=next=>{if(!next||typeof next!=='object')throw Error('Invalid voice settings');if(busy||messageBusy)throw Error('Wait for speech generation or cancel it before changing global settings');const previous=settings.engine;const updated={...settings};for(const key of ['engine','variant','device','language','speaker','narratorSpeaker','enabled','autoPlay','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(next[key]!==undefined)updated[key]=next[key];if(!['flash','qwen'].includes(updated.engine))throw Error('Choose Flash or Qwen3-TTS');if(!['cpu','cuda'].includes(updated.device))throw Error('Invalid device');if(updated.engine==='qwen'&&!VARIANTS.includes(updated.variant)||updated.engine==='flash'&&updated.variant!=='flash'&&!VARIANTS.includes(updated.variant))throw Error('Invalid speech variant');for(const key of ['speaker','narratorSpeaker','language','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(typeof updated[key]!=='string'||updated[key].length>1200)throw Error('Invalid voice setting');for(const key of ['enabled','autoPlay'])if(typeof updated[key]!=='boolean')throw Error('Invalid playback setting');if((install||downloader||setupRequested)&&(settings.engine!==updated.engine||settings.variant!==updated.variant))throw Error('Wait for the current voice installation or cancel the download before selecting another model.');settings=updated;fs.writeFileSync(file,JSON.stringify(settings,null,2));if(previous!==settings.engine)stop();return status();};
+ const configure=next=>{if(!next||typeof next!=='object')throw Error('Invalid voice settings');if(busy||messageBusy)throw Error('Wait for speech generation or cancel it before changing global settings');const previous=settings.engine;const updated={...settings};for(const key of ['engine','variant','device','language','speaker','narratorSpeaker','enabled','autoPlay','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(next[key]!==undefined)updated[key]=next[key];if(!['flash','qwen','kokoro'].includes(updated.engine))throw Error('Choose Flash, Kokoro or Qwen3-TTS');if(!['cpu','cuda'].includes(updated.device))throw Error('Invalid device');if(updated.engine==='qwen'&&!VARIANTS.includes(updated.variant)||updated.engine==='flash'&&updated.variant!=='flash'&&!VARIANTS.includes(updated.variant))throw Error('Invalid speech variant');for(const key of ['speaker','narratorSpeaker','language','dialogueReference','narratorReference','referenceText','narratorReferenceText','style'])if(typeof updated[key]!=='string'||updated[key].length>1200)throw Error('Invalid voice setting');for(const key of ['enabled','autoPlay'])if(typeof updated[key]!=='boolean')throw Error('Invalid playback setting');if((install||downloader||setupRequested)&&(settings.engine!==updated.engine||settings.variant!==updated.variant))throw Error('Wait for the current voice installation or cancel the download before selecting another model.');settings=updated;fs.writeFileSync(file,JSON.stringify(settings,null,2));if(previous!==settings.engine)stop();return status();};
  const installEngine=(options={})=>{
   if(install)throw Error('Voice dependency installation is already running. Check its live installation stage.');
   if(downloader)throw Error('A voice weight download is already running. Wait or cancel it before repairing dependencies.');
@@ -166,12 +172,12 @@ function createTTS(root){
   };
   const installPackages=()=>{
    appendInstall('\nStep 2/3: Installing '+engine+' packages into '+pythonExe+'…\n');
-   const packages=engine==='flash'?['chatterbox-flash','soundfile','huggingface_hub']:['qwen-tts','soundfile','huggingface_hub'];
+   const packages=engine==='flash'?['chatterbox-flash','soundfile','huggingface_hub']:engine==='kokoro'?['kokoro>=0.9.4','soundfile','huggingface_hub']:['qwen-tts','soundfile','huggingface_hub'];
    const command=isWindows?path.join(root,'TTSRuntime','uv.exe'):pythonExe;
    // uv pip directly manages environments without needing "python -m pip".
    const args=isWindows?['pip','install','--python',pythonExe,'--upgrade',...packages]:['-m','pip','install','--upgrade',...packages];
    runChild(command,args,'packages',()=>{
-    if(engine!=='flash'){done();return;}
+    if(engine!=='flash'&&engine!=='kokoro'){done();return;}
     appendInstall('\nStep 2/3: Installing PyTorch CUDA 12.8 wheels for the RTX 5070…\n');
     const wheels=['torch==2.7.1','torchaudio==2.7.1','torchvision==0.22.1'];
     const gpuArgs=isWindows?['pip','install','--python',pythonExe,'--upgrade',...wheels,'--index-url','https://download.pytorch.org/whl/cu128']:['-m','pip','install','--upgrade',...wheels,'--index-url','https://download.pytorch.org/whl/cu128'];

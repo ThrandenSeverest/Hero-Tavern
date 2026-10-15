@@ -36,7 +36,7 @@ test('Continuing an in-progress novel prioritizes current manuscript over origin
  assert.match(r.prompt,/Later beat \(not yet happening\): Beyond the gate/);
  assert.match(r.prompt,/story has ALREADY BEGUN/);
  assert.match(r.prompt,/current manuscript endpoint/i);
- assert.ok(r.prompt.endsWith('locked gate.'));
+ assert.match(r.prompt,/locked gate\.\n\[END OF EXISTING MANUSCRIPT\]/);
  assert.equal(r.diagnostics.beatIndex,1);
  assert.equal(r.diagnostics.scenePace,'steady');
  assert.equal(r.diagnostics.manuscriptStarted,true);

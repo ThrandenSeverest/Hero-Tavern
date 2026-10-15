@@ -27,7 +27,7 @@ test('writer rejects two consecutive explanatory drafts instead of offering them
   if(url.endsWith('/tokencount'))return Response.json({value:Math.ceil(payload.prompt.length/4)});
   n++;return Response.json({choices:[{text:'I understand I need to continue this scenario based on the instructions. Let me start by describing Lesya’s appearance:'}]});
  }});
- await assert.rejects(pipeline.generate({prompt:'',writerSettings:{maxReplyTokens:256},hero_writer:{text:'',prompt:'Lesya arrives at an inn.',memory:'',note:'',lore:[],operation:'continue'}},undefined,{mode:'writer'}),/could not produce a prose continuation/);
+ await assert.rejects(pipeline.generate({prompt:'',writerSettings:{maxReplyTokens:256},hero_writer:{text:'',prompt:'Lesya arrives at an inn.',memory:'',note:'',lore:[],operation:'continue'}},undefined,{mode:'writer'}),/could not produce new prose/);
  assert.equal(n,2);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

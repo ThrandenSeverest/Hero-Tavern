@@ -170,8 +170,8 @@ test('Kokoro pins versioned requirements and marks old unverified runtimes as ne
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'kokoro-dep-health-'));
  try{
   const svc=createTTS(root);svc.configure({engine:'kokoro',variant:'kokoro',language:'English'});
-  const d=path.join(root,'TTSRuntime','kokoro','bin');fs.mkdirSync(d,{recursive:true});
-  fs.writeFileSync(path.join(d,'python'),'fixture');
+  const d=path.join(root,'TTSRuntime','kokoro',process.platform==='win32'?'Scripts':'bin');fs.mkdirSync(d,{recursive:true});
+  fs.writeFileSync(path.join(d,process.platform==='win32'?'python.exe':'python'),'fixture');
   fs.writeFileSync(path.join(root,'TTSRuntime','kokoro','.installed'),'old-install');
   assert.equal(svc.status().ready,false);
   fs.writeFileSync(path.join(root,'TTSRuntime','kokoro','.installed'),'kokoro-0.9.4-transformers-4.49.0-cu128-v2\nverified');

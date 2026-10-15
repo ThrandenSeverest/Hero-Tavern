@@ -6,6 +6,7 @@ const {buildWriterContext,reduceLongContext}=require('./WriterContext.cjs');
 const {writerRepetitionIssue}=require('./WriterFlow.cjs');
 const {engineFetch,errorDetails}=require('./EngineHTTP.cjs');
 const {createMemory}=require('./ContextMemory.cjs');
+const {createNovelWriter}=require('./NovelWriter.cjs');
 const DEFAULTS = Object.freeze({thinkingMode:'off',planningSource:'same',top_k:20,temperature:0.8,top_p:0.9,min_p:0.05,repetition_penalty:1.08,memoryEnabled:true,memoryTokens:512,recentMessages:12,maxReplyTokens:512,planningTokens:192,replyStyle:'mixed',instructions:'',removeModelTokens:true,stopAtSpeaker:true,dedupeParagraphs:false,repairMetaReplies:true,avoidRepetition:true,repetitionSensitivity:0.83,stopMarkers:[]});
 function validateSettings(input = {}) {
     const value = {};
@@ -75,8 +76,10 @@ function isWriterNonProse(input){
  return '';
 }
 function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
-    let active = null,lastRun=null;const runSnapshot=()=>lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
+    const novelist=createNovelWriter({backendURL,fetchBackend,getModelProfile,getContextSize:()=>getContextSize?.()||(()=>{try{return JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).contextSize}catch{return 8192}})(),recordInspector,onStage:setState});
+    let active = null,lastRun=null;const runSnapshot=()=>novelist.runSnapshot()||lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
     async function generate(body, signal, {mode='chat'}={}) {
+        if(mode==='writer')return novelist.generate(body,signal);
         if(active)throw new Error('A reply is already being generated. Stop it before starting another.');
         if(typeof body.prompt!=='string')throw new Error('The local reply pipeline requires a text prompt.');
         lastRun={id:'run-'+Date.now(),started:Date.now(),stage:'preflight',timeline:[],requests:[],mode};
@@ -258,7 +261,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             return {id:'hero-'+Date.now(),object:'text_completion',model:body.model||'local-model',usage,...(mode==='writer'?{writerContext:lastRun.writerContext}:{}),choices:[{index:0,text,finish_reason:'stop'}]};
         } catch(error){lastRun.error=errorDetails(error);lastRun.failedStage=lastRun.stage;throw error;} finally {lastRun.elapsedMs=Date.now()-lastRun.started;lastRun.finished=Date.now();signal?.removeEventListener('abort',abort);active=null;stage('idle');}
     }
-    function abort(){active?.abort();if(fetchBackend===engineFetch){engineFetch(backendURL+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});const worker=getPlanningBackend();if(worker?.ready)engineFetch(worker.url+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});}}
+    function abort(){novelist.abort();active?.abort();if(fetchBackend===engineFetch){engineFetch(backendURL+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});const worker=getPlanningBackend();if(worker?.ready)engineFetch(worker.url+'/api/extra/abort',{method:'POST',timeoutMs:3000}).catch(()=>{});}}
     async function handle(req,res){
         if(!req.url.startsWith('/inference/'))return false;
         if(req.headers.origin){res.writeHead(403);res.end('Browser inference requests are not allowed.');return true;}

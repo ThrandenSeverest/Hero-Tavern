@@ -46,7 +46,7 @@ test('model testing presets contain all four operations and keep reports',()=>{
 test('Writer emits a real manuscript continuation prefill, not an assistant explanation request',async()=>{
  const w={text:'The clock struck midnight. A shadow entered the hall.',prompt:'Gothic mystery.',memory:'',lore:[],operation:'continue'};
  const result=await buildWriterContext(w,2200,async text=>Math.ceil(text.length/4));
- assert.ok(result.prompt.endsWith(w.text));
+ assert.ok(result.prompt.includes(w.text+'\n[END OF EXISTING MANUSCRIPT]'));
  assert.ok(result.prompt.includes('<|im_start|>assistant\n'));
  assert.ok(!result.prompt.endsWith('Write the passage now. Only story prose.'));
 });

@@ -44,7 +44,9 @@ test('tracker extraction retries after a transient invalid reply without consumi
  let calls=0;
  const pipeline={generate:async()=>{calls++;return {choices:[{text:calls<=2?'not valid json':JSON.stringify({changes:[{key:S.keyOf(d),value:'angry',sourceMessageId:'m1',evidence:'I am angry.'}]})}]}}};
  const api=createStoryAPI(store,pipeline,{ready:()=>true});
- await assert.rejects(api.action('/story/analyze',{id:'s'}),/could not validate any changes/);
+ const pending=await api.action('/story/analyze',{id:'s'});
+ assert.equal(pending.session.lastAnalysis.partial,true);
+ assert.match(pending.session.lastAnalysis.errors.join(' '),/No tracker changes could be verified/);
  assert.equal(session.analyzedSources.length,0);
  assert.ok(session.lastAnalysis.retryAt>Date.now());
  session.lastAnalysis.retryAt=Date.now()-1;
@@ -87,6 +89,16 @@ test('unassigned Flash voice routes to installed Qwen CustomVoice rather than re
   await assert.rejects(svc.speakMessage({text:'Welcome.'}),e=>/TTS_ENGINE_NOT_INSTALLED/.test(e.message)&&!/TTS_REFERENCE_REQUIRED/.test(e.message));
   const preset=svc.saveProfile({name:'Custom',voice:{engine:'qwen',variant:'custom-0.6',speaker:'Ryan'}}).profile;
   assert.equal(preset.voice.variant,'custom-0.6');svc.stop();
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+test('missing reference routes to no-WAV voice even before weights are installed',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-voice-no-reference-'));
+ try{
+  const svc=createTTS(root);svc.configure({engine:'qwen',variant:'clone-0.6',dialogueReference:'',narratorReference:''});
+  await assert.rejects(svc.speakMessage({text:'Welcome.'}),e=>/TTS_WEIGHTS_MISSING.*custom-0\.6/.test(e.message)&&!/TTS_REFERENCE_REQUIRED/.test(e.message));
+  const saved=svc.saveProfile({name:'Old clone',voice:{engine:'qwen',variant:'clone-0.6',reference:''}}).profile;
+  await assert.rejects(svc.speakMessage({text:'Welcome.',assignment:{dialogueProfileId:saved.id,narratorMode:'same'}}),e=>/TTS_WEIGHTS_MISSING.*custom-0\.6/.test(e.message)&&!/TTS_REFERENCE_REQUIRED/.test(e.message));
+  svc.stop();
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 test('Windows packaging wires the compatibility UI and report route',()=>{

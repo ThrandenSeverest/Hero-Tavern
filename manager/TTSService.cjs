@@ -50,13 +50,13 @@ function createTTS(root){
   return voice;
  }
  function resolveVoice(profileId,narrator=false){
-  if(profileId){if(!Object.hasOwn(profiles,profileId))throw speechError('TTS_CHARACTER_ROUTE_FAILED','Assigned voice profile is missing. Reassign it in Character Voice.');return normalizeVoice(profiles[profileId].voice);}
-  const voice=normalizeVoice(narrator?{speaker:settings.narratorSpeaker,reference:settings.narratorReference,referenceText:settings.narratorReferenceText}:{});
+  if(profileId&&!Object.hasOwn(profiles,profileId))throw speechError('TTS_CHARACTER_ROUTE_FAILED','Assigned voice profile is missing. Reassign it in Character Voice.');
+  const voice=profileId?normalizeVoice(profiles[profileId].voice):normalizeVoice(narrator?{speaker:settings.narratorSpeaker,reference:settings.narratorReference,referenceText:settings.narratorReferenceText}:{});
   // Never demand an arbitrary WAV from a character that has no assigned voice
   // when a local no-reference CustomVoice model is already installed.
   if(capabilities(voice.engine,voice.variant).referenceAudio&&!voice.reference){
-   const variant=['custom-0.6','custom-1.7'].find(kind=>installedWeight('qwen',kind));
-   if(variant)return normalizeVoice({engine:'qwen',variant,speaker:narrator?(settings.narratorSpeaker||'Ryan'):(settings.speaker||'Ryan'),reference:'',style:''});
+   const variant=['custom-0.6','custom-1.7'].find(kind=>installedWeight('qwen',kind))||'custom-0.6';
+   return normalizeVoice({engine:'qwen',variant,speaker:narrator?(settings.narratorSpeaker||'Ryan'):(settings.speaker||'Ryan'),reference:'',style:''});
   }
   return voice;
  }

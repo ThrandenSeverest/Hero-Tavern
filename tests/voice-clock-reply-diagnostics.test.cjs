@@ -108,9 +108,10 @@ test('Extractor failure is retryable and does not mark source messages analyzed'
  const session={id:'test',characterId:'seraphina',definitions:[d],events:[],analyzedSources:[],failures:[]};
  const store={view:()=>({session,messages:[m],context:{state:S.initialState([d])}}),get:()=>session,saveSession:()=>{}};
  const api=createStoryAPI(store,{generate:async()=>({choices:[{text:''}]})});
- await assert.rejects(api.action('/story/analyze',{id:'test'}),/could not validate any changes/);
+ const result=await api.action('/story/analyze',{id:'test'});
+ assert.equal(result.session.lastAnalysis.partial,true);
  assert.deepEqual(session.analyzedSources,[]);
- assert.equal(session.lastAnalysis.failed,true);
+ assert.match(session.lastAnalysis.errors.join(' '),/No tracker changes could be verified/);
  assert.ok(session.failures.length);
 });
 

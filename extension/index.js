@@ -266,16 +266,16 @@ const initHeroTavern = async () => {
        const download=document.createElement('a');download.href=audio.src;download.textContent=' Download voice';download.target='_blank';output.append(download);
        try{await audio.play()}catch{const note=document.createElement('p');note.textContent='Audio is ready. Click Play (browser blocked autoplay).';output.append(note)}
        heroLastSpoken=id;
-      }catch(e){output.textContent='Voice failed: '+e.message+' — Open Voices for model settings and speech job log.';console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;if(button)button.disabled=false;}
+      }catch(e){output.replaceChildren();const note=document.createElement('span');note.textContent='Voice unavailable: '+e.message+' ';const settings=document.createElement('button');settings.type='button';settings.className='hero-message-voice-settings';settings.textContent='Set this character’s voice';output.append(note,settings);console.warn('Hero Tavern TTS:',e.message)}finally{heroSpeaking=false;if(button)button.disabled=false;}
     }
     const heroChat=document.getElementById('chat');
     if(heroChat){
-     heroChat.addEventListener('click',e=>{const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeakMessage(button.closest('.mes'),true);}});
+     heroChat.addEventListener('click',e=>{const settings=e.target.closest('.hero-message-voice-settings');if(settings){e.preventDefault();document.dispatchEvent(new CustomEvent('hero-open-character-voice',{detail:{message:settings.closest('.mes')}}));return}const button=e.target.closest('.hero-speak-message');if(button){e.preventDefault();heroAudio?.pause();heroSpeakMessage(button.closest('.mes'),true);}});
      const attachVoiceButtons=()=>{
       for(const message of heroChat.querySelectorAll('.mes:not(.is_user):not([is_user="true"])')){
        if(message.querySelector('.hero-speak-message'))continue;
        const text=message.querySelector('.mes_text');if(!text)continue;
-       const btn=document.createElement('button');btn.className='hero-speak-message';btn.type='button';btn.textContent='▶ Voice';btn.title='Read narration and dialogue with separate voices';btn.style.cssText='margin:5px 0;padding:4px 9px;font-size:12px;border:1px solid #756348;border-radius:6px;background:#252b39;color:#e9d5a3;cursor:pointer';text.after(btn);
+       const btn=document.createElement('button');btn.className='hero-speak-message';btn.type='button';btn.textContent='▶ Voice';btn.title='Read narration and dialogue with separate voices';btn.style.cssText='margin:5px 0;padding:4px 9px;font-size:12px;border:1px solid #756348;border-radius:6px;background:#252b39;color:#e9d5a3;cursor:pointer';const settings=document.createElement('button');settings.className='hero-message-voice-settings';settings.type='button';settings.textContent='⚙ Character voice';settings.title='Choose this character’s dialogue and narrator voices';settings.style.cssText=btn.style.cssText+';margin-left:6px';text.after(btn,settings);
       }
      };
      let voiceTimer=null;

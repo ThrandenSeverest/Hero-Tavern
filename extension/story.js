@@ -283,7 +283,7 @@ export async function initStory({getContext,frame,show}){
   const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
   const analysis=view.session.lastAnalysis;
   if(analysis){const health=document.createElement('span');health.className='hero-track-meta';
-   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns'+(analysis.recheck?' · replayed':'')+(analysis.partial?' ⚠ partial; retry available':'');
+   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns'+(analysis.recheck?' · replayed':'')+(analysis.partial?' ⚠ '+String(analysis.errors?.[0]||'Some changes could not be checked').slice(0,140)+' · Re-analyze recent turns to retry':'');
    health.title='Check the Prompt Inspector for the full tracker update history';head.append(health);}
   const pending=view.session.events.filter(e=>e.status==='pending');
   if(pending.length){const review=document.createElement('button');review.textContent='Review '+pending.length+' state changes';

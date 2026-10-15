@@ -62,7 +62,7 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const candidate=candidates.get(data.candidateId);if(!candidate||candidate.storyId!==data.id)throw Error('Candidate expired or belongs to another story.');
    const s=store.read(data.id);if(s.version!==candidate.version)throw Error('Draft changed after generation. Candidate preserved; copy it or retry from the new draft.');
    const before=s.text.slice(0,candidate.start),after=s.text.slice(candidate.end);let prose=candidate.text;if(candidate.operation!=='rewrite'&&before&&!/\s$/.test(before)&&prose&&!/^[\s.,;:!?…)}\]]/.test(prose))prose=' '+prose;if(after&&prose&&/[\p{L}\p{N}]$/u.test(prose)&&/^[\p{L}\p{N}]/u.test(after))prose+=' ';
-   const result=store.save(s.id,{text:before+prose+after,label:'Accepted '+candidate.operation},s.version);
+   const result=store.save(s.id,{text:before+prose+after,beatIndex:candidate.nextBeatIndex??s.beatIndex,label:'Accepted '+candidate.operation},s.version);
    return result;
   }
   if(op==='generate-apply'||op==='regenerate'){
@@ -97,14 +97,15 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
     const position=op==='regenerate'?start:base.length;
     const writerText=op==='regenerate'?base.slice(0,position)+tail+base.slice(position):base+tail;
     const caret=position+tail.length;
-    const result=await pipeline.generate({prompt:'',writerSettings:original.settings,hero_writer:{...original,text:writerText,operation:modelOperation,start:caret,end:caret,instruction},stream:false},controller.signal,{mode:'writer'});let prose=String(result.choices?.[0]?.text||'').replace(/\{\{user\}\}/gi,()=>original.persona?.name?.trim()||'you');if(!prose.trim())throw Error('The model returned no prose; original draft preserved.');if(event)prose=tail+prose;
+    const nextBeatIndex=operation==='advance'&&op!=='regenerate'?Math.min(original.beats.length,original.beatIndex+1):original.beatIndex;
+    const result=await pipeline.generate({prompt:'',writerSettings:original.settings,hero_writer:{...original,beatIndex:nextBeatIndex,text:writerText,operation:modelOperation,start:caret,end:caret,instruction},stream:false},controller.signal,{mode:'writer'});let prose=String(result.choices?.[0]?.text||'').replace(/\{\{user\}\}/gi,()=>original.persona?.name?.trim()||'you');if(!prose.trim())throw Error('The model returned no prose; original draft preserved.');if(event)prose=tail+prose;
    const before=base.slice(0,start),after=base.slice(end);if(operation!=='rewrite'&&before&&!/\s$/.test(before)&&! /^[\s.,;:!?…)}\]]/.test(prose))prose=' '+prose;if(after&&prose&&/[\p{L}\p{N}]$/u.test(prose)&&/^[\p{L}\p{N}]/u.test(after))prose+=' ';
    const nextText=before+prose+after;
    const prevSegments=(original.generations||[]).filter(g=>g.id!==existing?.id);
    const {reconcileGenerations}=require('./WriterStore.cjs');
    const segments=reconcileGenerations(original.text,nextText,prevSegments);
    segments.push({id:existing?.id||crypto.randomUUID(),at:Date.now(),start:before.length,end:before.length+prose.length,text:prose,operation,instruction:op==='regenerate'?(existing?.instruction||''):String(data.instruction||'').slice(0,2000)});
-   const saved=store.save(original.id,{text:nextText,generations:segments,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
+   const saved=store.save(original.id,{text:nextText,beatIndex:nextBeatIndex,generations:segments,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
    return {story:saved,generation:saved.generations.find(g=>g.id===(existing?.id||segments.at(-1)?.id))||null,replacement:{start:before.length,text:prose},usage:result.usage,context:result.writerContext};
    }finally{active=null;signal?.removeEventListener('abort',abort);}
   }
@@ -118,9 +119,10 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const controller=new AbortController();active=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
    try{await ensureText(controller.signal);if(controller.signal.aborted)throw Error('Writer generation cancelled.');
     const event=writerEvent(operation,data.instruction,s.persona?.name),tail=event?(s.text&&!/\s$/.test(s.text)?'\n\n':'')+event+'\n\n':'';
-    const r=await pipeline.generate({prompt:'',writerSettings:s.settings,hero_writer:{...s,text:s.text+tail,operation,start:(s.text+tail).length,end:(s.text+tail).length,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});
+    const nextBeatIndex=operation==='advance'?Math.min(s.beats.length,s.beatIndex+1):s.beatIndex;
+    const r=await pipeline.generate({prompt:'',writerSettings:s.settings,hero_writer:{...s,beatIndex:nextBeatIndex,text:s.text+tail,operation,start:(s.text+tail).length,end:(s.text+tail).length,instruction:data.instruction||''},stream:false},controller.signal,{mode:'writer'});
     let prose=r.choices[0].text.replace(/\{\{user\}\}/gi,()=>s.persona?.name?.trim()||'you');if(event)prose=tail+prose;
-    const candidate={id:crypto.randomUUID(),storyId:s.id,version:s.version,operation,start,end,text:prose,usage:r.usage,context:r.writerContext};candidates.set(candidate.id,candidate);while(candidates.size>50)candidates.delete(candidates.keys().next().value);return candidate;
+    const candidate={id:crypto.randomUUID(),storyId:s.id,version:s.version,operation,start,end,nextBeatIndex,text:prose,usage:r.usage,context:r.writerContext};candidates.set(candidate.id,candidate);while(candidates.size>50)candidates.delete(candidates.keys().next().value);return candidate;
    }finally{active=null;signal?.removeEventListener('abort',abort)}
   }
   throw Error('Unknown Writer action.');

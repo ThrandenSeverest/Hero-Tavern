@@ -117,7 +117,14 @@ export async function initStory({getContext,frame,show}){
  async function openCharacterVoice(){
   const index=c().characterId,character=c().characters?.[index];if(!character||c().groupId)throw Error('Select one character to assign their voice.');
   const ext=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};
-  const {box}=dialog('Voice · '+character.name),state=await rpc('/tts/status');
+  // Never gate the Character Voice controls behind TTS model discovery. On a
+  // first launch Python dependencies may be missing or the local worker may
+  // be slow; voice configuration and assignment must still be usable.
+  const {box}=dialog('Voice · '+character.name);
+  const state=await Promise.race([
+    rpc('/tts/status').catch(error=>({settings:{device:'cpu'},profiles:[],voices:[],warning:error.message})),
+    new Promise(resolve=>setTimeout(()=>resolve({settings:{device:'cpu'},profiles:[],voices:[],warning:'Voice service is slow or offline. Controls remain available; check Diagnostics → TTS.'}),2000))
+  ]);
   const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Qwen CustomVoice uses built-in voices without a WAV; VoiceDesign uses a description; Flash and cloning models need an imported WAV. Voice models must be installed first.';
   const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
   dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
@@ -128,7 +135,7 @@ export async function initStory({getContext,frame,show}){
   const label=(text,field)=>{const el=document.createElement('label');el.textContent=text;el.append(field);return el};
   const text=document.createElement('textarea');text.value='*The door opens.* “Welcome to the tavern.”';
   const audio=document.createElement('audio');audio.controls=true;
-  const status=document.createElement('p');status.setAttribute('role','status');
+  const status=document.createElement('p');status.setAttribute('role','status');if(state.warning)status.textContent=state.warning;
   const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
   // A native Character Voice editor, not a link to an unrelated settings screen.
   const engine=document.createElement('select');engine.id='hero-character-voice-engine';
@@ -149,7 +156,7 @@ export async function initStory({getContext,frame,show}){
     const v=await rpc('/tts/import',{name:file.name.replace(/\.wav$/i,''),base64});wav.replaceChildren(new Option('Choose imported WAV',''),...(v.voices||[]).map(n=>new Option(n,n)));wav.value=file.name.toLowerCase().replace(/\.wav$/i,'').replace(/[^a-z0-9_-]/g,'').slice(0,60)+'.wav';status.textContent='Reference imported.';
    }catch(e){status.textContent=e.message}finally{importWav.disabled=false}
   };
-  const device=document.createElement('select');device.add(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings.device;
+  const device=document.createElement('select');device.add(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings?.device||'cpu';
   const voiceOptions=()=>{const [backend,variant]=engine.value.split(':');return {engine:backend,variant,device:device.value,language:'Auto',speaker:speaker.value,reference:wav.value,referenceText:transcript.value,style:mood.value}};
   const updateVoice=()=>{
    const chosen=engine.value,reference=chosen.startsWith('flash:')||chosen.includes(':clone-');

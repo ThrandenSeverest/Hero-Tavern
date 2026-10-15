@@ -23,6 +23,12 @@ test('Mistral-v3 places system guidance in first instruction and stop-free recov
  const m=modelRequest({prompt:canonical,stop:['<|im_end|>'],noStopSequences:true},profile);
  assert.equal(m.stop.length,0);assert.match(m.prompt,/^<s>\[INST\]Stay in character\.\n\nHello\[\/INST\]$/);
 });
+test('Mistral multi-turn system rules remain next to the most recent user prompt, not buried in opening history',()=>{
+ const canonical='<|im_start|>system\nStay in character. Answer directly.<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHello there!<|im_end|>\n<|im_start|>user\nContinue the scene<|im_end|>\n<|im_start|>assistant\n';
+ const prompt=modelRequest({prompt:canonical,noStopSequences:true},{Template:'mistral-v3',Family:'Mistral NeMo'}).prompt;
+ assert.match(prompt,/^<s>\[INST\]Hello\[\/INST\]Hello there!<\/s>\[INST\]Stay in character\. Answer directly\.\n\nContinue the scene\[\/INST\]$/);
+ assert.equal((prompt.match(/Stay in character/g)||[]).length,1);
+});
 test('Mistral empty responses retry without stop sequences and return user-visible text',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-mistral-'));const requests=[];
  try{

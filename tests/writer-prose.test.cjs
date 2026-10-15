@@ -36,7 +36,7 @@ test('writer preserves a valid narrative candidate without a repair pass',async(
  try{const pipeline=createPipeline({root,backendURL:'mock',getContextSize:()=>8192,fetchBackend:async(url,o)=>{
   const payload=JSON.parse(o.body);
   if(url.endsWith('/tokencount'))return Response.json({value:Math.ceil(payload.prompt.length/4)});
-  n++;return Response.json({choices:[{text:'The tavern door creaked open. Lesya looked up from the hearth.'}]});
+  n++;return Response.json({choices:[{text:'The tavern door creaked open. Lesya looked up from the hearth. A traveler staggered across the threshold, clutching a letter against his coat. Before she could ask his name, he sank into the nearest chair and asked whether anyone had followed him. Outside, a horse whinnied and heavy footsteps approached the door. The innkeeper reached for the iron latch.'}]});
  }});
  const r=await pipeline.generate({prompt:'',hero_writer:{text:'',prompt:'Lesya arrives at an inn.',memory:'',note:'',lore:[],operation:'continue'}},undefined,{mode:'writer'});
  assert.match(r.choices[0].text,/tavern door creaked/);assert.equal(n,1);

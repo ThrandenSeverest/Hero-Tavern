@@ -51,13 +51,14 @@ test('Qwen generated images follow text and use correct distilled sampler indepe
 });
 test('Qwen reference edits use the native reference-conditioned latent and discard stale SDXL CFG',()=>{
  const pack=QWEN_PACKS.find(p=>p.id==='qwen21-q5km');
- const g=recipeGraph(pack,{prompt:'Change the coat to black',negative_prompt:'',operation:'img2img',steps:25,cfg_scale:5,seed:234}, {source:'reference.png'});
+ const g=recipeGraph(pack,{prompt:'Change the coat to black',negative_prompt:'',operation:'img2img',steps:25,cfg_scale:5,denoise:0.25,seed:234}, {source:'reference.png'});
  const encoded=Object.entries(g.graph).find(([,node])=>node.class_type==='TextEncodeQwenImage21');
  const sampler=Object.values(g.graph).find(node=>node.class_type==='KSampler').inputs;
  assert.ok(!Object.values(g.graph).some(node=>node.class_type==='VAEEncode'));
  assert.deepEqual(sampler.latent_image,[encoded[0],2]);
  assert.equal(encoded[1].inputs['images.image_1'][0],Object.entries(g.graph).find(([,node])=>node.class_type==='LoadImage')[0]);
  assert.equal(sampler.cfg,1);
+ assert.equal(sampler.denoise,1,'Reference-conditioning edit must sample the native empty latent completely');
  assert.equal(sampler.scheduler,'simple');
 });
 

@@ -408,6 +408,9 @@ el('scene-export').onclick=async()=>{try{
  }catch(e){el('error').textContent=e.message}};
 let imageGenerateBusy=false;
 function activeStudioModel(){return el('image-create-model').value||'sdxl'}
+const qwenQualityNote=document.createElement('p');qwenQualityNote.id='qwen-quality-note';qwenQualityNote.className='small';qwenQualityNote.setAttribute('role','status');qwenQualityNote.textContent='Qwen at CFG 1 ignores the negative prompt. Describe the desired framing and anatomy in the main prompt. For difficult hands, feet or fine details, try 40 steps at 1024 px with the same seed; model output still varies.';el('image-negative').after(qwenQualityNote);
+const qwenQualityButton=document.createElement('button');qwenQualityButton.type='button';qwenQualityButton.id='image-qwen-quality';qwenQualityButton.textContent='Qwen detail · 1024 px / 40 steps';qwenQualityButton.title='Keep the prompt, turn off optional rewrites, and give Qwen more sampling steps for difficult detail';el('image-test-baseline').after(qwenQualityButton);
+qwenQualityButton.onclick=()=>{el('image-width').value='1024';el('image-height').value='1024';el('image-steps').value='40';el('image-cfg').value='1';el('image-sampler').value='Euler';el('image-scheduler').value='simple';el('studio-preset').value='raw';el('studio-refine').checked=false;el('hero-post-auto').checked=false;el('hero-upscale-auto').checked=false;imageGeometryTouched=true;syncImageFormat();showImageRequestState();el('image-create-feedback').textContent='Qwen detail settings applied. Prompt and seed were kept. The negative prompt is inactive at CFG 1. Generate and compare with the original at the same seed.';};
 function updateStudioModelStatus(){
  const choice=activeStudioModel(),status=el('image-create-model-status');
  const packs=heroHubDetails?.engine?.packs||heroHubDetails?.hub?.packs||[];
@@ -426,6 +429,7 @@ function updateStudioModelStatus(){
   if(!pack.installed)status.classList.add('error');
  }else status.textContent='Checking model files and ComfyUI availability…';
  const isSDXL=choice==='sdxl';
+ qwenQualityNote.hidden=!choice.startsWith('qwen21-');qwenQualityButton.hidden=!choice.startsWith('qwen21-');
  for(let i=1;i<=3;i++)el('hero-comfy-lora-'+i).disabled=!(isSDXL||choice==='flux-klein');
  const noEdit=choice==='koboldcpp'||choice==='z-turbo';
  if(noEdit&&el('hero-comfy-mode').value!=='txt2img'){
@@ -603,7 +607,7 @@ el('image-generate').onclick=async()=>{
   }
   el('image-result').src=lastImage;el('image-result').hidden=false;
   el('image-download').href=lastImage;el('image-download').hidden=false;el('image-to-chat').disabled=false;
-  feedback.textContent='Original image from '+(result.model||choice)+' · '+(result.operation||'txt2img')+' · seed '+result.seed+' · '+(result.preset||'raw')+' preset · '+(result.refined?'AI prompt refined':'no AI prompt rewrite')+'. '+(result.refinementWarning||'')+' Saved in gallery.';
+  feedback.textContent='Original image from '+(result.model||choice)+' · '+(result.operation||'txt2img')+' · seed '+result.seed+' · '+(result.preset||'raw')+' preset · '+(result.refined?'AI prompt refined':'no AI prompt rewrite')+'. '+(result.refinementWarning||'')+' '+(result.requestWarnings||[]).join(' ')+' Saved in gallery.';
   el('studio-refined').textContent='Effective text actually sent to ComfyUI:\n'+String(result.refinedPrompt||'')+'\n\nOriginal request:\n'+String(result.originalPrompt||'');
   // A gallery edit is one-shot. A subsequent Generate starts from a blank canvas.
   if(el('hero-comfy-mode').value==='img2img')clearImageSource();

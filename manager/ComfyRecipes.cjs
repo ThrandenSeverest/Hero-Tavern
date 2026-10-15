@@ -43,12 +43,16 @@ function recipeGraph(pack,params,{checkpoint='',source,mask,reference,resolvedFi
   if((params.batch_size||1)>1)latent=n('RepeatLatentBatch',{samples:latent,amount:params.batch_size});
   const seed=params.seed==null||params.seed<0?crypto.randomInt(0,2147483647):params.seed;
   const positive=[encoded[0],0],negative=[encoded[0],1];
-  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:effectiveCfg,sampler_name:'euler',scheduler:'simple',denoise:mode==='txt2img'?1:params.denoise??0.7});
+  // TextEncodeQwenImage21 returns an empty model-native latent; the reference
+  // lives in the conditioning. Partial denoising an empty latent is not SDXL
+  // img2img strength and leaves unfinished/noisy edits. Official edit graphs
+  // sample this latent at denoise 1.
+  const sample=n('KSampler',{model,positive,negative,latent_image:latent,seed,steps:params.steps??25,cfg:effectiveCfg,sampler_name:'euler',scheduler:'simple',denoise:1});
   const result=n('VAEDecode',{samples:sample,vae});
   let output=result;
   if(mode==='inpaint'){const masked=editMask(n,mask,params);output=n('ImageCompositeMasked',{destination:sourceNode,source:result,mask:masked,x:0,y:0,resize_source:false});}
   const saved=n('SaveImage',{images:output,filename_prefix:'HeroTavern_Qwen21'});
-  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg!==effectiveCfg?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,sampler:'euler',scheduler:'simple'}:null};
+  return {graph:nodes,saveId:saved[0],mode,seed,batch:params.batch_size||1,packId:pack.id,normalizedSettings:requestedCfg!==effectiveCfg||mode!=='txt2img'&&params.denoise!=null&&params.denoise!==1?{cfgFrom:requestedCfg,cfgTo:effectiveCfg,denoiseFrom:params.denoise,denoiseTo:1,sampler:'euler',scheduler:'simple'}:null};
  }
  if(pack.id==='sdxl')return buildWorkflow({checkpoint,params,source,mask,mode:params.operation,lora:params.lora||[],upscaleModel:params.upscaleModel||'',upscaleFactor:params.upscaleFactor||2});
  const mode=params.operation||'txt2img';

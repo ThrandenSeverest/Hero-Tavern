@@ -24,6 +24,12 @@ test('Qwen and FLUX defaults stay isolated from stale SDXL configs',()=>{
  const sdxl=normalizeImageRequest({modelPack:'sdxl',cfg_scale:7,sampler_name:'DPM++ 2M Karras'}).data;
  assert.equal(sdxl.cfg_scale,7);assert.equal(sdxl.sampler_name,'DPM++ 2M Karras');
 });
+test('Qwen explains ineffective negative prompt and uses full denoising for reference edits',()=>{
+ const a=normalizeImageRequest({prompt:'Correct anatomy',negative_prompt:'extra limbs',modelPack:'qwen21-q5km',cfg_scale:1,seed:10});
+ assert.match(a.warnings.join(' '),/ignores the negative prompt/);
+ const edit=normalizeImageRequest({prompt:'Change the coat',modelPack:'qwen21-q5km',operation:'img2img',sourceName:'source.png',denoise:0.25,seed:10});
+ assert.equal(edit.data.denoise,1);assert.match(edit.warnings.join(' '),/full denoising pass/);
+});
 test('model testing presets contain all four operations and keep reports',()=>{
  assert.deepEqual(Object.keys(PRESETS).sort(),['image2image','image2text','text2image','text2text']);
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-tests-'));

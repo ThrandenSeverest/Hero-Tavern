@@ -237,6 +237,10 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await panel.locator('[data-tab="images"]').click();
   const options=await panel.locator('#image-create-model option').evaluateAll(nodes=>nodes.map(x=>x.value));
   if(!['flux-klein','z-turbo','sdxl','koboldcpp','custom'].every(id=>options.includes(id)))throw Error('Image Studio unified model selector is incomplete');
+  await panel.locator('#image-create-model').selectOption('qwen21-q5km');
+  await panel.locator('#qwen-quality-note').waitFor({state:'visible'});
+  await panel.locator('#image-qwen-quality').click();
+  if(await panel.locator('#image-steps').inputValue()!=='40'||await panel.locator('#image-width').inputValue()!=='1024')throw Error('Qwen detail mode did not reach visible generation controls');
   await panel.locator('#image-create-model').selectOption('flux-klein');
   await panel.locator('#image-model-center').waitFor({state:'attached'});
   if(!await panel.locator('#hero-lora-quick').isVisible()||!await panel.locator('#image-create-guide').isVisible())throw Error('Guided model status and one-click LoRA shelf must be visible during generation');

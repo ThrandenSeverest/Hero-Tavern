@@ -39,6 +39,8 @@ function normalizeImageRequest(input={}){
  if(data.modelPack&&data.modelPack.startsWith('qwen21-')){
   if(data.lora.length)throw Error('Qwen Image cannot use FLUX/SDXL LoRAs.');
   if(data.cfg_scale==null||Number(data.cfg_scale)>2){warnings.push('Qwen-Image 2.1 uses CFG 1, not generic SDXL guidance.');data.cfg_scale=1;}
+  if(Number(data.cfg_scale)===1&&data.negative_prompt?.trim())warnings.push('Qwen Image at CFG 1 ignores the negative prompt. Put required composition and anatomy in the main prompt, or use CFG 2 with possible oversharpening.');
+  if(['img2img','inpaint'].includes(mode)&&data.denoise!=null&&Number(data.denoise)!==1){warnings.push('Qwen reference edits use the reference in conditioning and a full denoising pass; SDXL strength does not apply.');data.denoise=1;}
   data.sampler_name='Euler';data.scheduler='simple';
  }
  if(data.modelPack==='flux-klein'){

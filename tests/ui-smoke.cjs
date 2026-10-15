@@ -152,7 +152,28 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await page.screenshot({path:path.join(repo,'.ci/hero-generation-qa.png')});
   await page.locator('.hero-nav[data-hero="characters"]').click();await page.locator('#right-nav-panel').waitFor({state:'visible'});
   await waitFor(async()=>await page.evaluate(()=>{const panel=document.querySelector('#right-nav-panel').getBoundingClientRect(),toolbar=document.querySelector('#top-settings-holder').getBoundingClientRect(),chat=document.querySelector('#sheld').getBoundingClientRect();return panel.top>=toolbar.bottom-1&&chat.right<=panel.left+1}));
-  await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();if(c.characters.length)await c.selectCharacterById('0')});
+  // Exercise Character Voice against a real card. The fresh upstream fixture
+  // contains no characters, so merely selecting index zero previously failed.
+  await page.evaluate(async()=>{
+   const {getContext}=await import('/scripts/extensions.js');
+   const {getRequestHeaders}=await import('/script.js');
+   const c=getContext();
+   if(!c.characters.length){
+    const body=new FormData();
+    for(const [key,value] of Object.entries({
+     ch_name:'Hero Voice QA',description:'A fantasy tavern keeper.',
+     personality:'Observant and hospitable.',scenario:'A quiet tavern.',
+     first_mes:'Welcome, traveler.',mes_example:'',fav:'false'
+    }))body.append(key,value);
+    const headers={...getRequestHeaders()};delete headers['Content-Type'];
+    const created=await fetch('/api/characters/create',{method:'POST',headers,body});
+    if(!created.ok)throw Error('Fixture character create failed: HTTP '+created.status);
+    await c.getCharacters();
+   }
+   if(!c.characters.length)throw Error('Fixture character not available after native create');
+   await c.selectCharacterById('0');
+  });
+  await waitFor(async()=>await page.evaluate(async()=>{const {getContext}=await import('/scripts/extensions.js');const c=getContext();return c.characters.length>0&&String(c.characterId)==='0'}));
   await waitFor(async()=>await page.locator('#hero-welcome').isHidden());
   const clip=await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text')].some(el=>el.scrollWidth>el.clientWidth+2));if(clip)throw Error('Character drawer clips dialogue');
   await page.screenshot({path:path.join(repo,'.ci/hero-characters-qa.png')});

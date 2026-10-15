@@ -128,3 +128,34 @@ test('model-specific preflight distinguishes preset, design, clone and Flash; fa
   assert.ok(s.status().jobLog.some(e=>e.event==='failed'));assert.ok(fs.existsSync(path.join(root,'Logs','tts-jobs.jsonl')));
  }finally{s.stop();fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('Kokoro appears inside character Voice engine dropdown with selectable preset speakers and installation',()=>{
+ const story=fs.readFileSync(path.join(__dirname,'../extension/story.js'),'utf8');
+ const panel=fs.readFileSync(path.join(__dirname,'../manager/ModelPanel.html'),'utf8');
+ const worker=fs.readFileSync(path.join(__dirname,'../manager/TTSWorker.py'),'utf8');
+ const download=fs.readFileSync(path.join(__dirname,'../manager/TTSModelDownload.py'),'utf8');
+ assert.match(story,/kokoro:kokoro','Kokoro 82M/);
+ for(const name of ['af_heart','af_bella','am_adam','am_michael','bf_emma','bm_george']) assert.ok(story.includes("'"+name+"'"),name);
+ assert.match(story,/updateSpeakerOptions\(\)/);
+ assert.match(story,/speaker\.parentElement\.hidden=!\(chosen/);
+ assert.match(story,/backend==='kokoro'\?'English'/);
+ assert.match(story,/downloadedModels\?\.\[backend==='flash'\?'flash':backend==='kokoro'\?'kokoro':variant\]/);
+ assert.match(panel,/<option value="kokoro">Kokoro 82M/);
+ assert.match(worker,/if engine == "kokoro"/);
+ assert.match(download,/"kokoro": "hexgrad\/Kokoro-82M"/);
+});
+test('Kokoro voice profiles need no WAV and retain voice per character',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-kokoro-profile-'));
+ try{
+  const t=createTTS(root),v=t.saveProfile({name:'Mira',voice:{engine:'kokoro',variant:'kokoro',speaker:'af_bella',language:'English',reference:'unused.wav',style:'unnecessary'}}).profile.voice;
+  assert.equal(v.speaker,'af_bella');
+  assert.equal(v.engine,'kokoro');
+  assert.equal(v.variant,'kokoro');
+  assert.equal(v.reference,'');
+  assert.equal(v.style,'');
+  assert.throws(()=>t.configure({engine:'kokoro',variant:'custom-0.6'}),/Invalid speech variant/);
+  t.configure({engine:'kokoro',variant:'kokoro',language:'English',speaker:'am_adam'});
+  assert.equal(t.status().capabilities.presetSpeakers,true);
+  t.stop();
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

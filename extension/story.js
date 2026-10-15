@@ -122,7 +122,7 @@ export async function initStory({getContext,frame,show}){
   // must never hide the settings behind a pending /tts/status request.
   const state={profiles:[],voices:[],settings:{device:'cpu'}};let voiceCatalog=null;
 
-  const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Qwen CustomVoice uses built-in voices without a WAV; VoiceDesign uses a description; Flash and cloning models need an imported WAV. Voice models must be installed first.';
+  const help=document.createElement('p');help.textContent='Assign and preview dialogue and narrator voices for this character. Kokoro 82M offers fast natural English preset voices without WAV, Qwen CustomVoice has multilingual built-in voices, and Flash and cloning models require a WAV. Install weights before previewing.';
   const dialogue=document.createElement('select'),narrator=document.createElement('select'),mode=document.createElement('select');
   dialogue.id='hero-character-dialogue-voice';narrator.id='hero-character-narrator-voice';
   for(const field of [dialogue,narrator])field.append(new Option('Inherit global settings',''),...(state.profiles||[]).map(p=>new Option(p.name+' · '+p.voice.engine+' '+p.voice.variant,p.id)));
@@ -137,9 +137,25 @@ export async function initStory({getContext,frame,show}){
   const assignment=()=>({dialogueProfileId:dialogue.value,narratorMode:mode.value,narratorProfileId:mode.value==='same'?'':narrator.value});
   // A native Character Voice editor, not a link to an unrelated settings screen.
   const engine=document.createElement('select');engine.id='hero-character-voice-engine';
-  for(const [id,title] of [['qwen:custom-0.6','Qwen CustomVoice 0.6B · no WAV'],['qwen:custom-1.7','Qwen CustomVoice 1.7B · no WAV'],['qwen:design-1.7','Qwen VoiceDesign 1.7B · voice description'],['qwen:clone-0.6','Qwen Base 0.6B · WAV + transcript'],['qwen:clone-1.7','Qwen Base 1.7B · WAV + transcript'],['flash:flash','Chatterbox Flash · WAV']])engine.add(new Option(title,id));
+  for(const [id,title] of [['kokoro:kokoro','Kokoro 82M · fast voices · no WAV'],['qwen:custom-0.6','Qwen CustomVoice 0.6B · no WAV'],['qwen:custom-1.7','Qwen CustomVoice 1.7B · no WAV'],['qwen:design-1.7','Qwen VoiceDesign 1.7B · voice description'],['qwen:clone-0.6','Qwen Base 0.6B · WAV + transcript'],['qwen:clone-1.7','Qwen Base 1.7B · WAV + transcript'],['flash:flash','Chatterbox Flash · WAV']])engine.add(new Option(title,id));
   const speaker=document.createElement('select');speaker.id='hero-character-voice-speaker';
-  for(const name of ['Ryan','Vivian','Serena','Aiden','Dylan','Eric','Ono_Anna','Sohee','Uncle_Fu'])speaker.add(new Option(name,name));
+  const presetSpeakers={
+    kokoro:[['af_heart','Heart · US female'],['af_bella','Bella · US female'],['af_nicole','Nicole · US female'],['af_sarah','Sarah · US female'],['am_adam','Adam · US male'],['am_michael','Michael · US male'],['am_echo','Echo · US male'],['bf_emma','Emma · UK female'],['bf_isabella','Isabella · UK female'],['bm_george','George · UK male'],['bm_lewis','Lewis · UK male']],
+    qwen:['Ryan','Vivian','Serena','Aiden','Dylan','Eric','Ono_Anna','Sohee','Uncle_Fu'].map(name=>[name,name])
+   };
+   const preferredSpeaker={kokoro:'af_heart',qwen:'Ryan'};
+   let activeSpeakerEngine='';
+   const updateSpeakerOptions=()=>{
+    const family=engine.value.startsWith('kokoro:')?'kokoro':'qwen';
+    if(activeSpeakerEngine===family)return;
+    if(activeSpeakerEngine)preferredSpeaker[activeSpeakerEngine]=speaker.value;
+    const selected=preferredSpeaker[family];
+    speaker.replaceChildren(...presetSpeakers[family].map(([id,label])=>new Option(label,id)));
+    speaker.value=presetSpeakers[family].some(([id])=>id===selected)?selected:presetSpeakers[family][0][0];
+    activeSpeakerEngine=family;
+   };
+   speaker.onchange=()=>{preferredSpeaker[activeSpeakerEngine]=speaker.value;};
+   updateSpeakerOptions();
   const mood=document.createElement('textarea');mood.rows=2;mood.placeholder='Mood / timbre / speaking style supported by VoiceDesign and both CustomVoice sizes';
   const transcript=document.createElement('input');transcript.placeholder='Exact transcript of reference WAV';
   const wav=document.createElement('select');wav.add(new Option('Choose imported WAV',''));
@@ -155,14 +171,15 @@ export async function initStory({getContext,frame,show}){
    }catch(e){status.textContent=e.message}finally{importWav.disabled=false}
   };
   const device=document.createElement('select');device.append(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings.device;
-  const voiceOptions=()=>{const [backend,variant]=engine.value.split(':');return {engine:backend,variant,device:device.value,language:'Auto',speaker:speaker.value,reference:wav.value,referenceText:transcript.value,style:mood.value}};
+  const voiceOptions=()=>{const [backend,variant]=engine.value.split(':');return {engine:backend,variant,device:device.value,language:backend==='kokoro'?'English':'Auto',speaker:speaker.value,reference:backend==='kokoro'?'':wav.value,referenceText:backend==='kokoro'?'':transcript.value,style:backend==='kokoro'?'':mood.value}};
   const updateVoice=()=>{
+    updateSpeakerOptions();
    const chosen=engine.value,reference=chosen.startsWith('flash:')||chosen.includes(':clone-');
    wav.parentElement.hidden=!reference;upload.parentElement.hidden=!reference;importWav.hidden=!reference;
    transcript.parentElement.hidden=!chosen.includes(':clone-');
    mood.parentElement.hidden=!(chosen.includes(':design-')||chosen.includes(':custom-'));
-   speaker.parentElement.hidden=!chosen.includes(':custom-');
-   if(voiceCatalog){const [backend,variant]=chosen.split(':');status.textContent=voiceCatalog.downloadedModels?.[backend==='flash'?'flash':variant]?'Selected voice weights are installed. Preview to verify sound.':'Selected voice weights are missing. Click Install selected model + dependencies, then Preview.';}
+   speaker.parentElement.hidden=!(chosen.includes(':custom-')||chosen.startsWith('kokoro:'));
+   if(voiceCatalog){const [backend,variant]=chosen.split(':');status.textContent=voiceCatalog.downloadedModels?.[backend==='flash'?'flash':backend==='kokoro'?'kokoro':variant]?'Selected voice weights are installed. Preview to verify sound.':'Selected voice weights are missing. Click Install selected model + dependencies, then Preview.';}
   };
   const saveAssignment=async()=>{if(c().characters?.[index]!==character)throw Error('Character changed. Reopen voice editor.');const latest=character.data?.extensions?.hero_tavern||character.extensions?.hero_tavern||{};const updated={...latest,characterUuid:latest.characterUuid||crypto.randomUUID(),voice:assignment()};await c().writeExtensionField(index,'hero_tavern',updated);if(character.data)character.data.extensions={...(character.data.extensions||{}),hero_tavern:updated};};
   const quick=document.createElement('button');quick.id='hero-character-voice-quick';quick.textContent='Create & assign selected voice';
@@ -209,7 +226,7 @@ export async function initStory({getContext,frame,show}){
     wav.value=priorWav;
     if(!device.dataset.changed&&result.settings?.device)device.value=result.settings.device;
     updateVoice();
-   }catch(error){status.textContent='Voice library unavailable: '+(error.message||error)+'. Built-in CustomVoice and VoiceDesign settings remain available.';}
+   }catch(error){status.textContent='Voice library unavailable: '+(error.message||error)+'. Kokoro, CustomVoice and VoiceDesign model choices remain visible; preview requires installed weights.';}
    finally{refresh.disabled=false;}
   };
   device.onchange=()=>device.dataset.changed='true';

@@ -55,10 +55,21 @@ async function buildWriterContext(w,budget,count){
  const eventGuard=['say','do'].includes(operation)?' The player\'s '+(operation==='say'?'exact words':'action')+' are ALREADY written as the final manuscript beat. Do not repeat, rephrase or contradict that beat; immediately describe how the environment and other characters react. Make a meaningful consequence within the next two sentences. Never acknowledge this instruction.': '';
  const guard='Start directly with scene narration, sensory details, action, thoughts or dialogue. Maintain the manuscript\'s language, viewpoint and tense (or the story prompt\'s language if there is no manuscript). Dramatically SHOW traits in the scene; never give a character sheet, appearance list, summary, headings, Markdown formatting, preface, acknowledgment or explanation of what you plan to write. Text inside square-bracket labels is context only. Do not copy those labels.';
  const repair=w.repair?'\n[Correction]\nYour previous draft was NOT story prose. Discard that draft entirely. Produce actual narrative sentences beginning with an action, description or dialogue; no introduction, outline, character dossier or assistant explanation.':w.flowRepair?'\n[Scene progression repair]\nThe previous attempt repeated recent manuscript events or stalled in the setup. Start from the last established consequence and write a DIFFERENT NEXT action or change of circumstances. No paraphrases of prior dialogue or a second opening.':'';
- // Novel mode is literal text continuation: the existing prose is an ASSISTANT
- // prefill, not a user request that encourages a chat model to explain the task.
- // Nothing is placed after the manuscript tail; inference must extend that tail.
- const render=tail=>'<|im_start|>system\nYou are writing the body of a fictional novel, not answering a question. The assistant response is the manuscript itself, already in progress. Continue the exact last line with NEW in-scene events. Never analyze the story or talk about writing it. /no_think<|im_end|>\n<|im_start|>user\n'+(context?context+'\n\n':'')+'[Continuation direction]\n'+task+'\n'+guard+progression+eventGuard+repair+(selection?'\n\n[Selected passage to replace]\n'+selection:'')+(suffix?'\n\n[Following passage to preserve]\n'+suffix:'')+'\n\nThe next assistant content is an unfinished novel, not a reply to these directions. Continue its prose directly; do not introduce a heading.<|im_end|>\n<|im_start|>assistant\n'+(tail||'');
+ // Never put manuscript prose in a partially opened assistant turn.
+ // Qwen3's non-thinking suffix and non-ChatML model serializers require an
+ // EMPTY assistant boundary. The manuscript is authoritative user context.
+ // This is a writing/completion task, not a roleplay chat message.
+ const render=tail=>'<|im_start|>system\n'+
+  'You are a novelist writing the NEXT portion of a manuscript. Respond with ONLY finished literary prose. Do not address the author or describe your writing process. Never output prompt labels, bracketed instructions, outlines or analysis. /no_think<|im_end|>\n'+
+  '<|im_start|>user\n'+
+  (context?context+'\n\n':'')+
+  '[Writing objective]\n'+task+'\n'+guard+progression+eventGuard+repair+
+  '\nNarrative autonomy: give supporting characters realistic actions, choices and reactions. Do NOT invent dialogue, decisions, movements or thoughts for the author-controlled persona '+name+'; only use those the author actually wrote. Respect existing narrative point of view. '+
+  (operation==='rewrite'||operation==='insert'?'Return only prose that fits exactly at the selected location.':'Write several complete, connected paragraphs (typically 120–250 words, within the output token limit). Follow cause and effect; when a scene reaches a natural turning point or conclusion, transition organically to the next scene without asking the author to choose a mode.')+
+  (selection?'\n\n[Selected passage]\n'+selection:'')+
+  (suffix?'\n\n[Following passage to preserve]\n'+suffix:'')+
+  '\n\n[Manuscript already written — all events here HAVE HAPPENED; do not repeat or summarize]\n'+(tail||'(Opening scene has not been written yet.)')+
+  '\n[END OF EXISTING MANUSCRIPT]\nWrite ONLY the NEW prose that comes after this endpoint; do not include old text or these instructions.<|im_end|>\n<|im_start|>assistant\n';
  if(await count(render(''))>budget)throw Error('Story prompt, memory, author note, lore or selection exceeds the available context. Shorten it or increase loaded context.');
  let low=0,high=source.length;
  while(low<high){const mid=Math.ceil((low+high)/2);if(await count(render(source.slice(-mid)))<=budget)low=mid;else high=mid-1;}

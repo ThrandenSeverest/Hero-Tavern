@@ -154,7 +154,7 @@ export async function initStory({getContext,frame,show}){
     const v=await rpc('/tts/import',{name:file.name.replace(/\.wav$/i,''),base64});wav.replaceChildren(new Option('Choose imported WAV',''),...(v.voices||[]).map(n=>new Option(n,n)));wav.value=file.name.toLowerCase().replace(/\.wav$/i,'').replace(/[^a-z0-9_-]/g,'').slice(0,60)+'.wav';status.textContent='Reference imported.';
    }catch(e){status.textContent=e.message}finally{importWav.disabled=false}
   };
-  const device=document.createElement('select');device.add(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings.device;
+  const device=document.createElement('select');device.append(new Option('CPU','cpu'),new Option('CUDA GPU','cuda'));device.value=state.settings.device;
   const voiceOptions=()=>{const [backend,variant]=engine.value.split(':');return {engine:backend,variant,device:device.value,language:'Auto',speaker:speaker.value,reference:wav.value,referenceText:transcript.value,style:mood.value}};
   const updateVoice=()=>{
    const chosen=engine.value,reference=chosen.startsWith('flash:')||chosen.includes(':clone-');

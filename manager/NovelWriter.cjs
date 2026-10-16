@@ -123,7 +123,7 @@ function createNovelWriter({backendURL,fetchBackend,getModelProfile=()=>({Templa
     report.attempts.push({number:attempt+1,rawCharacters:s(raw).length,visibleCharacters:prose.length,issue:problem});
     if(!problem)break;
    }
-   if(!problem&&settings.finishSentences!==false&&/\p{L}$/u.test(prose.trim())){
+   if(!problem&&settings.finishSentences!==false&&!/[.!?…][”»"')\]]*$/u.test(prose.trim())){
     // Avoid fabricating an ending with string heuristics: request only the few
     // words needed to finish the incomplete sentence, never a new scene.
     report.stage='finishing-sentence';onStage(report.stage);

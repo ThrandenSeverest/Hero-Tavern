@@ -281,7 +281,8 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   // Diagnostics must expose the full multimodal flow, not just old result cards.
   await panel.locator('#diagnostic-open-flow').click();
   await panel.locator('#model-test-run-diagnostic-flow').waitFor({state:'visible'});
-  if(await panel.locator('#model-test-flow-stages li').count()!==7)throw Error('Full diagnostics flow did not render all seven stages');
+  const flowLabels=await panel.locator('#model-test-flow-stages li strong').allTextContents();
+  for(const label of ['Engine connections','Text → Text','Tracker ·','Writer ·','Character ·','Text → Image · red','Text → Image · green','Image → Image','Image → Text','Text → Speech'])if(!flowLabels.some(text=>text.includes(label)))throw Error('Full diagnostics flow is missing stage '+label);
   await page.screenshot({path:path.join(repo,'.ci/hero-diagnostic-flow-qa.png')});
   await page.locator('.hero-nav[data-hero="diagnostics"]').click();
   await panel.locator('#diagnostic-history').fill('20');await panel.locator('#diagnostic-text').click();await waitFor(async()=>(await panel.locator('#diagnostic-text-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image').click();await waitFor(async()=>(await panel.locator('#diagnostic-image-result').textContent()).includes('"ok": true'));await panel.locator('#diagnostic-image-preview').waitFor({state:'visible'});await page.screenshot({path:path.join(repo,'.ci/hero-diagnostics-qa.png')});await page.locator('.hero-nav[data-hero="images"]').click();await panel.locator('#image-to-chat').click();await waitFor(async()=>await page.locator('#hero-workspace').isHidden());await waitFor(async()=>await page.evaluate(()=>[...document.querySelectorAll('#chat .mes_text img')].some(img=>new URL(img.src).origin===location.origin&&img.complete&&img.naturalWidth>0)));

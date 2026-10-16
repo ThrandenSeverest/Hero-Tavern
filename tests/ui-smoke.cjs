@@ -88,7 +88,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   // Scene planning edits the outline, not the user's prose; active beat remains author-controlled.
   await writer.locator('#writer-scene-pace').selectOption('fast');
   await writer.locator('#plan-beats').click();
-  await waitFor(async()=>(await writer.locator('#beats-editor').inputValue()).includes('guard refuses Mira'),60000);
+  await waitFor(async()=>(await writer.locator('#beats-editor').inputValue()).includes('guard refuses Mira'),60000).catch(async error=>{throw Error('Writer plan-beats check: '+error.message+'; editor='+JSON.stringify({status:await writer.locator('#status').textContent(),error:await writer.locator('#error').textContent(),beats:await writer.locator('#beats-editor').inputValue()}))});
   if((await writer.locator('#manuscript').inputValue())!=='Лира ждала у двери таверны.')throw Error('AI beat planning overwrote manuscript prose');
   await writer.locator('#beat-next').click();
   if(!(await writer.locator('#beat-status').textContent()).includes('Active 2/4'))throw Error('Writer beat cursor did not advance');

@@ -16,7 +16,7 @@ test('Pinned upstream parser and example generator execute; old command formats 
 test('WTracker builds complete schema-constrained requests for KoboldCpp with short aliases',()=>{
  const fields=[def('clock','clock','--:--'),def('mass','number',61.5,{unit:'kg',min:0,max:300}),def('inventory','list',[])];
  const req=W.buildRequest(fields,W.initialState(fields),[{name:'Lyra',mes:'She takes a rope.'}]);
- assert.deepEqual(req.json_schema.required,['field_0','field_1','field_2']);assert.deepEqual(JSON.parse(req.grammar),req.json_schema);assert.equal(req.json_schema.properties.field_0.example,'--:--');assert.equal(req.json_schema.properties.field_1.example,61.5);assert.match(req.prompt,/PREVIOUS TRACKER/);assert.match(req.prompt,/She takes a rope/);
+ assert.deepEqual(req.json_schema.required,['field_0','field_1','field_2']);assert.deepEqual(JSON.parse(req.grammar),req.json_schema);assert.equal(req.json_schema.properties.field_0.example,undefined);assert.equal(req.json_schema.properties.field_1.example,undefined);assert.match(req.prompt,/PREVIOUS TRACKER/);assert.match(req.prompt,/She takes a rope/);
  assert.deepEqual(W.readSnapshot('{"field_0":"--:--","field_1":61.5,"field_2":["rope"]}',fields).map(v=>v.value),['--:--',61.5,['rope']]);
 });
 test('Every requested field must exist and match its schema; unknown clock remains valid',()=>{
@@ -79,4 +79,14 @@ test('Actual ReplyPipeline forwards grammar + JSON schema and max_tokens to Mist
 test('Packaging removes the retired module and ships new runtime, UI and MIT notice',()=>{
  const read=name=>fs.readFileSync(path.join(__dirname,'..',name),'utf8');for(const name of ['installer/Install.ps1','launcher/Bootstrap.cs','.github/workflows/build-windows.yml'])for(const asset of ['WTracker.cjs','WTrackerUpstream.cjs','WTrackerPanel.js','WTracker-LICENSE.txt'])assert.ok(read(name).includes(asset),name+' missing '+asset);
  assert.doesNotMatch(read('manager/StoryAPI.cjs'),/TrackerDelta|parseCommands|explicitStateChanges/);assert.doesNotMatch(read('manager/StoryState.cjs'),/evidence|validateInjuryChange|maxDelta/);assert.ok(read('manager/ModelPanel.html').includes('/wtracker-panel.js'));
+});
+
+test('Tracker update gives latest completed events priority without stale answer examples',()=>{
+ const fields=[def('location','text','Unknown'),def('coins','number',0),def('clock','clock','--:--')];
+ const state=Object.fromEntries(fields.map((d,i)=>[W.keyOf(d),['Stonebridge',12,'09:15'][i]]));
+ const q=W.buildRequest(fields,state,[{name:'Lyra',mes:'Arrives at Stonebridge with 12 coins at 09:15.'},{name:'Lyra',mes:'Enters Oak Inn, pays 3 coins and has exactly 9 left at 09:30.'}]);
+ assert.equal(q.prompt.split('Stonebridge').length-1,2); // baseline and older narrative, never an answer example
+ assert.ok(q.prompt.indexOf('LATEST MESSAGE TO APPLY')>q.prompt.indexOf('JSON SCHEMA'));
+ assert.match(q.prompt,/LATEST MESSAGE TO APPLY:[\s\S]*Oak Inn[\s\S]*New completed events supersede/);
+ assert.match(q.prompt,/remaining amount is the final amount/);
 });

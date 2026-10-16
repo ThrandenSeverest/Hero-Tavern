@@ -89,13 +89,13 @@ test('speech planner merges identical settings and preserves different narrator 
  assert.equal(splitSpeech('<think>unfinished private reasoning').length,0);
 });
 function synthesisHarness(root){
- const commands=[],tasks=[],children=[];let fail=false;
+ const commands=[],tasks=[],children=[];let fail=false,crash=false;
  const wav=Buffer.alloc(52);wav.write('RIFF');wav.writeUInt32LE(44,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(24000,24);wav.writeUInt32LE(48000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(8,40);
- function spawn(command){commands.push(command);const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();child.kill=()=>setImmediate(()=>child.emit('exit',0));child.stdin.write=line=>{const task=JSON.parse(line);tasks.push(task);setImmediate(()=>child.stdout.emit('data',Buffer.from(JSON.stringify(fail?{id:task.id,ok:false,error:'fixture failure'}:{id:task.id,ok:true,audio:wav.toString('base64')})+'\n')))};children.push(child);return child;}
+ function spawn(command){commands.push(command);const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();child.kill=()=>setImmediate(()=>child.emit('exit',0));child.stdin.write=line=>{const task=JSON.parse(line);tasks.push(task);if(crash){setImmediate(()=>{child.emit('exit',3221225477);child.stderr.emit('data',Buffer.from('Windows fatal exception: access violation'));child.emit('close',3221225477,null)});return;}setImmediate(()=>child.stdout.emit('data',Buffer.from(JSON.stringify(fail?{id:task.id,ok:false,error:'fixture failure'}:{id:task.id,ok:true,audio:wav.toString('base64')})+'\n')))};children.push(child);return child;}
  for(const engine of ['qwen','flash']){const dir=path.join(root,'TTSRuntime',engine,process.platform==='win32'?'Scripts':'bin');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,process.platform==='win32'?'python.exe':'python'),'fixture');}
  for(const [engine,variant] of [['flash','flash'],...['custom-0.6','custom-1.7','clone-0.6','clone-1.7','design-1.7'].map(v=>['qwen',v])]){const dir=path.join(root,'TTSModels',engine,variant);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'.hero-downloaded'),'revision1');}
  const mod={exports:{}};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../manager/TTSService.cjs'),'utf8'),{module:mod,require:n=>n==='node:child_process'?{spawn}:require(n),process,Buffer,setTimeout,clearTimeout,console});
- return {service:mod.exports.createTTS(root),commands,tasks,setFail:v=>{fail=v}};
+ return {service:mod.exports.createTTS(root),commands,tasks,setFail:v=>{fail=v},setCrash:v=>{crash=v}};
 }
 test('real service routes profiles to exact model paths, combines response audio and preserves global settings',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tts-route-'));const h=synthesisHarness(root),s=h.service;
@@ -178,4 +178,14 @@ test('Kokoro pins versioned requirements and marks old unverified runtimes as ne
   assert.equal(svc.status().ready,true);
   svc.stop();
  }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+
+test('Native speech crash retains late stderr and Windows exit status in the job report',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'tts-crash-')),h=synthesisHarness(root);
+ try{
+  h.setCrash(true);
+  await assert.rejects(h.service.speak({text:'Crash diagnostics test.'}),e=>e.code==='TTS_WORKER_EXITED'&&/0xc0000005/.test(e.message)&&/access violation/.test(e.message));
+  assert.match(h.service.status().workerLog,/access violation/);
+  assert.match(fs.readFileSync(path.join(root,'Logs','tts-jobs.jsonl'),'utf8'),/access violation/);
+ }finally{h.service.stop();fs.rmSync(root,{recursive:true,force:true})}
 });

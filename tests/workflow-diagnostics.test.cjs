@@ -45,3 +45,8 @@ test('A model with correct long replies cannot pass long-context coverage withou
  const f=factory({tokenScale:100}),r=await runWorkflowTest({kind:'character-long',makePipeline:f.makePipeline,contextSize:16384});
  assert.equal(r.status,'warning');assert.ok(r.stages.every(s=>s.checks.passed&&!s.longContextVerified));
 });
+
+test('NPC questions do not invent player thoughts, but preceding player assertions remain detectable',()=>{
+ for(const text of ['Mira asks, "What do you think - speed and risk, or caution and time?"', '"A better plan, don’t you think?" Mira says.', '"Where will you take the cargo?"'])assert.deepEqual(agencyFindings(text),[],text);
+ for(const text of ['You take the letter. "What do you think?" Mira asks.', 'Rowan thinks the inn is safe.', 'You think the inn is safe.', 'Rowan says, "Yes?"'])assert.ok(agencyFindings(text).length,text);
+});

@@ -115,7 +115,17 @@ function agencyFindings(text,name='Rowan'){
   ['player action or thought',new RegExp('\\b'+subject+'\\s+(?:(?:quietly|slowly|then)\\s+)?(?:decide[sd]?|think[s]?|thought|feel[s]?|felt|nod[s]?|nodded|smile[sd]?|walk[s]?|walked|step[s]?|stepped|reach(?:es|ed)?|agree[sd]?|accept[sd]?|take[s]?|took|open[s]?|opened|turn[s]?|turned)\\b','gi')],
   ['unresolved player placeholder',/\{\{user\}\}/gi]
  ];
- const findings=[];for(const [rule,re] of patterns)for(const match of text.matchAll(re))findings.push({rule,evidence:text.slice(Math.max(0,match.index-45),match.index+match[0].length+100)});
+ const findings=[];for(const [rule,re] of patterns)for(const match of text.matchAll(re)){
+  // Questions addressed to the player do not assert the player's thoughts or
+  // actions. Limit this exemption to the matched clause, so a later question
+  // cannot hide an earlier invented action.
+  if(/^you\b/i.test(match[0])){
+   const end=text.slice(match.index).search(/[.!?\n]/);
+   const before=text.slice(Math.max(0,match.index-25),match.index);
+   if(end>=0&&text[match.index+end]==='?'||/\b(?:do|don't|did|didn't|would|could|can|will|should)\s+$/i.test(before))continue;
+  }
+  findings.push({rule,evidence:text.slice(Math.max(0,match.index-45),match.index+match[0].length+100)});
+ }
  return findings.slice(0,30);
 }
 function passageChecks(text,{expected=[],minWords=180,minParagraphs=3}={}){

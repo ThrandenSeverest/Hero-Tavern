@@ -259,10 +259,17 @@ function createTTS(root){
   if(!fs.existsSync(executable(engine)))throw speechError('TTS_ENGINE_NOT_INSTALLED','Install '+engine+' in Voice Models.');
   if(!installedWeight(engine,variant))throw speechError('TTS_WEIGHTS_MISSING','Download '+engine+' '+variant+' in Voice Models.');
   if(engine==='kokoro'&&!runtimeHealthy(engine))throw speechError('TTS_DEPENDENCIES_OUTDATED','Kokoro requires an import-checked dependency repair (AlbertModel). Open Voice Library → Install + download / Repair Python dependencies. Existing voice weights are retained.');
-  const proc=spawn(executable(engine),['-u',path.join(root,'TTSWorker.py')],{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1'}});child=proc;workerEngine=engine;fault='';
+  const proc=spawn(executable(engine),['-X','faulthandler','-u',path.join(root,'TTSWorker.py')],{windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,PYTHONUNBUFFERED:'1'}});child=proc;workerEngine=engine;fault='';
   let buffer='';workerLog='';proc.stdout.on('data',d=>{buffer+=d.toString();let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n);buffer=buffer.slice(n+1);let item;try{item=JSON.parse(line)}catch{continue}const p=pending.get(item.id);if(!p)continue;pending.delete(item.id);if(item.ok)p.resolve(item);else{const error=Error(item.error||'Speech synthesis failed');error.traceback=String(item.traceback||'').slice(-9000);if(error.traceback)workerLog=(workerLog+'\n'+error.traceback).slice(-9000);p.reject(error);}}});
   proc.stderr.on('data',d=>{const chunk=d.toString();workerLog=(workerLog+chunk).slice(-9000);if(/Traceback|Error:|CUDA out of memory/i.test(chunk))fault=workerLog.slice(-1500)});
-  proc.on('error',e=>{if(child===proc){fault=e.message;stop()}});proc.on('exit',()=>{if(child!==proc)return;child=null;for(const p of pending.values())p.reject(Error('Speech engine exited. '+fault));pending.clear()});
+  proc.on('error',e=>{if(child===proc){fault=e.message;stop()}});
+  // close follows drained stderr; exit can precede the useful crash output.
+  proc.on('close',(code,signal)=>{if(child!==proc)return;child=null;
+   const reason=signal?'signal '+signal:'exit '+code+(Number.isInteger(code)?' (0x'+(code>>>0).toString(16)+')':'');
+   fault='Speech engine exited: '+engine+'; '+reason+'. '+(workerLog.trim()||fault||'No worker output was captured.');
+   const error=speechError('TTS_WORKER_EXITED',fault);error.traceback=workerLog;
+   for(const p of pending.values())p.reject(error);pending.clear();
+  });
   proc.stdin.on('error',e=>{if(child===proc){fault=e.message;stop()}});return proc;
  }
  function call(task){const proc=start(task.engine,task.variant),id=++sequence;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(speechError('TTS_TIMEOUT','Speech worker timed out and was stopped. Retry a shorter segment.'));stop()},180000);pending.set(id,{resolve:v=>{clearTimeout(timer);resolve(v)},reject:e=>{clearTimeout(timer);reject(e)}});proc.stdin.write(JSON.stringify({id,type:'generate',...task})+'\n');});}

@@ -85,6 +85,9 @@ jobs:
       - name: Test WTracker panel against real story storage
         shell: pwsh
         run: node tests/wtracker-ui-smoke.cjs
+      - name: Test diagnostic stage selection
+        shell: pwsh
+        run: node tests/model-tests-ui-smoke.cjs
       - name: Test real SillyTavern UI and automatic local engine connection
         shell: pwsh
         run: node tests/ui-smoke.cjs

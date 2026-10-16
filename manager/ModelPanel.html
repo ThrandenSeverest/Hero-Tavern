@@ -176,11 +176,14 @@
  <h3>Full diagnostic flow · live progress</h3>
  <p>Checks engine connections and GPU/CPU telemetry, then tests text instructions, two distinct image prompts, source-image editing, image analysis, and installed TTS. Each model generates only one job at a time. Unsupported or uninstalled models are explicitly skipped, never marked as passed.</p>
  <div class="actions">
-  <button id="model-test-run-diagnostic-flow" class="primary">Run complete diagnostic flow</button>
+  <button id="model-test-run-diagnostic-flow" class="primary">Run selected diagnostics</button>
+  <button data-flow-select="all">Select all</button>
+  <button data-flow-select="text">Text workflows only</button>
+  <button data-flow-select="none">Clear selection</button>
   <button id="model-test-flow-export" disabled>Download full flow report</button>
   <button id="model-test-flow-hardware">Hardware benchmark details</button>
  </div>
- <p id="model-test-flow-summary" role="status" aria-live="polite">Not started. Choose your installed image model above.</p>
+ <p id="model-test-flow-summary" role="status" aria-live="polite">Check the stages to run below. Unchecked stages are skipped. Connections and hardware are always checked. Your selection is saved for next time.</p>
  <ol id="model-test-flow-stages" style="padding-left:24px;line-height:1.9"></ol>
  <pre id="model-test-flow-telemetry" style="max-height:180px;overflow:auto;white-space:pre-wrap"></pre>
 </div>

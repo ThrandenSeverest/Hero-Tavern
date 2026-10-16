@@ -9,7 +9,7 @@ const {createStoryStore}=require('../manager/StoryStore.cjs'),{createStoryAPI}=r
  const store=createStoryStore(root);let view=store.sync({avatar:'Lyra.png',filename:'Scene'});const id=view.session.id;
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../manager/ModelPanel.html'),'utf8'),{url:'http://127.0.0.1:8001/',runScripts:'outside-only'}),w=dom.window,$=s=>w.document.querySelector(s);w.structuredClone=structuredClone;
  try{
-  const api=createStoryAPI(store,{generate:async request=>{if(!request.json_schema)return {choices:[{text:JSON.stringify({trackers:[{id:'courage',type:'number',initialValue:40,min:0,max:100,label:'Courage'}]})}]};const result=Object.fromEntries(Object.entries(request.json_schema.properties).map(([key,s])=>[key,s.description.startsWith('Location')?'Tavern':s.example]));return {choices:[{text:JSON.stringify(result)}]};}});
+  const api=createStoryAPI(store,{generate:async request=>{if(!request.json_schema)return {choices:[{text:JSON.stringify({trackers:[{id:'courage',type:'number',initialValue:40,min:0,max:100,label:'Courage'}]})}]};const result=Object.fromEntries(Object.entries(request.json_schema.properties).map(([key,s])=>[key,s.title==='Location'?'Tavern':s.type==='array'?[]:s.type==='number'?0:s.type==='object'?{}:s.pattern?'--:--':'Unknown']));return {choices:[{text:JSON.stringify(result)}]};}});
   const render=()=>w.HeroWTrackerRender(store.view(id),send,render),send=async(op,data={})=>{view=await api.action('/story/'+op,{id,...data});render();return view};
   w.eval(fs.readFileSync(path.join(__dirname,'../manager/WTrackerPanel.js'),'utf8'));render();
   const click=async button=>{assert.ok(button,'Button exists');await button.onclick();assert.equal($('#story-error').textContent,'')};

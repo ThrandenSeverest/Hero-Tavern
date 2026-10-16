@@ -114,7 +114,7 @@
   try{const result=await record(report);notify((result.status==='passed'?'PASS':'CHECK')+' · '+kindNames[kind]+' · '+(result.elapsedMs/1000).toFixed(1)+' sec'+(result.error?' · '+result.error:''));return result;}
   catch(e){notify('Could not save test report: '+e.message);return {...report,error:report.error||e.message};}
  }
- const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-diagnostic-flow','model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-tracker','model-test-run-writer-agency','model-test-run-character-long','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
+ const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-diagnostic-flow','model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-tracker','model-test-run-writer-agency','model-test-run-character-long','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;for(const x of document.querySelectorAll('[data-flow-stage], [data-flow-select]'))x.disabled=v||x.dataset.flowStage==='preflight';};
  async function guarded(fn){if(active)return;stopRequested=false;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
 
  // Full diagnosis is deliberately separate from individual history cards and from
@@ -133,6 +133,16 @@
  ];
  let flowReport=null;
  const flowState={};
+ const selectionKey='hero-diagnostic-stages-v1';
+ let savedSelection=null;try{savedSelection=JSON.parse(localStorage.getItem(selectionKey));}catch{}
+ const selectedStages=new Set(Array.isArray(savedSelection)?savedSelection:FLOW_STAGES.map(x=>x[0]));
+ selectedStages.add('preflight');
+ function saveSelection(){try{localStorage.setItem(selectionKey,JSON.stringify([...selectedStages]));}catch{}}
+ for(const button of document.querySelectorAll('[data-flow-select]'))button.onclick=()=>{
+  selectedStages.clear();selectedStages.add('preflight');
+  for(const [id] of FLOW_STAGES)if(button.dataset.flowSelect==='all'||button.dataset.flowSelect==='text'&&['text','tracker','writer-agency','character-long'].includes(id))selectedStages.add(id);
+  saveSelection();drawFlow();
+ };
  function drawFlow(){
   const box=$('model-test-flow-stages');box.replaceChildren();
   for(const [id,label] of FLOW_STAGES){
@@ -140,7 +150,13 @@
    const name=document.createElement('strong');name.textContent=label+' · ';
    const detail=document.createElement('span');detail.textContent=item.status.toUpperCase()+(item.note?' — '+item.note:'');
    detail.style.color=item.status==='passed'?'#93dfb3':item.status==='failed'?'#ffa4a4':item.status==='warning'?'#f1d58f':'#b3c2d7';
-   li.append(name,detail);box.append(li);
+   const labelBox=document.createElement('label'),check=document.createElement('input');
+   labelBox.style.cssText='display:inline-flex;align-items:center;margin:0;cursor:pointer';
+   check.type='checkbox';check.dataset.flowStage=id;check.checked=selectedStages.has(id);check.disabled=active||id==='preflight';
+   check.style.cssText='width:20px;height:20px;vertical-align:middle;margin-right:10px;accent-color:#75baff';
+   check.setAttribute('aria-label',label);if(id==='preflight')check.title='Required to check selected services';
+   check.onchange=()=>{if(check.checked)selectedStages.add(id);else selectedStages.delete(id);saveSelection();};
+   labelBox.append(check,name);li.append(labelBox,detail);box.append(li);
   }
  }
  const flowSet=(id,status,note='',extra={})=>{
@@ -156,7 +172,8 @@
   }catch(error){flowReport.errors.push('Hardware telemetry ('+stage+'): '+clip(error));}
  }
  async function flowStage(id,fn){
-  if(stopRequested){flowSet(id,'skipped','Stopped');return null;}
+  if(!flowReport.selectedStages.includes(id)){skipFlow(id,'Unchecked');return null;}
+  if(stopRequested){skipFlow(id,'Stopped');return null;}
   flowSet(id,'running','Testing…');
   const started=Date.now();
   await flowSample(id+':before');
@@ -175,6 +192,7 @@
   }finally{await flowSample(id+':after')}
  }
  function skipFlow(id,note){
+  if(!flowReport.selectedStages.includes(id))note='Unchecked';
   flowSet(id,'skipped',note);
   flowReport.stages[id]={...flowState[id]};
  }
@@ -191,7 +209,7 @@
  $('model-test-flow-hardware').onclick=()=>{document.querySelector('[data-tab="diagnostics"]')?.click();};
  const flowRun=()=>guarded(async()=>{
   const suiteId='compare-'+Date.now();
-  flowReport={id:suiteId,startedAt:new Date().toISOString(),completedAt:null,mode:'full-diagnostic-flow',modelSelection:$('model-test-model').value,stages:{},samples:[],errors:[],testRecordIds:[],connections:null,hardware:null};
+  flowReport={id:suiteId,startedAt:new Date().toISOString(),completedAt:null,mode:'full-diagnostic-flow',modelSelection:$('model-test-model').value,selectedStages:[...selectedStages],stages:{},samples:[],errors:[],testRecordIds:[],connections:null,hardware:null};
   $('model-test-flow-export').disabled=true;
   for(const [id] of FLOW_STAGES)flowState[id]={status:'pending'};
   drawFlow();
@@ -206,6 +224,7 @@
    ]);
    const get=i=>checks[i].status==='fulfilled'?checks[i].value:null;
    flowReport.connections=get(0);engine=get(1);comfy=get(2);vision=get(3);voice=get(4);
+   flowReport.services={text:engine,image:comfy,vision,voice};
    flowReport.hardware=flowReport.connections?.environment||null;
    const unavailable=['Connections','Text service','ComfyUI','Vision','TTS'].filter((_,i)=>!get(i));
    if(unavailable.length)return {status:'warning',notes:['Some services unavailable: '+unavailable.join(', ')]};
@@ -221,6 +240,7 @@
   for(const kind of ['tracker','writer-agency','character-long']){if(!engine?.selected&&!engine?.runningModel)skipFlow(kind,'No text model selected');else await add(kind,kind);}
   const selected=$('model-test-model').value,pack=(comfy?.packs||[]).find(x=>x.id===selected);
   const imageReady=!!pack?.installed;
+  sourceImage=$('model-test-source').value||sourceImage;
   if(!imageReady){
    for(const id of ['imageA','imageB','edit'])skipFlow(id,'Selected image pack not installed: '+(selected||'none'));
   }else{
@@ -243,7 +263,8 @@
   else if(!voice?.ready||!voice?.weightsReady)skipFlow('tts','TTS dependencies or voice weights missing; install from All AI models');
   else await flowStage('tts',async()=>{
    const started=Date.now();
-   const result=await callTest('/tts/speak',{text:'This is a Hero Tavern speech diagnostics test.'},'tts',150000);
+   let result;try{result=await callTest('/tts/speak',{text:'This is a Hero Tavern speech diagnostics test.'},'tts',150000);}
+   finally{try{flowReport.voiceAfter=await api('/tts/status');}catch(error){flowReport.errors.push('TTS status: '+clip(error));}}
    if(!/^\/tts\/audio\/[a-z0-9_-]+\.wav$/i.test(result.url||''))throw Error('TTS response did not contain a valid WAV path');
    return {status:'passed',notes:['WAV synthesis succeeded'],url:result.url,elapsedMs:Date.now()-started,engine:voice.settings?.engine,variant:voice.settings?.variant};
   });

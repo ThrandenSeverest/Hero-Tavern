@@ -47,7 +47,7 @@ function parseCommands(raw,definitions,messages,state){
    const resolvedKey=d?keyOf(d):key;
    if(!d||d.enabled===false||d.updateMode==='manual')throw Error('Unknown or manual-only tracker '+key);
    let verifiedEvidence=String(evidence||'');const sourceText=String(message?.mes||message?.text||'');
-   if(message&&!sourceText.includes(verifiedEvidence)&&verifiedEvidence.length>=6){const escaped=verifiedEvidence.replace(/[.*+?^$()|{}\[\]\\]/g,'\\if(!message||!evidence||!String(message.mes||message.text||'').includes(evidence))throw Error('Evidence is not an exact quote from '+id);').replace(/\s+/g,'\\s+');verifiedEvidence=sourceText.match(new RegExp(escaped))?.[0]||'';}
+    // Exact provenance is mandatory: no punctuation or whitespace guesses can turn a non-quote into evidence.
    if(!message||!verifiedEvidence||!sourceText.includes(verifiedEvidence))throw Error('Evidence is not an exact quote from '+id);
    const previous=working[resolvedKey];if(previous===undefined)throw Error('Tracker is not available in this chat');
    let value=copy(previous);

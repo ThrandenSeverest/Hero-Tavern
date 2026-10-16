@@ -31,6 +31,9 @@ jobs:
       - name: Test model verification and profile preservation
         shell: powershell
         run: ./tests/ModelTools.Tests.ps1
+      - name: Test stale sessions and blocked launcher shutdown
+        shell: powershell
+        run: ./tests/StopHeroTavern.Tests.ps1
       - name: Test fresh SillyTavern profile configuration
         shell: pwsh
         run: node --test --test-concurrency=1 tests/*.test.cjs

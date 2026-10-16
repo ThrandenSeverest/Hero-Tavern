@@ -433,11 +433,20 @@ export async function initStory({getContext,frame,show}){
   try{
    let v=await sync();
    if(v.session.definitions.some(d=>d.enabled!==false&&d.updateMode!=='manual')){
-    for(let pass=0;pass<8;pass++){
-     const n=v.session.analyzedSources.length;
-     try{v=await rpc('/story/analyze',{id:v.session.id});view=v;publish();}
-     catch(error){window.toastr?.warning('Tracker update failed; saved state was preserved. '+error.message,'Tracker diagnostics');setTimeout(schedule,16000);break;}
-     if(v.session.analyzedSources.length===n||v.session.analyzedSources.length>=v.messages.length)break;
+    // One background analysis per cycle. A fast next-turn event is coalesced,
+    // rather than blocking SillyTavern or flooding an already-busy local model.
+    try{
+     v=await rpc('/story/analyze',{id:v.session.id});view=v;publish();
+     const analysis=v.session.lastAnalysis||{};
+     if(analysis.partial||analysis.failed){
+      const wait=Math.max(1500,(analysis.retryAt||Date.now()+15000)-Date.now());
+      clearTimeout(scheduled);scheduled=setTimeout(schedule,wait+250);
+     }else if(analysis.backlog>0){
+      clearTimeout(scheduled);scheduled=setTimeout(schedule,700);
+     }
+    }catch(error){
+     window.toastr?.warning('Trackers will retry; saved state is safe. '+error.message,'Tracker diagnostics');
+     clearTimeout(scheduled);scheduled=setTimeout(schedule,18000);
     }
    }
   }catch(error){notify(error)}finally{syncing=false;if(rerunAfterSync){rerunAfterSync=false;schedule()}}

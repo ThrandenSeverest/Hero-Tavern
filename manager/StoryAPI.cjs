@@ -46,9 +46,8 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    // One bounded automatic retry is allowed after a failure/partial extraction.
    // Unlike the old permanent same-head throttle, temporary empty outputs are recoverable.
    const last=session.lastAnalysis;
-   if(data.recheck!==true&&last?.head===head&&(last.failed||last.partial)){
-    if((last.autoRetries||0)>=1||Date.now()<(last.retryAt||0))return v;
-   }
+   // Never permanently lock a completed turn after a transient local model failure.
+   if(data.recheck!==true&&last?.head===head&&(last.failed||last.partial)&&Date.now()<(last.retryAt||0))return v;
    const eligible=session.definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
    const lastFinal=v.messages.findLastIndex(m=>!m.is_system&&!m.is_user&&String(m.mes||'').trim());
    if(!eligible.length||lastFinal<0)return v;
@@ -59,7 +58,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const recheck=data.recheck===true;
    // Never silently replay an already processed turn. Explicit recheck is the recovery path,
    // including old versions which incorrectly saved an empty/failed extraction as complete.
-   const selected=recheck?all.slice(-8):all.filter(m=>!session.analyzedSources.includes(S.signature(m))).slice(0,2);
+   const selected=recheck?all.slice(-8):all.filter(m=>!session.analyzedSources.includes(S.signature(m))).slice(0,3);
    if(!selected.length)return v;
    const selectedIds=new Set(selected.map(m=>m.extra.heroMessageId));
    const priorEvents=new Set(session.events.filter(e=>e.op==='set'&&e.status!=='invalid'&&selectedIds.has(e.sourceMessageId)).map(e=>e.key+'|'+e.sourceMessageId));
@@ -68,7 +67,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
    const eligibleFor=m=>eligible.filter(d=>sourceIndex(m)>=firstIndex(d));
    const direct=explicitStateChanges(eligible,selected,v.context.state);
    const contextBefore=v.messages.slice(Math.max(0,sourceIndex(selected[0])-5),sourceIndex(selected[0])).filter(m=>!m.is_system);
-   const diagnostics={at:Date.now(),head,recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length,autoRetries:recheck?0:(last?.head===head?(last.autoRetries||0)+1:0)};
+   const diagnostics={at:Date.now(),head,recheck,processed:selected.length,changes:0,partial:false,errors:[],changeTypes:{},modelUsed:false,directChanges:direct.length,autoRetries:recheck?0:(last?.head===head?(last.autoRetries||0)+1:0),sourceIds:selected.map(m=>m.extra.heroMessageId),backlog:all.filter(m=>!session.analyzedSources.includes(S.signature(m))).length};
    try{
     let parsed={changes:[],issues:[],recognized:0};
     if(ready()){
@@ -84,7 +83,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
        },signal,{mode:'utility'});
        const raw=String(response.choices?.[0]?.text||'');
        parsed=parseCommands(raw,eligible,selected,v.context.state);
-       if(!parsed.recognized&&!parsed.issues.length)parsed.issues.push('Model returned no operations JSON (not a valid no-change result).');
+       if(!parsed.recognized&&!parsed.issues.length)parsed.issues.push('Model returned no changes JSON.');
        for(const change of parsed.changes){
         const d=eligible.find(d=>S.keyOf(d)===change.key),at=indexById.get(change.sourceMessageId);
         if(!d||at===undefined||at<firstIndex(d))parsed.issues.push('Tracker not active for source message: '+change.key);
@@ -116,7 +115,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     // A completely malformed output is an actual retryable failure, not a clean no-op.
     // Invalid model output is an unverified attempt, never an empty successful
     // extraction. Keep the source eligible for retry without failing the chat.
-    if(diagnostics.errors.length&&!updates.length)diagnostics.errors.unshift('No tracker changes could be verified. Saved state is unchanged; retry when the reply model is idle.');
+    if(diagnostics.errors.length&&!updates.length)diagnostics.errors.unshift('Tracker extraction pending retry; verified state was preserved.');
     diagnostics.partial=diagnostics.errors.length>0;
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(updates.length){
@@ -129,8 +128,11 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     const persisted=store.get(data.id);
     // A failed/partial extraction never consumes its source signatures.
     // It can retry on the next completed turn or by the explicit Re-analyze button.
+    // Confirm explicitly extracted changes immediately even if the LLM is temporarily
+    // unavailable; only consume sources as fully analyzed when the model succeeds.
     if(!diagnostics.partial&&diagnostics.modelUsed)persisted.analyzedSources=[...new Set([...persisted.analyzedSources,...selected.map(S.signature)])].slice(-1500);
-    if(diagnostics.partial)diagnostics.retryAt=Date.now()+15000;
+    if(diagnostics.partial)diagnostics.retryAt=Date.now()+Math.min(60000,8000*Math.pow(2,Math.min(3,diagnostics.autoRetries)));
+    diagnostics.backlog=all.filter(m=>!persisted.analyzedSources.includes(S.signature(m))).length;
     persisted.lastAnalysis=diagnostics;
     if(diagnostics.errors.length){persisted.failures.push({at:Date.now(),message:diagnostics.errors.join(' | ').slice(0,1500),head});persisted.failures=persisted.failures.slice(-30);}
     store.saveSession(persisted);return store.view(data.id);
@@ -166,7 +168,9 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     if(parsed.trackers.length>24)throw Error('AI suggested too many trackers (maximum 24). Narrow the request and try again.');
     parsed.trackers=parsed.trackers.map((candidate,index)=>{
      const item={...candidate,owner:'character:draft'};
-     if(!item.id&&item.label)item.id=String(item.label).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,60);
+     if(!item.id&&item.label)item.id=String(item.label).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,60)||'tracker_'+index;
+     if(!item.updateMode)item.updateMode='automatic';
+     if(item.type==='record'&&item.dynamicFields===undefined)item.dynamicFields=true;
      if(item.type==='number'&&typeof item.initialValue==='string'&&item.initialValue.trim()!==''&&Number.isFinite(Number(item.initialValue)))item.initialValue=Number(item.initialValue);
      if(item.type==='boolean'&&typeof item.initialValue==='string'&&['true','false'].includes(item.initialValue.toLowerCase()))item.initialValue=item.initialValue.toLowerCase()==='true';
      try{const checked=S.validateDefinition(item);delete checked.owner;return checked;}catch(e){throw Error('AI tracker '+(index+1)+' ('+(item.label||item.id||'unnamed')+') needs revision: '+e.message+'. Nothing was saved.');}

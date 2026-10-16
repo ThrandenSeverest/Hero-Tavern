@@ -96,7 +96,11 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   await writer.locator('#save').click();
   await waitFor(async()=>(await writer.locator('#status').textContent()).startsWith('Saved ·'));
   await writer.locator('#continue').click();
-  await waitFor(async()=>(await writer.locator('#manuscript').inputValue()).includes('Fixture generation works.'),60000);
+  await waitFor(async()=>{
+   const error=await writer.locator('#error').textContent();
+   if(error?.trim())throw Error('Writer generation UI error: '+error);
+   return (await writer.locator('#manuscript').inputValue()).includes('Fixture generation works.');
+  },60000).catch(async error=>{throw Error(error.message+'; Writer state='+JSON.stringify({error:await writer.locator('#error').textContent(),status:await writer.locator('#status').textContent(),prose:(await writer.locator('#manuscript').inputValue()).slice(-650)}))});
   if(await writer.locator('#candidate').count()||await writer.locator('#accept').count()||await writer.locator('#reject').count())throw Error('Obsolete Writer Accept/Reject candidate UI remains');
   const initialPassage=await writer.locator('#manuscript').inputValue();
   if(!initialPassage.startsWith('Лира ждала у двери таверны.'))throw Error('Writer lost original manuscript during generation');

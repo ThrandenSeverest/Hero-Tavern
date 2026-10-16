@@ -91,7 +91,7 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const controller=new AbortController();active=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
    try{await ensureText(controller.signal);
     const instruction=op==='regenerate'?(existing?.instruction||''):(data.instruction||'');
-    const event=['say','do'].includes(operation)?writerEvent(operation,instruction,original.persona?.name):'';
+    const event=op!=='regenerate'&&['say','do'].includes(operation)?writerEvent(operation,instruction,original.persona?.name):'';
     const tail=event?(base&& !/\s$/.test(base)?'\n\n':'')+event+'\n\n':'';
     const isMidpoint=op==='regenerate'&&start<original.text.length-(existing?.text?.length||0);
     const modelOperation=isMidpoint?'insert':operation;

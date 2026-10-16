@@ -115,7 +115,7 @@ function createStoryAPI(store,pipeline,{ready=()=>true,contextSize=()=>8192}={})
     // A completely malformed output is an actual retryable failure, not a clean no-op.
     // Invalid model output is an unverified attempt, never an empty successful
     // extraction. Keep the source eligible for retry without failing the chat.
-    if(diagnostics.errors.length&&!updates.length)diagnostics.errors.unshift('Tracker extraction pending retry; verified state was preserved.');
+    if(diagnostics.errors.length&&!updates.length)diagnostics.errors.unshift('No tracker changes could be verified. Saved state is unchanged; automatic retry scheduled.');
     diagnostics.partial=diagnostics.errors.length>0;
     if(S.hash(store.view(data.id).messages.map(S.signature))!==head)throw Error('Chat changed; stale state analysis discarded.');
     if(updates.length){

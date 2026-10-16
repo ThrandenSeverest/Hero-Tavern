@@ -12,6 +12,10 @@ test('Named save points keep separate manuscripts and restore the original text 
   const restored=store.restoreCheckpoint(a.id,point.checkpoints[0].id,changed.version);
   assert.equal(restored.text,'A beginning.');assert.equal(store.read(b.id).text,'Another beginning.');
   assert.equal(restored.checkpoints[0].label,'Before the ambush');
+  const second=store.checkpoint(a.id,'After restoring',restored.version);
+  assert.equal(second.checkpoints.length,2);
+  assert.equal(second.checkpoints[1].story.checkpoints,undefined,'Save points must not recursively contain prior save points');
+  assert.equal(second.checkpoints[1].story.history,undefined,'Do not recursively embed revision history');
   assert.ok(restored.history.some(h=>h.text==='A beginning. The ambush.'));
   assert.equal(store.list().length,2);
  }finally{fs.rmSync(root,{recursive:true,force:true})}

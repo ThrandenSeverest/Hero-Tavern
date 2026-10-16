@@ -79,6 +79,14 @@ function isWriterNonProse(input){
  if(/(?:here(?:['’]s| is) (?:the|a|my) (?:revised|requested|next)|I'll (?:write|continue|provide)|I now understand what|now I understand what|what (?:am I|I'm) supposed to do)/i.test(head.slice(0,180))&&!/^[“"«]/.test(text))return 'assistant talking about task';
  return '';
 }
+// Planning may select references; it cannot promote invented prose to scene facts.
+const CONTINUITY_SCHEMA={type:'object',properties:{facts:{type:'array',maxItems:4,items:{type:'string',maxLength:240}}},required:['facts'],additionalProperties:false};
+function groundedContinuityPlan(raw,source){
+ let value;try{value=JSON.parse(String(raw).trim())}catch{return null}
+ if(!value||Array.isArray(value)||Object.keys(value).some(k=>k!=='facts')||!Array.isArray(value.facts)||value.facts.length>4)return null;
+ if(value.facts.some(f=>typeof f!=='string'||!f.trim()||f.length>240||!source.includes(f)||/<\||\[\/?(?:INST|SYSTEM_PROMPT)\]/.test(f)))return null;
+ return value.facts.length?JSON.stringify({facts:value.facts}):'';
+}
 function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetch,enforceContext=false,setDiagnostics=()=>{},getModelProfile=()=>({Template:'chatml'}),getContextSize=null,getPlanningBackend=()=>null,getStoryContext=()=>null,recordInspector=()=>{}}) {
     const novelist=createNovelWriter({backendURL,fetchBackend,getModelProfile,getContextSize:()=>getContextSize?.()||(()=>{try{return JSON.parse(fs.readFileSync(path.join(root,'backend.json'),'utf8')).contextSize}catch{return 8192}})(),recordInspector,onStage:setState});
     let active = null,lastRun=null;const runSnapshot=()=>novelist.runSnapshot()||lastRun;const stage=value=>{if(lastRun){lastRun.stage=value;lastRun.timeline.push({stage:value,at:Date.now()-lastRun.started});}setState(value);};
@@ -131,14 +139,18 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             if(mode==='chat'&&settings.thinkingMode==='separate'){
                 stage('planning');
                 const planningBase=body.hero_context?.generationType==='continue'?body.prompt+'<|im_end|>\n<|im_start|>assistant\n':body.prompt;
-                const prompt=replyPrompt(planningBase,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');
+                const planningSource=body.prompt+stateInstruction+directionInstruction;
+                const prompt=replyPrompt(planningBase,taskInstruction+directionInstruction+stateInstruction+'\n[Private continuity outline]\nSelect up to four references relevant to the latest user request. Copy each fact exactly from the supplied conversation or confirmed state, at most 240 characters each. Return only {"facts":["exact source excerpt"]}; use an empty array if nothing is established. Do not invent a scene, next event, dialogue, motives or locations. A request to verify saved state is not a request to advance the story.\n[/Private continuity outline]');
+                const planFormat={json_schema:CONTINUITY_SCHEMA,grammar:JSON.stringify(CONTINUITY_SCHEMA)};
                 if(settings.planningSource==='different'){
                     const worker=getPlanningBackend();const planningProfile=worker?.settings?.name?profileFor(root,worker.settings.name):{Template:'chatml'};if(!worker?.ready)throw Error('Load a separate planning model in Generation, or choose Use reply model.');
                     let planningPrompt=prompt;const budget=worker.settings.contextSize-settings.planningTokens-64;
                     const count=async text=>{const r=await fetchBackend(worker.url+'/api/extra/tokencount',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:renderPrompt(text,planningProfile)}),signal:controller.signal});const j=await r.json();return Number.isFinite(j.value)?j.value:Buffer.byteLength(text,'utf8')};
                     while(await count(planningPrompt)>budget){const match=/<\|im_start\|>(?:user|assistant)\n[\s\S]*?<\|im_end\|>\n?/.exec(planningPrompt);if(!match||planningPrompt.slice(match.index+match[0].length).indexOf('<|im_start|>user')<0)throw Error('Planning context is too small for the character and latest turn. Increase planning context or use the reply model.');planningPrompt=planningPrompt.slice(0,match.index)+planningPrompt.slice(match.index+match[0].length);}
-                    plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']},planningProfile)),signal:controller.signal})),settings).slice(0,6000);
-                }else plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
+                    plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({...planFormat,prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']},planningProfile)),signal:controller.signal})),settings).slice(0,6000);
+                }else plan=filterReply(await sendChecked({...body,...planFormat,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
+                const grounded=groundedContinuityPlan(plan,planningSource);
+                if(grounded===null){lastRun.planningRejected='Planner output was malformed or contained references absent from the supplied context';plan='';}else plan=grounded;
             }
             if(plan&&isWriterNonProse(plan)){lastRun.planningRejected='Planner returned commentary instead of continuity notes';plan='';}
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
@@ -161,7 +173,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 if(planned)plan=planned.slice(0,1600);
             }
             stage(mode==='state'?'analyzing':'responding');
-            const extra=taskInstruction+stateInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'');
+            const extra=taskInstruction+directionInstruction+(plan?'\n[Private continuity notes — do not quote or reproduce]\n'+plan+'\n[/Private continuity notes]':'')+stateInstruction;
             let prompt;
             if(mode==='writer'){
                 prompt=replyPrompt(body.prompt,extra);
@@ -271,4 +283,4 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
     }
     return {generate,handle,abort,runSnapshot};
 }
-module.exports={DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,isWriterNonProse,createPipeline};
+module.exports={groundedContinuityPlan,DEFAULTS,validateSettings,readSettings,saveSettings,replyPrompt,completionText,isWriterNonProse,createPipeline};

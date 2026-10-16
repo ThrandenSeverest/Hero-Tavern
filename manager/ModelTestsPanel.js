@@ -76,7 +76,7 @@
   try{
    if(['tracker','writer-agency','character-long'].includes(kind)){
     progress('Running '+kindNames[kind]);
-    const result=await callTest('/model-tests/workflow',{kind},kind,900000);history.push(result);showHistory();notify(kindNames[kind]+' · '+result.status.toUpperCase());return result;
+    const result=await callTest('/model-tests/workflow',{kind,suiteId:override?.suiteId},kind,900000);history.push(result);showHistory();notify(kindNames[kind]+' · '+result.status.toUpperCase());return result;
    }else if(kind==='text2text'){
     progress('Running local text-instruction test');
     const prompt=presets.text2text.prompt;

@@ -25,8 +25,8 @@ test('Separate planning uses two requests and only the cleaned final reply is re
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-reply-'));const calls=[],states=[];
  try{
   saveSettings(root,{thinkingMode:'separate',replyStyle:'dialogue',instructions:'Keep the reply concise.',temperature:0.55,maxReplyTokens:256});
-  const pipeline=createPipeline({root,backendURL:'http://unused',setState:s=>states.push(s),fetchBackend:async(url,request)=>{calls.push(JSON.parse(request.body));return new Response(JSON.stringify({choices:[{text:calls.length===1?'OUTLINE_PRIVATE_123':'<think>ANALYSIS_PRIVATE_456</think>Hello, friend.'}]}),{headers:{'Content-Type':'application/json'}})}});
-  const result=await pipeline.generate({prompt:'<|im_start|>assistant\n',stream:false,stop:['END']});
+  const pipeline=createPipeline({root,backendURL:'http://unused',setState:s=>states.push(s),fetchBackend:async(url,request)=>{calls.push(JSON.parse(request.body));return new Response(JSON.stringify({choices:[{text:calls.length===1?JSON.stringify({facts:['OUTLINE_PRIVATE_123']}):'<think>ANALYSIS_PRIVATE_456</think>Hello, friend.'}]}),{headers:{'Content-Type':'application/json'}})}});
+  const result=await pipeline.generate({prompt:'<|im_start|>user\nThe password is OUTLINE_PRIVATE_123.<|im_end|>\n<|im_start|>assistant\n',stream:false,stop:['END']});
   assert.equal(calls.length,2);assert.equal(calls[0].stream,false);assert.equal(calls[1].temperature,0.55);assert.equal(calls[1].max_tokens,256);assert.deepEqual(calls[1].stop,['END']);assert.match(calls[1].prompt,/OUTLINE_PRIVATE_123/);assert.match(calls[1].prompt,/spoken dialogue only/);
   assert.equal(result.choices[0].text,'Hello, friend.');assert.doesNotMatch(JSON.stringify(result),/PRIVATE/);assert.deepEqual(states,['tokenizing','planning','responding','idle']);
  }finally{fs.rmSync(root,{recursive:true,force:true})}

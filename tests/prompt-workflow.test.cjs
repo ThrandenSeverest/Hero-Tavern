@@ -43,3 +43,18 @@ test('Continuation with private planning keeps the final prose endpoint open and
  assert.ok(requests[1].prompt.includes('Continue the last assistant reply'));
  assert.equal(result.choices[0].text,'a traveller enters.');
 }));
+test('Planner receives authoritative state and latest task; invented facts never become reply instructions',()=>fixture(async root=>{
+ saveSettings(root,{thinkingMode:'separate'});const requests=[];
+ const state='Confirmed location: Oak Inn. Coins: 9. Clock: 09:30.';
+ const pipeline=createPipeline({root,backendURL:'http://fixture',getContextSize:()=>8192,getModelProfile:()=>({Template:'mistral-v3',Family:'Mistral NeMo'}),getStoryContext:()=>({text:state,trackers:[],lore:[]}),fetchBackend:async(url,{body})=>{if(url.includes('tokencount'))return Response.json({value:100});const q=JSON.parse(body);requests.push(q);return Response.json({choices:[{text:requests.length%2===1?JSON.stringify({facts:['Mira is in the Forest of Whispers.']}):'Oak Inn, 9 coins, 09:30.'}]});}});
+ await pipeline.generate({prompt:'<|im_start|>assistant\n',hero_context:{id:'verify',sessionId:'verify',messages:[{role:'user',text:'Read the current saved location and time. Do not advance the scene.'}],oneReply:'Verify the saved values exactly.'}});
+ assert.equal(requests.length,2);assert.match(requests[0].prompt,/Oak Inn/);assert.match(requests[0].prompt,/Verify the saved values exactly/);assert.ok(requests[0].json_schema.properties.facts);
+ assert.doesNotMatch(requests[1].prompt,/Forest of Whispers/);assert.match(requests[1].prompt,/09:30/);assert.match(pipeline.runSnapshot().planningRejected,/absent/);
+}));
+test('Continuity selection accepts only bounded exact source excerpts',()=>{
+ const {groundedContinuityPlan}=require('../manager/ReplyPipeline.cjs');
+ const source='The location is Oak Inn. The clock reads 09:30.';
+ assert.equal(groundedContinuityPlan('{"facts":["Oak Inn","09:30"]}',source),'{"facts":["Oak Inn","09:30"]}');
+ assert.equal(groundedContinuityPlan('{"facts":[]}',source),'');
+ for(const raw of ['Mira enters the forest.','{"facts":["forest"]}','{"facts":["Oak Inn"],"goal":"move to forest"}','{"facts":[4]}'])assert.equal(groundedContinuityPlan(raw,source),null);
+});

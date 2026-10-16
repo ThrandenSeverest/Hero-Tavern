@@ -433,7 +433,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
                 workflowControl=control;let report;
                 try{report=await runWorkflowTest({kind:data.kind,settings:readSettings(root),contextSize:loadedContext||8192,signal:control.signal,
                     makePipeline:(temporaryRoot,setDiagnostics,getStoryContext)=>{for(const name of ['models.json','model-profiles.json','backend.json']){const source=path.join(root,name);if(fs.existsSync(source))fs.copyFileSync(source,path.join(temporaryRoot,name));}return createPipeline({root:temporaryRoot,backendURL,getStoryContext,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||8192,getPlanningBackend:()=>thinking.snapshot(),setDiagnostics,setState:value=>{generationState=value;}});}});}finally{workflowControl=null;}
-                const record=modelTests.record({kind:data.kind,model:runningModel||selected(),status:report.status,elapsedMs:report.elapsedMs,notes:report.notes,error:report.error,workflow:report,text:report.stages.map(s=>s.label+'\n'+(s.text||JSON.stringify(s.actual||{}))).join('\n\n')});
+                const record=modelTests.record({kind:data.kind,suiteId:data.suiteId,settings:{...report.settings,contextSize:report.contextSize},model:runningModel||selected(),status:report.status,elapsedMs:report.elapsedMs,notes:report.notes,error:report.error,workflow:report,text:report.stages.map(s=>s.label+'\n'+(s.text||JSON.stringify(s.actual||{}))).join('\n\n')});
                 json(200,record);return;
             }
             if(req.url==='/model-tests/text'){

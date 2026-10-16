@@ -133,10 +133,10 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
  try{
   const {saveSettings}=require('./ReplyPipeline.cjs');
   // Local diagnostic overrides are written only to the disposable root.
-  report.settings=saveSettings(temp,{...settings,maxReplyTokens:1024,replyStyle:'mixed',memoryEnabled:true,recentMessages:100,instructions:'Write at least three substantial paragraphs, about 220–350 words. Preserve established scene facts. Do not speak or act for the player.'});
+  report.settings=saveSettings(temp,{...settings,maxReplyTokens:1024,replyStyle:'mixed',memoryEnabled:true,recentMessages:100,instructions:kind==='tracker'?'Answer the latest state verification question directly from confirmed values. Do not invent a new scene.':'Write at least three substantial paragraphs, about 220–350 words. Preserve established scene facts. Do not speak or act for the player.'});
   let storyContext=()=>null;
   const pipeline=makePipeline(temp,value=>{context=value},(id,query)=>storyContext(id,query));
-  const complete=async(body,mode='chat')=>{ensureActive();const at=Date.now();const result=await pipeline.generate(body,signal,{mode});return {text:String(result.choices?.[0]?.text||''),usage:result.usage,context:context?{...context}:null,elapsedMs:Date.now()-at};};
+  const complete=async(body,mode='chat')=>{ensureActive();const at=Date.now();const result=await pipeline.generate(body,signal,{mode});return {text:String(result.choices?.[0]?.text||''),usage:result.usage,context:context?{...context}:null,planningRejected:pipeline.runSnapshot()?.planningRejected||null,elapsedMs:Date.now()-at};};
   if(kind==='tracker'){
    const {createStoryStore}=require('./StoryStore.cjs'),{createStoryAPI}=require('./StoryAPI.cjs'),W=require('./WTracker.cjs');
    const folder=path.join(temp,'SillyTavern/data/default-user/chats/Mira');fs.mkdirSync(folder,{recursive:true});
@@ -168,6 +168,7 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
    const result=await complete({prompt:'<|im_start|>system\nRead confirmed state for this isolated diagnostic.<|im_end|>\n<|im_start|>assistant\n',hero_context:{id,sessionId:id,messages:[{role:'user',text:question}],oneReply:'Verify the saved tracker values exactly, without inventing new events.'},stream:false});
    const checks=passageChecks(result.text,{expected:['Oak Inn','9','09:30'],minWords:1,minParagraphs:1});
    report.stages.push({label:'Next reply uses saved tracker state',status:checks.passed?'passed':'failed',...result,checks});
+   if(!checks.passed)report.notes.push('Extraction and persistence are checked separately above. Reply grounding failed: missing '+checks.missing.join(', ')+'.');
   }else if(kind==='writer-agency'){
    report.notes.push('Agency detection is an English heuristic. Review the saved outputs; a clean scan does not prove that every player action was avoided.');
    const cases=[
@@ -178,7 +179,8 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
    for(const [label,operation,text,note] of cases){
     const body={prompt:'',hero_writer:{text,prompt:'A quiet mystery in a riverside inn. Mira is the innkeeper. Rowan is the player, controlled only by the author.',persona:{name:'Rowan',description:'The player-controlled traveller; {{user}} refers to Rowan.'},operation,note,settings:{protectPlayerSpeech:true,protectPlayerActions:true,finishSentences:true}},writerSettings:{maxReplyTokens:1024,protectPlayerSpeech:true,protectPlayerActions:true}};
     const result=await complete(body,'writer'),findings=agencyFindings(result.text),checks=passageChecks(result.text,{minWords:80,minParagraphs:1});
-    report.stages.push({label,status:!result.text.trim()||findings.length?'failed':checks.passed?'passed':'warning',...result,findings,checks,input:body.hero_writer});
+    report.stages.push({label,status:!result.text.trim()||findings.length?'failed':checks.passed?'passed':'warning',agencyStatus:findings.length?'failed':'passed',lengthStatus:checks.passed?'passed':'warning',...result,findings,checks,input:body.hero_writer});
+    if(!checks.passed)report.notes.push(label+': reply length '+checks.words+' words; threshold '+checks.minWords+'. Player-agency findings: '+findings.length+'.');
    }
   }else{
    report.notes.push('Three sequential character replies use actual prior generated replies. Longer responses require at least 180 words and three paragraphs each.');
@@ -198,6 +200,7 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
   }
  }catch(error){report.error=error.message;report.status='failed';}
  finally{report.elapsedMs=Date.now()-started;fs.rmSync(temp,{recursive:true,force:true});}
+ const failedStages=report.stages.filter(s=>s.status==='failed').map(s=>s.label);if(failedStages.length)report.notes.push('Failed stages: '+failedStages.join('; ')+'.');
  if(report.stages.some(s=>s.status==='failed'))report.status='failed';else if(report.status!=='failed'&&report.stages.some(s=>s.status==='warning'))report.status='warning';
  return report;
 }

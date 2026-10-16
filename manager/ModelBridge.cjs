@@ -98,7 +98,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const prepareLoras=input=>{if(!input.lora?.length)return input;const checkpoint=studio.snapshot().settings.comfyCheckpoint;input.lora=loraManager.validateSelection(input.lora,input.modelPack,checkpoint);const library=loraManager.list({pack:input.modelPack,checkpoint});input.loraTriggerWords=[...new Set(input.lora.flatMap(active=>library.items.find(item=>item.name===active.name)?.triggerWords||[]).map(word=>word.trim()).filter(Boolean))];return input;};
     const comfyRuntime=createComfyRuntime(root);
     const pipeline = createPipeline({root,backendURL,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||backendArguments(root,'').config.contextSize,getPlanningBackend:()=>thinking.snapshot(),getStoryContext:(id,query)=>story.view(id,query).context,recordInspector:(id,value)=>story.inspector(id,value),setDiagnostics:value=>{contextDiagnostics=value},setState: value => { generationState = value; }});
-    const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady,contextSize:()=>loadedContext||8192});
+    const storyAPI=createStoryAPI(story,pipeline,{ready:()=>backendReady&&generationState==='idle'&&queuedInference===0,contextSize:()=>loadedContext||8192});
     const selection = path.join(models, 'selected-model.txt');
     const selected = () => {
         if (!fs.existsSync(selection)) return '';

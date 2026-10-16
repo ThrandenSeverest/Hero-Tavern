@@ -11,20 +11,25 @@ function scalar(x){
 }
 function parseCommands(raw,definitions,messages,state){
  const clean=String(raw||'').replace(/<think>[\s\S]*?(?:<\/think>|$)/gi,'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
+ let jsonPacket=null;try{const packet=require('./StoryState.cjs').parseModelJSON(clean);if(Array.isArray(packet.changes)||Array.isArray(packet.operations))jsonPacket=packet;}catch{}
  let rows,recognized=0;
- if(clean.startsWith('{')){
+ if(jsonPacket){
   try{
-   const packet=JSON.parse(clean);
+   const packet=jsonPacket;
    // Accept both legacy operations and a much simpler complete-value delta format.
    // Every change still requires exact evidence and passes StoryState validation.
    const changes=Array.isArray(packet.changes)?packet.changes:packet.operations;
    if(!Array.isArray(changes)||changes.length>100)throw Error('Expected changes or operations array (maximum 100)');
    rows=changes.map(op=>{
     if(!op||typeof op!=='object')throw Error('Change must be an object');
-    const key=op.key??op.trackerId??op.tracker,verb=String(op.verb??op.op??'SET').toUpperCase(),id=op.sourceMessageId??op.messageId??op.evidence?.messageId,evidence=typeof op.evidence==='string'?op.evidence:op.evidence?.quote;
+    const key=op.key??op.trackerId??op.tracker,verb=String(op.verb??op.op??'SET').toUpperCase();
+    const sourceIndex=op.sourceIndex??op.messageIndex??op.source;
+    let id=op.sourceMessageId??op.messageId??op.evidence?.messageId??(Number.isInteger(sourceIndex)?messages[sourceIndex]?.extra?.heroMessageId:undefined);
+    const evidence=typeof op.evidence==='string'?op.evidence:op.evidence?.quote??op.quote;
+    if(!id&&typeof evidence==='string'){const matches=messages.filter(m=>String(m.mes||m.text||'').includes(evidence));if(matches.length===1)id=matches[0].extra?.heroMessageId;}
     if(typeof key!=='string'||typeof id!=='string'||typeof evidence!=='string'||!Object.hasOwn(op,'value'))throw Error('Change needs key, value, sourceMessageId and verbatim evidence');
     if(op.path&&op.path!=='/value')throw Error('Use FIELD for a single record field or SET at /value');
-    return ['UPDATE',key,verb,typeof op.value==='string'?op.value:JSON.stringify(op.value),id,evidence];
+    return ['UPDATE',key,verb,op.value,id,evidence];
    });recognized=rows.length||1;
   }catch(e){return {changes:[],issues:['Invalid operations JSON: '+e.message],recognized:0};}
  }else rows=clean.split(/\r?\n/).slice(0,100);
@@ -38,10 +43,12 @@ function parseCommands(raw,definitions,messages,state){
    const parts=Array.isArray(row)?row:row.trim().split(/\s+::\s+/);
    if(parts.length<6)throw Error('Provide key, verb, value, message ID and evidence');
    const [,key,verbRaw,payload,id,...rest]=parts,verb=verbRaw.toUpperCase(),evidence=rest.join(' :: ');
-   const d=known.get(key)||definitions.find(item=>item.id===key&&definitions.filter(candidate=>candidate.id===key).length===1),message=byId.get(id);
+   const d=known.get(key)||definitions.find(item=>(item.id===key||item.label.toLowerCase()===String(key).toLowerCase())&&definitions.filter(candidate=>candidate.id===key||candidate.label.toLowerCase()===String(key).toLowerCase()).length===1),message=byId.get(id);
    const resolvedKey=d?keyOf(d):key;
    if(!d||d.enabled===false||d.updateMode==='manual')throw Error('Unknown or manual-only tracker '+key);
-   if(!message||!evidence||!String(message.mes||message.text||'').includes(evidence))throw Error('Evidence is not an exact quote from '+id);
+   let verifiedEvidence=String(evidence||'');const sourceText=String(message?.mes||message?.text||'');
+   if(message&&!sourceText.includes(verifiedEvidence)&&verifiedEvidence.length>=6){const escaped=verifiedEvidence.replace(/[.*+?^$()|{}\[\]\\]/g,'\\if(!message||!evidence||!String(message.mes||message.text||'').includes(evidence))throw Error('Evidence is not an exact quote from '+id);').replace(/\s+/g,'\\s+');verifiedEvidence=sourceText.match(new RegExp(escaped))?.[0]||'';}
+   if(!message||!verifiedEvidence||!sourceText.includes(verifiedEvidence))throw Error('Evidence is not an exact quote from '+id);
    const previous=working[resolvedKey];if(previous===undefined)throw Error('Tracker is not available in this chat');
    let value=copy(previous);
    if(['INCREASE','DECREASE'].includes(verb)){
@@ -50,8 +57,8 @@ function parseCommands(raw,definitions,messages,state){
     value=Math.max(d.min,Math.min(d.max,value+(verb==='INCREASE'?delta:-delta)));
    }else if(verb==='SET'){
     if(!['number','boolean','enum','text','clock','record','quest','timer','relationship','list','injuries'].includes(d.type))throw Error('SET unsupported for this tracker type');
-    value=scalar(payload);
-    if(d.type==='record'){const shape=(old,next)=>{if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Record SET needs an object');for(const key of Object.keys(old)){if(!Object.hasOwn(next,key))throw Error('Preserve unchanged record field '+key)}for(const key of Object.keys(next)){if(!Object.hasOwn(old,key)||['__proto__','constructor','prototype'].includes(key))throw Error('Unknown record field '+key);if(old[key]!==null&&typeof old[key]==='object'&&!Array.isArray(old[key]))shape(old[key],next[key]);else if(old[key]!==null&&(Array.isArray(old[key])?!Array.isArray(next[key]):typeof old[key]!==typeof next[key]))throw Error('Wrong type for record field '+key)}};shape(previous,value);}
+    value=Array.isArray(row)?(typeof payload==='string'&&d.type==='number'&&Number.isFinite(Number(payload))?Number(payload):copy(payload)):scalar(payload);
+    if(d.type==='record'){const shape=(old,next)=>{if(!next||typeof next!=='object'||Array.isArray(next))throw Error('Record SET needs an object');for(const key of Object.keys(old)){if(!Object.hasOwn(next,key))throw Error('Preserve unchanged record field '+key)}for(const key of Object.keys(next)){if(['__proto__','constructor','prototype'].includes(key)||(!d.dynamicFields&&!Object.hasOwn(old,key)))throw Error('Unknown record field '+key);if(!Object.hasOwn(old,key))continue;if(old[key]!==null&&typeof old[key]==='object'&&!Array.isArray(old[key]))shape(old[key],next[key]);else if(old[key]!==null&&(Array.isArray(old[key])?!Array.isArray(next[key]):typeof old[key]!==typeof next[key]))throw Error('Wrong type for record field '+key)}};shape(previous,value);}
    }else if(verb==='ADD'||verb==='REMOVE'){
     if(d.type!=='list')throw Error('ADD/REMOVE requires list');
     if(!payload.trim())throw Error('Empty list item');const item=payload.trim();
@@ -66,7 +73,7 @@ function parseCommands(raw,definitions,messages,state){
     for(let j=0;j<keys.length-1;j++){if(!object||typeof object!=='object'||Array.isArray(object)||!Object.hasOwn(object,keys[j]))throw Error('Unknown nested field');object=object[keys[j]];}
     const field=keys.at(-1);
     if(!object||typeof object!=='object'||Array.isArray(object))throw Error('Invalid record field');
-    if(d.type==='record'&&!Object.hasOwn(object,field))throw Error('Record fields must be defined in the tracker template');
+    if(d.type==='record'&&!d.dynamicFields&&!Object.hasOwn(object,field))throw Error('Record fields must be defined in the tracker template');
     if(op==='=')object[field]=scalar(rawValue);
     else {if(!Array.isArray(object[field]))throw Error('Append/remove requires existing list field');const item=rawValue.trim();if(!item)throw Error('Empty list item');if(op==='+='){if(!object[field].includes(item))object[field].push(item)}else object[field]=object[field].filter(v=>v!==item);}
    }else if(verb==='WOUND'){
@@ -83,7 +90,7 @@ function parseCommands(raw,definitions,messages,state){
     if(status)found.status=status;if(treatment)found.treatment=treatment;if(pain)found.pain=num(pain);
    }else throw Error('Unknown operation '+verb);
    validateValue(d,value);if(JSON.stringify(value)===JSON.stringify(previous))continue;
-   output.push({key:resolvedKey,value,sourceMessageId:id,evidence,reason:verb+' from observed turn'});
+   output.push({key:resolvedKey,value,sourceMessageId:id,evidence:verifiedEvidence,reason:verb+' from observed turn'});
    working[resolvedKey]=value;
   }catch(error){issues.push((Array.isArray(row)?row.join(' :: '):row).slice(0,200)+': '+error.message);}
  }
@@ -143,10 +150,10 @@ function explicitStateChanges(definitions,messages,state){
 function explicitClockChanges(definitions,messages,state){return explicitStateChanges(definitions.filter(d=>d.type==='clock'),messages,state);}
 function trackerInstructions(definitions,state,messages,contextMessages=[]){
  const allowed=definitions.filter(d=>d.enabled!==false&&d.updateMode!=='manual');
- const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,current:state[keyOf(d)]}));
- return 'You are a factual state transition extractor, not a storyteller. Return ONLY one JSON object. Format: {"changes":[{"key":"exact manifest key","value":"the NEW complete value, preserving its JSON type","sourceMessageId":"exact source ID","evidence":"EXACT verbatim quote from that source proving the event"}]}. If no established change, return {"changes":[]}. Do not add Markdown or analysis.\n'+
+ const entries=allowed.map(d=>({key:keyOf(d),type:d.type,label:d.label,description:d.description||'',changeRules:d.changeRules||'',maxDelta:d.maxDelta,allowedValues:d.allowedValues,dynamicFields:!!d.dynamicFields,current:state[keyOf(d)]}));
+ return 'You are a factual state transition extractor, not a storyteller. Return ONLY one JSON object. Format: {"changes":[{"key":"exact manifest key","value":"NEW typed value","sourceIndex":0,"evidence":"verbatim quote proving this change"}]}. If no established change, return {"changes":[]}. Do not add Markdown or analysis.\n'+
  'For number trackers value is a number, for booleans a boolean, for lists a complete string array, for structured records a complete JSON object with ALL unchanged fields retained, for injuries a complete array that never erases established wounds, and for other trackers their matching typed value. The legacy operations array is also supported. Existing {"operations":[{"key":"...","verb":"INCREASE|DECREASE|SET|ADD|REMOVE|FIELD|WOUND|TREAT","value":"...","sourceMessageId":"...","evidence":"..."}]} is also accepted if easier for incremental updates.\n'+
- 'Only include real changes, directly proven by one of the eligible source messages. Do not guess hidden emotional states or arbitrary numeric levels, change unrelated fields, reverse proven injuries, or treat plans/hypotheticals as completed actions. Preserve all previously established facts and unchanged fields; modest numeric changes must respect maxDelta and the permitted range.\n'+
+ 'Use sourceIndex 0 for the first eligible message, 1 for the second; no UUID copying necessary. If sourceIndex is unavailable, supply sourceMessageId. A quote must be copied from that SAME eligible message. Only include real changes, directly proven by one of the eligible source messages. Do not guess hidden emotional states or arbitrary numeric levels, change unrelated fields, reverse proven injuries, or treat plans/hypotheticals as completed actions. Preserve all previously established facts and unchanged fields; modest numeric changes must respect maxDelta and the permitted range.\n'+
  'Tracker manifest:\n'+JSON.stringify(entries)+'\nEarlier context (read-only; never cite these as source IDs):\n'+JSON.stringify(contextMessages.map(m=>({speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,2400)})))+'\nMessages eligible for evidence-backed changes:\n'+JSON.stringify(messages.map(m=>({id:m.extra?.heroMessageId,speaker:m.is_user?'Player':m.name||'Character',text:String(m.mes||m.text||'').slice(0,6000)})));
 }
 module.exports={parseCommands,trackerInstructions,explicitClockChanges,explicitStateChanges};

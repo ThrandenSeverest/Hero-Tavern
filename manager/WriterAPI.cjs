@@ -25,6 +25,7 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
  async function action(route,data={},signal){
   const op=route.replace('/writer/api/','');
   if(op==='list')return store.list();if(op==='create')return store.create(data.story);if(op==='get')return store.read(data.id);
+  if(op==='checkpoint')return store.checkpoint(data.id,data.label,data.expectedVersion);if(op==='checkpoint-restore')return store.restoreCheckpoint(data.id,data.checkpointId,data.expectedVersion);if(op==='checkpoint-delete')return store.deleteCheckpoint(data.id,data.checkpointId,data.expectedVersion);
   if(op==='save')return store.save(data.id,data.story,data.expectedVersion);if(op==='restore')return store.restore(data.id,data.revision,data.expectedVersion);if(op==='fork')return store.fork(data.id);if(op==='delete')return store.remove(data.id);
   if(op==='import'){if(data.story?.schemaVersion!==1&&data.story?.schemaVersion!==undefined)throw Error('Unsupported Writer export version.');return store.create(data.story)}
   if(op==='plan-beats'){
@@ -103,7 +104,8 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const prevSegments=(original.generations||[]).filter(g=>g.id!==existing?.id);
    const {reconcileGenerations}=require('./WriterStore.cjs');
    const segments=reconcileGenerations(original.text,nextText,prevSegments);
-   segments.push({id:existing?.id||crypto.randomUUID(),at:Date.now(),start:before.length,end:before.length+prose.length,text:prose,operation,instruction:op==='regenerate'?(existing?.instruction||''):String(data.instruction||'').slice(0,2000)});
+   if(event){const authorOffset=before.length+(prose.startsWith(' ')?1:0);segments.push({id:crypto.randomUUID(),kind:'manual',at:Date.now(),start:authorOffset,end:authorOffset+tail.length,text:tail,operation,instruction:String(instruction||'').slice(0,2000)});}
+   segments.push({id:existing?.id||crypto.randomUUID(),kind:'generated',at:Date.now(),start:before.length+(event?prose.indexOf(tail)+tail.length:0),end:before.length+prose.length,text:event?prose.slice(prose.indexOf(tail)+tail.length):prose,operation,instruction:op==='regenerate'?(existing?.instruction||''):String(data.instruction||'').slice(0,2000)});
    // "Next Scene" is an explicit scene-advance command, not another
    // rewrite of the current beat. Move to the following beat only after
    // the prose is actually committed. Regeneration must not skip beats.

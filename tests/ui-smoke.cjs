@@ -79,8 +79,10 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   // Writer is a dedicated top-level manuscript workspace using the existing engine.
   await page.locator('.hero-nav[data-hero="writer"]').click();
   const writer=page.frameLocator('#hero-writer-frame');
-  await writer.locator('#writer-view-mode').click();
-  await writer.locator('#manuscript').waitFor();
+  // Writer v2 defaults to a continuous editable manuscript. Do not click the
+  // passage-history toggle before checking its default, or the test hides the editor.
+  await writer.locator('#manuscript').waitFor({state:'visible'});
+  if(await writer.locator('#writer-segments').isVisible())throw Error('Novel Writer must open with the continuous manuscript editor, not passage cards');
   await writer.locator('#manuscript').fill('Лира ждала у двери таверны.');
   await writer.locator('#memory').fill('Лира ранена в левое плечо.');
   // Scene planning edits the outline, not the user's prose; active beat remains author-controlled.

@@ -136,7 +136,7 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
   report.settings=saveSettings(temp,{...settings,maxReplyTokens:1024,replyStyle:'mixed',memoryEnabled:true,recentMessages:100,instructions:kind==='tracker'?'Answer the latest state verification question directly from confirmed values. Do not invent a new scene.':'Write at least three substantial paragraphs, about 220–350 words. Preserve established scene facts. Do not speak or act for the player.'});
   let storyContext=()=>null;
   const pipeline=makePipeline(temp,value=>{context=value},(id,query)=>storyContext(id,query));
-  const complete=async(body,mode='chat')=>{ensureActive();const at=Date.now();const result=await pipeline.generate(body,signal,{mode});return {text:String(result.choices?.[0]?.text||''),usage:result.usage,context:context?{...context}:null,planningRejected:pipeline.runSnapshot()?.planningRejected||null,elapsedMs:Date.now()-at};};
+  const complete=async(body,mode='chat')=>{ensureActive();const at=Date.now();const result=await pipeline.generate(body,signal,{mode});return {text:String(result.choices?.[0]?.text||''),usage:result.usage,context:context?{...context}:null,planningRejected:pipeline.runSnapshot()?.planningRejected||null,writerContext:result.writerContext||null,elapsedMs:Date.now()-at};};
   if(kind==='tracker'){
    const {createStoryStore}=require('./StoryStore.cjs'),{createStoryAPI}=require('./StoryAPI.cjs'),W=require('./WTracker.cjs');
    const folder=path.join(temp,'SillyTavern/data/default-user/chats/Mira');fs.mkdirSync(folder,{recursive:true});
@@ -178,8 +178,9 @@ async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,s
    ];
    for(const [label,operation,text,note] of cases){
     const body={prompt:'',hero_writer:{text,prompt:'A quiet mystery in a riverside inn. Mira is the innkeeper. Rowan is the player, controlled only by the author.',persona:{name:'Rowan',description:'The player-controlled traveller; {{user}} refers to Rowan.'},operation,note,settings:{protectPlayerSpeech:true,protectPlayerActions:true,finishSentences:true}},writerSettings:{maxReplyTokens:1024,protectPlayerSpeech:true,protectPlayerActions:true}};
-    const result=await complete(body,'writer'),findings=agencyFindings(result.text),checks=passageChecks(result.text,{minWords:80,minParagraphs:1});
-    report.stages.push({label,status:!result.text.trim()||findings.length?'failed':checks.passed?'passed':'warning',agencyStatus:findings.length?'failed':'passed',lengthStatus:checks.passed?'passed':'warning',...result,findings,checks,input:body.hero_writer});
+    const result=await complete(body,'writer'),findings=agencyFindings(result.text),checks=passageChecks(result.text,{minWords:80,minParagraphs:1}),styleWarnings=result.writerContext?.styleWarnings||[];
+    report.stages.push({label,status:!result.text.trim()||findings.length?'failed':checks.passed&&!styleWarnings.length?'passed':'warning',styleWarnings,agencyStatus:findings.length?'failed':'passed',lengthStatus:checks.passed?'passed':'warning',...result,findings,checks,input:body.hero_writer});
+    if(styleWarnings.length)report.notes.push(label+': '+styleWarnings.join('; ')+'. Output retained without automatic regeneration.');
     if(!checks.passed)report.notes.push(label+': reply length '+checks.words+' words; threshold '+checks.minWords+'. Player-agency findings: '+findings.length+'.');
    }
   }else{

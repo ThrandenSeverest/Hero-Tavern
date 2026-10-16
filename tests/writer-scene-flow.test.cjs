@@ -85,7 +85,7 @@ test('Repetition detector catches long exact loops while allowing short dialogue
  assert.equal(writerRepetitionIssue('"We have to leave," she said. The messenger blocked the entrance and offered her a bargain.',old),'');
 });
 
-test('Writer retries a repeated passage with scene-progression repair but keeps the manuscript unchanged until commit',async()=>{
+test('Writer reports repetition diagnostically without discarding prose or making a second generation',async()=>{
  const root=temp(),requests=[];
  try{
   const old='She crossed the bridge slowly, counting each loose board beneath her boots. The river battered the stone supports, and Mira was certain the ropes would break. She escaped and reached the watchtower just before the rain.';
@@ -95,9 +95,8 @@ test('Writer retries a repeated passage with scene-progression repair but keeps 
    return Response.json({choices:[{text:requests.length===1?'She crossed the bridge slowly, counting each loose board beneath her boots. The river battered the stone supports, and Mira was certain the ropes would break. Then she stopped.':'At the watchtower, a sentinel slammed the barred gate and demanded she surrender the map. Mira refused, forcing him to sound the alarm. Behind him, boots struck the steps as reinforcements arrived. The guard ordered her to kneel, but a crash in the courtyard interrupted everyone. The watchtower shook as a second alarm sounded, leaving both sides uncertain whether their confrontation was still the immediate danger.'}]});
   }});
   const result=await pipeline.generate({prompt:'',writerSettings:{writerTwoPass:false,maxReplyTokens:256},hero_writer:{prompt:'Mira meets a courier.',text:old,memory:'',note:'',beats:['The guard demands proof.'],beatIndex:0,operation:'continue',lore:[]}},null,{mode:'writer'});
-  assert.equal(requests.length,2);assert.match(requests[1].prompt,/Last attempt gave no usable prose/);
-  assert.match(result.choices[0].text,/sentinel slammed/);
-  assert.equal(pipeline.runSnapshot().attempts.length,2);
+  assert.equal(requests.length,1);assert.match(result.choices[0].text,/She crossed the bridge/);assert.ok(result.writerContext.styleWarnings.includes('repeated existing scene'));
+  assert.equal(pipeline.runSnapshot().attempts.length,1);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 

@@ -37,13 +37,52 @@ test('Player control toggles change the model prompt and avoid auto-continuing t
  const w={prompt:'A party is traveling.',text:'The old guard steps aside.',persona:{name:'Ari',description:''},settings:{protectPlayerSpeech:true,protectPlayerActions:true,finishSentences:true}};
  const build=async x=>buildNovelPrompt(x,{maxInputTokens:4096,countTokens:async t=>Math.ceil(t.length/4)});
  const on=await build(w),off=await build({...w,settings:{protectPlayerSpeech:false,protectPlayerActions:false,finishSentences:false}});
- assert.match(on.prompt,/NEVER invent, complete, quote or paraphrase words spoken by Ari/);
- assert.match(on.prompt,/NEVER invent decisions, voluntary movements/);
+ assert.match(on.prompt,/The author supplies Ari’s dialogue/);
+ assert.match(on.prompt,/voluntary actions, decisions and inner life/);
  assert.match(on.prompt,/Finish prose at a natural sentence/);
- assert.doesNotMatch(off.prompt,/NEVER invent, complete, quote or paraphrase/);
+ assert.doesNotMatch(off.prompt,/The author supplies Ari’s dialogue/);
  assert.doesNotMatch(off.prompt,/Finish prose at a natural sentence/);
 });
 test('Writer UI has persistent highlights and independent story management buttons',()=>{
  const html=fs.readFileSync(path.join(__dirname,'../manager/Writer.html'),'utf8');
  for(const str of ['id="manuscript-ink"','user-say','user-do','ai-prose','new-checkpoint','checkpoint-restore','rename-story','Never write my dialogue','Never write my actions'])assert.ok(html.includes(str),str);
+});
+
+test('Regenerate last preserves Say/Do text and highlights across repeated retries, reopening and save points',async()=>{
+ for(const operation of ['say','do']){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-writer-regen-highlight-'));
+  try{
+   let calls=0;const inputs=[];
+   const api=createWriterAPI(root,{generate:async body=>{inputs.push(body.hero_writer.text);return {choices:[{text:'Mira response '+(++calls)+'.'}]}}});
+   const draft=await api.action('/writer/api/create',{story:{text:'Mira waits at the gate.',persona:{name:'Ari',description:''}}});
+   let result=await api.action('/writer/api/generate-apply',{id:draft.id,expectedVersion:draft.version,operation,instruction:operation==='say'?'Let me pass.':'places a map on the desk.'});
+   const manual=result.story.generations.find(g=>g.kind==='manual'),firstAI=result.generation;
+   assert.equal(result.replacement.start,firstAI.start);assert.equal(result.replacement.text,firstAI.text);
+   for(let retry=0;retry<3;retry++){
+    result=await api.action('/writer/api/regenerate',{id:draft.id,expectedVersion:result.story.version,operation,generationId:result.generation.id,replacement:result.replacement});
+    const kept=result.story.generations.find(g=>g.id===manual.id);
+    assert.deepEqual(kept,manual);assert.equal(result.story.text.slice(kept.start,kept.end),manual.text);
+    assert.equal(result.story.text.split(manual.text).length-1,1);assert.ok(inputs.at(-1).includes(manual.text));
+    assert.equal(result.story.generations.filter(g=>g.kind==='generated').length,1);
+   }
+   const reopened=createWriterStore(root).read(draft.id);assert.deepEqual(reopened.generations.find(g=>g.kind==='manual'),manual);
+   const point=api.store.checkpoint(draft.id,'Highlighted input',reopened.version);assert.deepEqual(point.checkpoints[0].story.generations.find(g=>g.kind==='manual'),manual);
+  }finally{fs.rmSync(root,{recursive:true,force:true})}
+ }
+});
+
+test('Legacy whole-insertion regenerate anchors resolve to AI prose without deleting highlighted author text',async()=>{
+ for(const operation of ['say','do']){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'hero-writer-legacy-anchor-'));
+  try{
+   let count=0;const api=createWriterAPI(root,{generate:async()=>({choices:[{text:++count===1?'The guard waits.':'The guard steps aside.'}]})});
+   const draft=await api.action('/writer/api/create',{story:{text:'At the gate.',persona:{name:'Ari',description:''}}});
+   const first=await api.action('/writer/api/generate-apply',{id:draft.id,expectedVersion:draft.version,operation,instruction:operation==='say'?'Hello.':'shows the map.'});
+   const manual=first.story.generations.find(g=>g.kind==='manual');
+   const legacy={start:draft.text.length,text:first.story.text.slice(draft.text.length)};
+   const result=await api.action('/writer/api/regenerate',{id:draft.id,expectedVersion:first.story.version,operation,replacement:legacy});
+   assert.deepEqual(result.story.generations.find(g=>g.id===manual.id),manual);assert.match(result.story.text,/guard steps aside/);assert.doesNotMatch(result.story.text,/guard waits/);
+   await assert.rejects(api.action('/writer/api/regenerate',{id:draft.id,expectedVersion:result.story.version,operation,generationId:manual.id}),/boundary changed/);
+  }finally{fs.rmSync(root,{recursive:true,force:true})}
+ }
 });

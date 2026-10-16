@@ -27,7 +27,7 @@ test('Character diagnostic makes three sequential long-context requests, feeding
 test('Writer diagnostic checks three real manuscript continuations and flags invented player speech and actions',async()=>{
  const f=factory({leak:true}),r=await runWorkflowTest({kind:'writer-agency',makePipeline:f.makePipeline,contextSize:16384});
  assert.equal(r.status,'failed');assert.equal(r.stages.length,3);assert.ok(r.stages.every(s=>s.findings.some(f=>f.rule==='player speech')&&s.findings.some(f=>f.rule==='player action or thought')));
- assert.ok(f.requests[0].prompt.includes('NEVER invent'));assert.ok(f.requests[0].prompt.endsWith('Rowan says, "What happened to the bridge?"\n\n'));
+ assert.ok(f.requests[0].prompt.includes('The author supplies Rowan’s dialogue'));assert.ok(f.requests[0].prompt.endsWith('Rowan says, "What happened to the bridge?"\n\n'));
  const clean=factory(),passed=await runWorkflowTest({kind:'writer-agency',makePipeline:clean.makePipeline,contextSize:16384});assert.equal(passed.status,'passed',JSON.stringify(passed));
  assert.deepEqual(agencyFindings('Mira looks toward Rowan. "The choice is yours," Mira says.'),[]);
  assert.equal(passageChecks('Hello.').passed,false);

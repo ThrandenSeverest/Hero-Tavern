@@ -74,13 +74,18 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    if(op==='regenerate'){
     if(data.generationId){
       existing=(original.generations||[]).find(g=>g.id===data.generationId);
-      if(!existing||original.text.slice(existing.start,existing.end)!==existing.text)throw Error('This generation was manually edited or its boundary changed. Restore its revision or generate a new segment.');
+      if(!existing||existing.kind==='manual'||original.text.slice(existing.start,existing.end)!==existing.text)throw Error('This generation was manually edited or its boundary changed. Restore its revision or generate a new segment.');
       start=existing.start;end=existing.end;
     }else{
       const replacement=data.replacement;
       if(!replacement||!Number.isInteger(replacement.start)||typeof replacement.text!=='string'||original.text.slice(replacement.start,replacement.start+replacement.text.length)!==replacement.text)throw Error('Generated passage was edited. Use Undo or restore the previous draft before retrying.');
       start=replacement.start;end=start+replacement.text.length;
-      existing=(original.generations||[]).find(g=>g.start===start&&g.end===end)||null;
+      existing=(original.generations||[]).find(g=>g.kind!=='manual'&&g.start===start&&g.end===end)||null;
+      // Older clients remembered the entire Say/Do insertion, including the
+      // author's highlighted text. Resolve that anchor to its AI portion.
+      if(!existing)existing=(original.generations||[]).find(g=>g.kind!=='manual'&&g.start>=start&&g.end===end)||null;
+      if(existing){start=existing.start;end=existing.end;}
+      else if((original.generations||[]).some(g=>g.kind==='manual'&&g.start<end&&g.end>start))throw Error('This replacement includes author text. Select an AI-generated passage to regenerate.');
     }
     base=original.text.slice(0,start)+original.text.slice(end);
     end=start;
@@ -112,7 +117,8 @@ function createWriterAPI(root,pipeline,{ensureText=async()=>{}}={}){
    const nextBeatIndex=op==='generate-apply'&&operation==='advance'
     ?Math.min((original.beats||[]).length,original.beatIndex+1):original.beatIndex;
    const saved=store.save(original.id,{text:nextText,generations:segments,beatIndex:nextBeatIndex,label:op==='regenerate'?'Regenerated '+operation:'Generated '+operation},original.version);
-   return {story:saved,generation:saved.generations.find(g=>g.id===(existing?.id||segments.at(-1)?.id))||null,replacement:{start:before.length,text:prose},usage:result.usage,context:result.writerContext};
+   const generated=saved.generations.find(g=>g.id===(existing?.id||segments.at(-1)?.id))||null;
+   return {story:saved,generation:generated,replacement:{start:generated?.start??before.length,text:generated?.text??prose},usage:result.usage,context:result.writerContext};
    }finally{active=null;signal?.removeEventListener('abort',abort);}
   }
   if(op==='generate'){

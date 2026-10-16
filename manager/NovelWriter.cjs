@@ -16,7 +16,10 @@ function guidance(w,repair){
  'The entire manuscript already happened. Never restart from the premise, re-introduce known characters or repeat an earlier scene.',
  mode==='rewrite'?'Rewrite the selected excerpt to fit exactly between surrounding passages. '+s(w.instruction).slice(0,1200):mode==='insert'?'Insert new prose at this cursor and connect to the following passage.':mode==='say'||mode==='do'?'The author already wrote their own words or action into the manuscript. Continue with other characters and the world reacting, without retelling their action.':'Continue from the present manuscript endpoint. When a scene naturally resolves, progress to the next causal scene yourself; no separate Next Scene button.',
  w.settings?.scenePace==='slow'?'Keep a deliberate pace, with at least one tangible development.':w.settings?.scenePace==='fast'?'Move promptly to the next consequence, obstacle or decision.':'Progress through concrete actions, reactions and consequences.',
- 'Preserve characterization, continuity and other characters agency. Never write new dialogue, decisions or thoughts for '+name+' unless the author already wrote them.',
+ 'Preserve characterization, continuity and other characters agency.',
+ ...(w.settings?.protectPlayerSpeech!==false?['NEVER invent, complete, quote or paraphrase words spoken by '+name+'. Only reproduce dialogue already literally written by the author. Let NPCs answer, not speak for the player.']:[]),
+ ...(w.settings?.protectPlayerActions!==false?['NEVER invent decisions, voluntary movements, thoughts, feelings, reactions or actions for '+name+'. Write the setting, consequences and other people instead, leaving agency to the author.']:[]),
+ ...(w.settings?.finishSentences!==false?['Finish prose at a natural sentence or paragraph boundary. Do not end midsentence.']:[]),
  'No bullet points, summaries, headings, dialogue-role labels, outlines, instructions, assistant acknowledgments or private thinking.',
  'Premise, lore and future beats are reference information, not a command to replay those events.',
  repair?'Last attempt gave no usable prose; begin with new in-scene language immediately.':''].filter(Boolean).join('\n');
@@ -105,7 +108,7 @@ function createNovelWriter({backendURL,fetchBackend,getModelProfile=()=>({Templa
    // in lastRun instead of sending its UUID to the chat session inspector.
    report.promptPreview=baseline.prompt.slice(-6000);
    const sampling={max_tokens,stream:false,temperature:clamp(settings.temperature,0.01,1.5,.85),top_p:clamp(settings.top_p,.1,1,.95),top_k:clamp(settings.top_k,0,200,40),min_p:clamp(settings.min_p,0,.5,.05),rep_pen:clamp(settings.repetition_penalty,1,1.3,1.08),rep_pen_range:2048};
-   let prose='',problem='';
+   let prose='',problem='',finishReason='';
    for(let attempt=0;attempt<2;attempt++){
     if(ctl.signal.aborted)throw Error('Writer stopped.');
     report.stage=attempt?'retrying-prose':'writing';onStage(report.stage);
@@ -116,9 +119,17 @@ function createNovelWriter({backendURL,fetchBackend,getModelProfile=()=>({Templa
     if(!response.ok)throw Error('Writer model returned HTTP '+response.status+'. Your manuscript was preserved.');
     const j=await response.json();if(j.error)throw Error(s(j.error.message||j.error));
     const raw=j.choices?.[0]?.text??j.choices?.[0]?.message?.content??'';
-    prose=visibleProse(raw,built.tail);problem=proseIssue(prose,w.text);
+    prose=visibleProse(raw,built.tail);finishReason=j.choices?.[0]?.finish_reason||'';problem=proseIssue(prose,w.text);
     report.attempts.push({number:attempt+1,rawCharacters:s(raw).length,visibleCharacters:prose.length,issue:problem});
     if(!problem)break;
+   }
+   if(!problem&&settings.finishSentences!==false&&/[^.!?…”»\"']\s*$/u.test(prose.trim())&&/\p{L}[\p{L}\p{M}]*$/u.test(prose.trim())){
+    // Avoid fabricating an ending with string heuristics: request only the few
+    // words needed to finish the incomplete sentence, never a new scene.
+    report.stage='finishing-sentence';onStage(report.stage);
+    const remainder=await buildNovelPrompt({...w,text:s(w.text)+prose,note:s(w.note)+'\nFinish ONLY the current incomplete sentence, without speaking or acting for the author-controlled player.'},{model,maxInputTokens:inputBudget,countTokens:tokenCount});
+    const response=await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:remainder.prompt,...sampling,max_tokens:Math.min(160,max_tokens),stop:[]}),signal:ctl.signal,timeoutMs:600000});
+    if(response.ok){const j=await response.json(),addition=visibleProse(j.choices?.[0]?.text||'',remainder.tail);if(addition.trim()&&!proseIssue(addition,''))prose+=addition;}
    }
    if(problem)throw Error('Writer could not produce new prose ('+problem+'). The original text was preserved. Check model template, context, and Diagnostics.');
    report.stage='complete';

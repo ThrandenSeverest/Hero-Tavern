@@ -14,7 +14,7 @@
  function rewriteSelf(value){if(typeof value==='string'&&value.startsWith('character:'+window.HeroStoryPanel.view?.session.characterId))return value.replace('character:'+window.HeroStoryPanel.view.session.characterId,'character:self');if(Array.isArray(value))return value.map(rewriteSelf);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[rewriteSelf(k),rewriteSelf(v)]));return value;}
  function candidateTrackers(){
   const current=window.HeroStoryPanel.view;
-  const base=loaded?.extensions?.hero_tavern?.trackers||current?.session.definitions.filter(d=>!d.template)||[];
+  const base=(loaded?.extensions?.hero_tavern?.trackerEngine==='wtracker-1'?loaded.extensions.hero_tavern.trackers:null)||current?.session.definitions.filter(d=>!d.template)||[];
   const trackers=base.filter(d=>!d.template).map(d=>{const copy={...d};delete copy.introducedAt;return rewriteSelf(copy)});
   for(const check of document.querySelectorAll('[data-creator-preset]:checked')){
    const template=creatorTemplates.find(t=>t[0]===check.dataset.creatorPreset);
@@ -49,7 +49,7 @@
   };
   row.append(label,info,remove);box.append(row);
  }if(!box.children.length)box.textContent='No starting trackers. Select a preset above to add one.'}
- function profile(){const current=window.HeroStoryPanel.view;return {...(loaded?.extensions?.hero_tavern||base().extensions?.hero_tavern||{}),voice:{dialogueProfileId:$('creator-voice').value,narratorMode:$('creator-narrator-mode').value,narratorProfileId:$('creator-narrator-voice').value},schemaVersion:1,leadingPrompt:$('creator-leading-prompt').value.slice(0,4000),lorebookName:$('lore-native-name').value.trim()||undefined,trackers:candidateTrackers(),lore:rewriteSelf(current?.session.lore||loaded?.extensions?.hero_tavern?.lore||[]),episodes:rewriteSelf(episodes)}}
+ function profile(){const current=window.HeroStoryPanel.view;return {...(loaded?.extensions?.hero_tavern||base().extensions?.hero_tavern||{}),voice:{dialogueProfileId:$('creator-voice').value,narratorMode:$('creator-narrator-mode').value,narratorProfileId:$('creator-narrator-voice').value},schemaVersion:1,trackerEngine:'wtracker-1',leadingPrompt:$('creator-leading-prompt').value.slice(0,4000),lorebookName:$('lore-native-name').value.trim()||undefined,trackers:candidateTrackers(),lore:rewriteSelf(current?.session.lore||loaded?.extensions?.hero_tavern?.lore||[]),episodes:rewriteSelf(episodes)}}
 
  function v2(){const data=$('creator-level').value==='simple'?read():base();return {spec:'chara_card_v2',spec_version:'2.0',data:{creator:'Hero Tavern',character_version:'1',creator_notes:'',system_prompt:'',post_history_instructions:'',alternate_greetings:episodes.map(e=>e.greeting),tags:[],...data,extensions:{...(data.extensions||{}),hero_tavern:profile()}}};}
  for(const key of fields)$('creator-'+key).oninput=()=>{const old=JSON.parse($('character-json').value||'{}'),data=old.spec?old.data:old;data[key]=$('creator-'+key).value;$('character-json').value=JSON.stringify(data,null,2)};

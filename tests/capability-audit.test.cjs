@@ -1,60 +1,12 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const S=require('../manager/StoryState.cjs');
-const {parseCommands}=require('../manager/TrackerDelta.cjs');
 const {buildCapabilityReport}=require('../manager/CapabilityAudit.cjs');
 const {createStoryAPI}=require('../manager/StoryAPI.cjs');
 const {createTTS}=require('../manager/TTSService.cjs');
 const base={owner:'character:test',updateMode:'automatic'};
 const def=(id,type,initialValue,extra={})=>S.validateDefinition({...base,id,type,initialValue,...extra});
 const message=(text,id='m1')=>({mes:text,name:'Character',is_user:false,extra:{heroMessageId:id}});
-test('simplified evidence-backed tracker deltas support all typed values without inventing changes',()=>{
- const defs=[
-  def('health','number',80,{min:0,max:100}),
-  def('mood','enum','calm',{allowedValues:['calm','angry']}),
-  def('equipment','list',[]),
-  def('injuries','injuries',[]),
-  def('memory','record',{summary:'Unchanged',items:[]})
- ];
- const source=message('A blade cut my arm. I dropped the torch. I am angry.');
- const key=id=>'character:test:'+id;
- const changes=[
-  {key:key('health'),value:73,sourceMessageId:'m1',evidence:'A blade cut my arm.'},
-  {key:key('mood'),value:'angry',sourceMessageId:'m1',evidence:'I am angry.'},
-  {key:key('equipment'),value:['bandage'],sourceMessageId:'m1',evidence:'I dropped the torch.'},
-  {key:key('memory'),value:{summary:'Unchanged',items:['blade cut']},sourceMessageId:'m1',evidence:'A blade cut my arm.'}
- ];
- const parsed=parseCommands(JSON.stringify({changes}),defs,[source],S.initialState(defs));
- assert.equal(parsed.issues.length,0,parsed.issues.join('; '));
- assert.equal(parsed.changes.length,4);
- assert.deepEqual(parsed.changes.find(x=>x.key===key('equipment')).value,['bandage']);
- const bad=parseCommands(JSON.stringify({changes:[{key:key('mood'),value:'angry',sourceMessageId:'m1',evidence:'Lies about facts not in transcript'}]}),defs,[source],S.initialState(defs));
- assert.equal(bad.changes.length,0);assert.ok(bad.issues.length);
- const unchanged=parseCommands('{"changes":[]}',defs,[source],S.initialState(defs));
- assert.ok(unchanged.recognized);assert.equal(unchanged.issues.length,0);
-});
-test('tracker extraction retries after a transient invalid reply without consuming the message',async()=>{
- const d=def('mood','enum','calm',{allowedValues:['calm','angry']});
- const m=message('I am angry.'),session={id:'s',definitions:[d],characterId:'test',events:[],analyzedSources:[],failures:[]};
- const store={
-  view:()=>({session,messages:[m],context:{state:S.stateAt(session,[m])}}),
-  get:()=>session,saveSession:()=>{},
-  eventPatch(_id,changes){session.events.push(...S.propose(session,[m],changes));return this.view();}
- };
- let calls=0;
- const pipeline={generate:async()=>{calls++;return {choices:[{text:calls<=2?'not valid json':JSON.stringify({changes:[{key:S.keyOf(d),value:'angry',sourceMessageId:'m1',evidence:'I am angry.'}]})}]}}};
- const api=createStoryAPI(store,pipeline,{ready:()=>true});
- const pending=await api.action('/story/analyze',{id:'s'});
- assert.equal(pending.session.lastAnalysis.partial,true);
- assert.match(pending.session.lastAnalysis.errors.join(' '),/No tracker changes could be verified/);
- assert.equal(session.analyzedSources.length,0);
- assert.ok(session.lastAnalysis.retryAt>Date.now());
- session.lastAnalysis.retryAt=Date.now()-1;
- const fixed=await api.action('/story/analyze',{id:'s'});
- assert.equal(fixed.context.state[S.keyOf(d)],'angry');
- assert.equal(session.analyzedSources.length,1);
- assert.equal(calls,3);
-});
 test('capability report distinguishes downloaded, online and tested independently by mode',()=>{
  const input={
   engine:{selected:'rp.gguf',runningModel:'rp.gguf',installed:['rp.gguf'],backendReady:true,catalog:[{File:'rp.gguf',Recommended:true}]},

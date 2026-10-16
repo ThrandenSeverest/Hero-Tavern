@@ -12,7 +12,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
  // This is the disposable cloned UI fixture, never a user's installed profile.
  fs.rmSync(path.join(st,'data'),{recursive:true,force:true});
  fs.mkdirSync(root,{recursive:true});fs.mkdirSync(path.join(root,'Models'),{recursive:true});
- for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'SharedTools.js', 'ModelTestsPanel.js', 'CapabilityAuditUI.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
+ for(const file of ['models.json','ModelPanel.html','Adventure.html','AdventureAdapter.js','spells.json','WTrackerPanel.js','StoryPanel.js', 'CreatorPanel.js', 'VoicePanel.js', 'SharedTools.js', 'ModelTestsPanel.js', 'CapabilityAuditUI.js', 'AssistantPanel.js', 'ImageModelCenterUI.js', 'LoRALibraryUI.js', 'Writer.html'])fs.copyFileSync(path.join(repo,'manager',file),path.join(root,file));
  const ext=path.join(st,'public/scripts/extensions/hero-tavern');fs.mkdirSync(ext,{recursive:true});
  fs.copyFileSync(path.join(repo,'manager/ReplyFilters.cjs'),path.join(ext,'reply-filters.js'));
  for(const file of ['index.js','manifest.json','story.js','images.js'])fs.copyFileSync(path.join(repo,'extension',file),path.join(ext,file));
@@ -210,12 +210,24 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   // P0/P1 controls operate on the actual native chat and sidecar state.
   await page.locator('.hero-nav[data-hero="trackers"]').click();const modelFrame=page.frames().find(f=>new URL(f.url()).port==='8001'&&new URL(f.url()).pathname==='/');
   await waitFor(async()=>await modelFrame.evaluate(()=>!!window.HeroStoryPanel?.view));
-  await panel.locator('#tracker-presets label').filter({hasText:'Health & Injuries'}).locator('input').check();
-  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.type==='number'&&d.id==='health')&&HeroStoryPanel.view.session.definitions.some(d=>d.type==='injuries')));
+  await panel.locator('#wtracker-presets').getByRole('button',{name:'Add Health & Injuries',exact:true}).click();
+  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.type==='text'&&d.id==='condition')&&HeroStoryPanel.view.session.definitions.some(d=>d.type==='injuries')));
   const originalId=await page.evaluate(()=>HeroStory.view.session.id);
-  const stateProof=await page.evaluate(async()=>{let v=await HeroStory.sync();const wound=v.session.definitions.find(d=>d.type==='injuries'),key=wound.owner+':'+wound.id;v=await HeroStory.run('patch',{patch:[{key,value:[{id:'shoulder-arrow',location:'left shoulder',cause:'arrow',severity:'moderate',status:'fresh',pain:6,symptoms:'pain',limitations:'limited arm movement',treatment:'none',scar:''}],sourceMessageId:v.messages.at(-1).extra.heroMessageId}]});const damaged=v.context.state[key];const branch=await HeroStory.run('fork',{mode:'branch',atIndex:0});const before=branch.context.state[key];await HeroStory.run('open',{id:v.session.id});const fresh=await HeroStory.run('fork',{mode:'fresh'});const reset=fresh.context.state[key];await HeroStory.run('open',{id:v.session.id});return {damaged,before,reset};});
-  if(stateProof.damaged?.[0]?.status!=='fresh'||stateProof.reset?.length!==0||stateProof.before?.length)throw Error('Native branch/fresh tracker isolation failed: '+JSON.stringify(stateProof));
-  await page.locator('.hero-nav[data-hero="trackers"]').click();await panel.locator('#tracker-values article').first().locator('summary').click();await panel.locator('#tracker-values article').first().locator('textarea').last().fill('Protect the established injury.');await page.evaluate(()=>HeroStory.sync());if(await panel.locator('#tracker-values article').first().locator('textarea').last().inputValue()!=='Protect the established injury.')throw Error('Background sync destroyed a behavior draft');await panel.getByRole('button',{name:'Save behavior'}).first().click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions[0].version===2));await panel.locator('#tracker-ai-brief').fill('A courage tracker.');await panel.locator('#tracker-helper').click();await panel.getByRole('button',{name:'Review in editor'}).click();await panel.locator('#tracker-add').click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.id==='courage')));await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-trackers-qa.png')});
+  const stateProof=await page.evaluate(async()=>{let v=await HeroStory.sync();const wound=v.session.definitions.find(d=>d.type==='injuries'),key=wound.owner+':'+wound.id;v=await HeroStory.run('patch',{patch:[{key,value:[{location:'left shoulder',condition:'fresh',treatment:'none',history:'arrow wound'}],sourceMessageId:v.messages.at(-1).extra.heroMessageId}]});const damaged=v.context.state[key];const branch=await HeroStory.run('fork',{mode:'branch',atIndex:0});const before=branch.context.state[key];await HeroStory.run('open',{id:v.session.id});const fresh=await HeroStory.run('fork',{mode:'fresh'});const reset=fresh.context.state[key];await HeroStory.run('open',{id:v.session.id});return {damaged,before,reset};});
+  if(stateProof.damaged?.[0]?.condition!=='fresh'||stateProof.reset?.length!==0||stateProof.before?.length)throw Error('Native branch/fresh tracker isolation failed: '+JSON.stringify(stateProof));
+  await page.locator('.hero-nav[data-hero="trackers"]').click();
+  await panel.locator('#wtracker-values article').first().locator('summary').click();
+  await panel.locator('#wtracker-values article').first().locator('details textarea').last().fill('Protect the established injury.');
+  await page.evaluate(()=>HeroStory.sync());
+  if(await panel.locator('#wtracker-values article').first().locator('details textarea').last().inputValue()!=='Protect the established injury.')throw Error('Background sync destroyed a field draft');
+  await panel.getByRole('button',{name:'Save settings',exact:true}).first().click();
+  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions[0].version===2));
+  await panel.locator('#wtracker-brief').fill('A courage tracker.');await panel.locator('#wtracker-design').click();
+  await panel.locator('#wtracker-drafts').getByRole('button',{name:'Add field',exact:true}).click();
+  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.id==='courage')));
+  await panel.locator('#wtracker-update').click();
+  await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.lastAnalysis?.engine==='WTracker'&&!HeroStoryPanel.view.session.lastAnalysis.partial));
+  await modelFrame.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(repo,'.ci/hero-trackers-qa.png')});
   await page.locator('.hero-nav[data-hero="lore"]').click();await panel.locator('#lore-ai-brief').fill('A hidden tavern vault.');await panel.locator('#lore-helper').click();await panel.getByRole('button',{name:'Review in editor'}).click();await panel.locator('#lore-save').click();await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.lore.some(e=>e.id==='vault')));
   await panel.locator('#lore-native-name').fill('Hero QA lore');await panel.locator('#lore-native-save').click();
   const worldPath=path.join(st,'data/default-user/worlds/Hero QA lore.json');

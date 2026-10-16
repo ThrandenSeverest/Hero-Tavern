@@ -20,7 +20,7 @@ test('custom measurements are not timers, 24h story clock has strict validation'
  const clock=S.validateDefinition({id:'current_time',owner:'character:test',type:'clock',initialValue:'--:--',unit:'HH:mm'});
  for(const s of ['00:00','13:25','23:59','--:--'])assert.equal(S.validateValue(clock,s),s);
  for(const s of ['24:00','3:20','13:60','days',10])assert.throws(()=>S.validateValue(clock,s));
- assert.ok(S.TEMPLATE_DATA.find(x=>x[0]==='Location & Time')[1].some(d=>d.type==='clock'));
+ assert.ok(S.TEMPLATE_DATA.find(x=>x[0]==='Scene')[1].some(d=>d.type==='clock'));
 });
 test('managed Qwen loader uses compatible fork and checks Qwen-Image 2.1 architecture',()=>{
  const c=fs.readFileSync(path.join(__dirname,'../manager/ImageModelCenter.cjs'),'utf8');

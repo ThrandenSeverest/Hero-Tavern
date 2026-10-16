@@ -19,3 +19,7 @@ Original installer prototype: SillyTavern Ready contributors, 2026 (MIT notice r
 Image checkpoints are downloaded separately, never bundled. DreamShaper 8 and DreamShaper XL Turbo are distributed by Lykon; consult https://huggingface.co/Lykon/DreamShaper and the linked original model terms. The application does not relabel those terms as unrestricted.
 
 Adventure mode adapts user-supplied Ilreon 1.5.4 HTML/JavaScript. Its pinned HeroList catalogue comes from ThrandenSeverest/list-geroya-5e commit f115e08a38c04a1a8f7f4f6c2c4f3d3856aad196. See adventure/NOTICE.md for provenance.
+
+### SillyTavern WTracker
+
+The tracker replacement adapts JSON parsing, schema examples, and the complete-snapshot generation lifecycle from [bmen25124/SillyTavern-WTracker](https://github.com/bmen25124/SillyTavern-WTracker), commit `8a5e42e6cbea0b63ca0fb92b5ce52ec4a399012c`. Copyright (c) 2025 bmen25124. MIT license. Full notice: `manager/WTracker-LICENSE.txt`; unmodified source and adaptation details: `docs/upstream/wtracker/`. The local backend adapter and UI are Hero Tavern-specific.

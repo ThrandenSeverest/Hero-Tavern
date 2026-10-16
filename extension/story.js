@@ -8,7 +8,7 @@ export async function initStory({getContext,frame,show}){
  const card=()=>c().characters[c().characterId]?.data?.extensions?.hero_tavern||{};
  function identities(){for(const m of c().chat){m.extra=m.extra||{};m.extra.heroMessageId ||=m.heroMessageId||crypto.randomUUID();m.heroMessageId=m.extra.heroMessageId;}}
  let personaModule=await import('../../personas.js');
- async function sync(){if(!selected())return null;identities();await c().saveChat();const v=await rpc('/story/sync',{location:location(),template:card(),members:c().groupId?(c().groups.find(g=>g.id===c().groupId)?.members||[]):[],legacyMemoryKey:legacy(),profile:{personaAvatar:personaModule.user_avatar,persona:c().powerUserSettings?.persona_description||'',model:c().onlineStatus,promptProfile:c().powerUserSettings?.instruct?.preset||''}});c().chatMetadata.hero_tavern={schemaVersion:1,sessionId:v.session.id,characterId:v.session.characterId};view=v;publish();return v;}
+ async function sync(){if(!selected())return null;identities();await c().saveChat();const v=await rpc('/story/sync',{location:location(),template:card(),members:c().groupId?(c().groups.find(g=>g.id===c().groupId)?.members||[]):[],legacyMemoryKey:legacy(),profile:{name:String(c().characters[c().characterId]?.name||'').slice(0,180),description:String(c().characters[c().characterId]?.description||'').slice(0,4400),personality:String(c().characters[c().characterId]?.personality||'').slice(0,2000),scenario:String(c().characters[c().characterId]?.scenario||'').slice(0,1500),personaAvatar:personaModule.user_avatar,persona:c().powerUserSettings?.persona_description||'',model:c().onlineStatus,promptProfile:c().powerUserSettings?.instruct?.preset||''}});c().chatMetadata.hero_tavern={schemaVersion:1,sessionId:v.session.id,characterId:v.session.characterId};view=v;publish();return v;}
  function publish(){frame.contentWindow.postMessage({type:'hero-story-view',view},origin);updateMessageMenus();renderTrackerStrip();const title=document.querySelector('#hero-session-name');if(title)title.textContent=view?.session.title||'Select a chat';}
  function notify(error){window.toastr?.error(error.message||String(error),'Hero Tavern');}
  async function open(session){c().stopGeneration?.();if(session.profile?.personaAvatar){if(c().powerUserSettings.personas?.[session.profile.personaAvatar])await personaModule.setUserAvatar(session.profile.personaAvatar);else window.toastr?.warning('The saved player persona is missing; its association was preserved.');}if(c().groupId!==session.location.group){if(session.location.group){await c().openGroupChat(session.location.group,session.location.filename);return sync()}const index=c().characters.findIndex(x=>x.avatar===session.location.avatar);if(index<0)throw Error('This session’s character is missing. Import its card or archive first.');if(Number(c().characterId)!==index)await c().selectCharacterById(String(index));}if(session.location.group)await c().openGroupChat(session.location.group,session.location.filename);else await c().openCharacterChat(session.location.filename);await sync();show('chat');}
@@ -87,8 +87,8 @@ export async function initStory({getContext,frame,show}){
    if(op==='export')return rpc('/story/export',{...data,id:v.session.id});
    if(op==='generate'){
     const kind=data.kind,defaults={normal:'',descriptive:'Continue with richer scene detail, keeping established facts.',concise:'Continue concisely without repetition.',strict:'Stay strictly in character and honor all established facts.',next:'Advance naturally to the next scene without undoing established events.',unexpected:'Introduce a plausible unexpected event while preserving character agency.',emergency:'Introduce a plausible urgent situation without inventing irreversible injuries.'};
-    let timers=[];if(kind==='time'){if(!Number.isFinite(data.amount)||data.amount<=0||data.amount>365||!['days','hours','turns'].includes(data.unit))throw Error('Choose a positive time skip and its unit.');timers=v.session.definitions.filter(d=>d.type==='timer'&&d.enabled!==false&&(d.unit||'days')===data.unit&&v.context.state[d.owner+':'+d.id]?.clock==='story').map(d=>({key:d.owner+':'+d.id,value:{remaining:Math.max(0,v.context.state[d.owner+':'+d.id].remaining-data.amount),clock:'story'}}));if(data.unit==='hours'){for(const d of v.session.definitions.filter(d=>d.type==='clock'&&d.enabled!==false)){const previous=v.context.state[d.owner+':'+d.id];if(typeof previous==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(previous)){const [h,m]=previous.split(':').map(Number),minutes=(h*60+m+Math.round(data.amount*60))%1440;timers.push({key:d.owner+':'+d.id,value:String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0')});}}}if(!confirm('Advance '+data.amount+' '+data.unit+'? '+timers.length+' matching story timers will decrease. No injury heals automatically.'))return null;data.instruction='Advance the story by '+data.amount+' established '+data.unit+'. Preserve injuries; do not assume healing. '+(data.instruction||'');}
-    actionInstruction=data.instruction||defaults[kind]||'';try{show('chat');if(kind==='continue')await c().generate('continue');else if(['normal','descriptive','concise','strict','custom'].includes(kind))await c().generate('regenerate');else await c().generate('normal',{automatic_trigger:true,quiet_prompt:actionInstruction,quietToLoud:true});const updated=await sync();if(timers.length&&updated.session.id===v.session.id&&updated.messages.length>v.messages.length){view=await rpc('/story/patch',{id:updated.session.id,patch:timers.map(t=>({...t,sourceMessageId:updated.messages.at(-1).extra.heroMessageId,reason:'User approved '+data.amount+' '+data.unit+' story time skip'}))});publish();return view;}return updated;}finally{actionInstruction='';}
+    if(kind==='time'){if(!Number.isFinite(data.amount)||data.amount<=0||data.amount>365||!['days','hours','turns'].includes(data.unit))throw Error('Choose a positive time skip and its unit.');data.instruction='Advance the story by '+data.amount+' '+data.unit+'. Preserve established injuries and show the passage of fictional time. '+(data.instruction||'');}
+    actionInstruction=data.instruction||defaults[kind]||'';try{show('chat');if(kind==='continue')await c().generate('continue');else if(['normal','descriptive','concise','strict','custom'].includes(kind))await c().generate('regenerate');else await c().generate('normal',{automatic_trigger:true,quiet_prompt:actionInstruction,quietToLoud:true});const updated=await sync();return updated;}finally{actionInstruction='';}
    }
    if(op==='profile'){if(c().groupId)throw Error('Select a single character to edit its reusable template.');const value=await rpc('/story/profile',{characterId:v.session.characterId,profile:data.profile});await c().writeExtensionField(c().characterId,'hero_tavern',value);return value;}
    const result=await rpc('/story/'+op,{...data,id:v.session.id});if(result?.session){view=result;publish();}return result;
@@ -289,119 +289,24 @@ export async function initStory({getContext,frame,show}){
  #hero-live-trackers .hero-track-actions{display:flex;gap:5px;flex-wrap:wrap}
  @media(max-width:700px){#hero-live-trackers .hero-track-card{min-width:110px;flex-basis:130px}#hero-live-trackers{padding:7px}}
  `;document.head.append(trackStyle);
- function prettyTracker(d,value){if(d.type==='record')return value?.summary||'Details tracked below';if(d.type==='injuries')return value?.length?value.map(i=>i.location+' · '+i.status+' · pain '+i.pain+'/10'+(i.scar?' · scar: '+i.scar:'')).join(' | '):'No established injuries';if(d.type==='boolean')return value?'Yes':'No';if(d.type==='number')return String(value)+(d.unit?(d.unit==='%'?'':' ')+d.unit:'');if(d.type==='clock')return value==='--:--'?'--:-- · set the story clock':String(value);if(d.type==='enum')return String(value);if(d.type==='list')return value?.length?value.join(', '):'None';if(d.type==='relationship')return Object.entries(value||{}).map(([k,v])=>k+': '+v).join(' · ')||'No bonds';if(d.type==='timer')return value?.remaining+' '+(d.unit||'units')+' remaining';if(d.type==='quest')return (value?.stage||'Not started')+' · '+(value?.status||'inactive');return String(value??'');}
  function renderTrackerStrip(){
-  if(!trackerStrip||!view||!selected()){if(trackerStrip)trackerStrip.hidden=true;return;}
-  const defs=view.session.definitions.filter(d=>d.enabled!==false&&d.visibility!=='hidden'),state=view.context?.state||{};
-  const visible=defs.filter(d=>Object.hasOwn(state,d.owner+':'+d.id));
-  trackerStrip.hidden=false;trackerStrip.replaceChildren();
-  const head=document.createElement('div');head.className='hero-track-head';
-  const title=document.createElement('strong');title.textContent='✦ Live story state';head.append(title);
-  const info=document.createElement('span');info.className='hero-track-meta';info.textContent=visible.length+' trackers · persistent across chat turns';head.append(info);
-  const analysis=view.session.lastAnalysis;
-  if(analysis){const health=document.createElement('span');health.className='hero-track-meta';
-   health.textContent=analysis.failed?'⚠ Update failed — '+String(analysis.error||'unknown error').slice(0,160):'Last extraction: '+(analysis.changes||0)+' changes from '+(analysis.processed||0)+' turns'+(analysis.recheck?' · replayed':'')+(analysis.partial?' ⚠ '+String(analysis.errors?.[0]||'Some changes could not be checked').slice(0,140)+' · Re-analyze recent turns to retry':'');
-   health.title='Check the Prompt Inspector for the full tracker update history';head.append(health);}
-  const pending=view.session.events.filter(e=>e.status==='pending');
-  if(pending.length){const review=document.createElement('button');review.textContent='Review '+pending.length+' state changes';
-   review.onclick=()=>{show('trackers');sync().catch(notify)};head.append(review);}
-  const refresh=document.createElement('button');refresh.textContent='Update now';
-  refresh.onclick=async()=>{refresh.disabled=true;refresh.textContent='Extracting…';
-   try{const v=await sync();view=await rpc('/story/analyze',{id:v.session.id});publish()}
-   catch(error){notify(error);refresh.disabled=false;refresh.textContent='Retry update'}};
-  head.append(refresh);
-  const replay=document.createElement('button');replay.textContent='Re-analyze recent turns';replay.title='Recheck the last 8 completed story messages for ANY missed automatic tracker changes. Previously confirmed or manually corrected values are not applied twice.';
-  replay.onclick=async()=>{replay.disabled=true;replay.textContent='Rechecking…';try{const current=await sync();view=await rpc('/story/analyze',{id:current.session.id,recheck:true});publish();if(view.session.lastAnalysis?.partial)window.toastr?.warning('Some state changes need review. Open Diagnostics → Story trackers.','Tracker analysis');}catch(e){notify(e)}finally{replay.disabled=false;replay.textContent='Re-analyze recent turns'}};
-  head.append(replay);
-  const edit=document.createElement('button');edit.textContent='Manage trackers';edit.onclick=()=>{show('trackers');sync().catch(notify)};head.append(edit);
-  const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.setAttribute('aria-expanded',String(trackerStrip.dataset.collapsed!=='true'));collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);
-  trackerStrip.append(head);
+  trackerStrip.hidden=!view?.session||!selected();if(trackerStrip.hidden)return;
+  trackerStrip.replaceChildren();const head=document.createElement('div');head.className='hero-track-head';
+  const name=document.createElement('strong');name.textContent='WTracker · current scene';head.append(name);
+  const analysis=view.session.lastAnalysis,status=document.createElement('span');status.className='hero-track-meta';
+  status.textContent=analysis?.partial?'Update needs retry: '+(analysis.error||analysis.errors?.[0]||'Unknown error'):analysis?'Snapshot saved · '+analysis.changes+' changed fields':'Waiting for the first scene snapshot';head.append(status);
+  const update=document.createElement('button');update.textContent='Update now';update.onclick=async()=>{update.disabled=true;try{const current=await sync();view=await rpc('/story/analyze',{id:current.session.id,recheck:true});publish()}catch(e){notify(e)}finally{update.disabled=false}};head.append(update);
+  const manage=document.createElement('button');manage.textContent='Edit trackers';manage.onclick=()=>{show('trackers');sync().catch(notify)};head.append(manage);
+  const collapse=document.createElement('button');collapse.textContent=trackerStrip.dataset.collapsed==='true'?'Expand':'Collapse';collapse.onclick=()=>{trackerStrip.dataset.collapsed=trackerStrip.dataset.collapsed==='true'?'false':'true';renderTrackerStrip()};head.append(collapse);trackerStrip.append(head);
   if(trackerStrip.dataset.collapsed==='true')return;
-  if(!visible.length){const empty=document.createElement('div');empty.className='hero-track-meta';empty.textContent='No visible trackers yet. Add a preset or use the AI tracker designer in Trackers.';trackerStrip.append(empty);return;}
   const grid=document.createElement('div');grid.className='hero-track-grid';
-  for(const d of visible){
-   const value=state[d.owner+':'+d.id],tile=document.createElement('article');tile.className='hero-track-card';
-   const label=document.createElement('div');label.className='hero-track-title';label.textContent=(d.icon?d.icon+' ':'')+d.label;tile.append(label);
-   const amount=document.createElement('div');amount.className='hero-track-value';amount.textContent=prettyTracker(d,value);tile.append(amount);
-   if(d.type==='number'&&Number.isFinite(value)&&Number.isFinite(d.min)&&Number.isFinite(d.max)&&d.max>d.min){const bar=document.createElement('div');bar.className='hero-track-bar';bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',String(value));bar.setAttribute('aria-valuemin',String(d.min));bar.setAttribute('aria-valuemax',String(d.max));const fill=document.createElement('span');fill.style.width=(100*(value-d.min)/(d.max-d.min)).toFixed(1)+'%';bar.append(fill);tile.append(bar);}
-   const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent=d.category||'Tracker details';details.append(summary);
-   if(d.type==='record'){details.open=true;for(const [key,val] of Object.entries(value)){const p=document.createElement('p');p.textContent=key.replace(/([A-Z])/g,' $1')+': '+(Array.isArray(val)?val.join(' · ')||'None established':val===null?'Unknown':typeof val==='object'?JSON.stringify(val):String(val));details.append(p);}}
-   if(d.type==='injuries')for(const injury of value){const p=document.createElement('p');p.textContent=injury.location+' — '+injury.severity+', '+injury.status+'; pain '+injury.pain+'/10. '+['cause','symptoms','limitations','treatment','scar'].map(k=>k+': '+injury[k]).join('; ');details.append(p);}
-   for(const detail of [d.description,d.rules?.[String(value)],d.instructions,d.changeRules].filter(Boolean)){const p=document.createElement('p');p.textContent=detail;details.append(p);}
-   const actions=document.createElement('div');actions.className='hero-track-actions';const change=document.createElement('button');change.textContent='Edit value';change.onclick=async()=>{
-    try{const raw=prompt('New '+d.label+(d.type==='record'||d.type==='injuries'||d.type==='quest'||d.type==='relationship'?' (advanced full state)':''),JSON.stringify(value));if(raw===null)return;let next;
-     if(d.type==='number')next=Number(raw);else if(d.type==='boolean')next=raw==='true';else if(['list','relationship','timer','quest','injuries','record'].includes(d.type))next=JSON.parse(raw);else next=raw.replace(/^"|"$/g,'');
-     if(d.type==='enum'&&!d.allowedValues.includes(next))throw Error('Allowed: '+d.allowedValues.join(', '));
-     const current=await sync(),source=current.messages.at(-1);if(!source)throw Error('Send a message before editing a live state value.');
-     const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'Manual state update from chat'}]});view=result;publish();
-    }catch(e){notify(e)}
-   };actions.append(change);
-   // Quick local corrections use typed controls; ordinary edits need no JSON.
-   const pushManual=async next=>{const current=await sync(),source=current.messages.at(-1);
-    if(!source)throw Error('Start a chat first.');
-    const result=await rpc('/story/patch',{id:current.session.id,patch:[{key:d.owner+':'+d.id,value:next,sourceMessageId:source.extra.heroMessageId,reason:'User corrected tracker value'}]});view=result;publish();};
-   if(d.type==='number'){
-    for(const [symbol,step] of [['−',-1],['+',1]]){
-     const button=document.createElement('button');button.textContent=symbol;button.title='Change '+d.label+' by '+step;
-     button.onclick=()=>pushManual(Math.max(d.min,Math.min(d.max,value+step))).catch(notify);actions.append(button);
-    }
-   }
-   if(d.type==='boolean'){
-    const button=document.createElement('button');button.textContent='Toggle';button.onclick=()=>pushManual(!value).catch(notify);actions.append(button);
-   }
-   if(d.type==='list'){
-    const add=document.createElement('button');add.textContent='+ Item';add.onclick=async()=>{
-     const item=prompt('New entry for '+d.label);if(item?.trim())await pushManual([...new Set([...value,item.trim()])]);
-    };actions.append(add);
-    const drop=document.createElement('button');drop.textContent='− Item';drop.onclick=async()=>{
-     const item=prompt('Remove an entry from '+d.label+'\n'+value.join(' · '));if(item?.trim())await pushManual(value.filter(x=>x!==item.trim()));
-    };actions.append(drop);
-   }
-   if(d.type==='record'||d.type==='relationship'||d.type==='quest'||d.type==='timer'){
-    const fieldButton=document.createElement('button');fieldButton.textContent='Edit field';
-    fieldButton.onclick=async()=>{
-     const fields=Object.keys(value||{}),field=prompt('Field to change in '+d.label+'\n'+fields.join(' · '),fields[0]||'');
-     if(!field||!fields.includes(field))return;
-     const old=value[field],raw=prompt('New value for '+field+'\n(For lists, use Add or Remove separately)',old===null?'':String(old));
-     if(raw===null)return;
-     let parsed=raw;
-     if(typeof old==='number'){parsed=Number(raw);if(!Number.isFinite(parsed))throw Error('Enter a number');}
-     if(typeof old==='boolean')parsed=raw.toLowerCase()==='true';
-     if(old===null)parsed=/^-?\d+(\.\d+)?$/.test(raw)?Number(raw):raw;
-     if(Array.isArray(old)){const chosen=prompt('Enter a single new entry to append to '+field);if(chosen?.trim())parsed=[...old,chosen.trim()];else return;}
-     await pushManual({...value,[field]:parsed});
-    };actions.append(fieldButton);
-   }
-   if(d.type==='injuries'){
-    const wound=document.createElement('button');wound.textContent='+ Injury';
-    wound.onclick=async()=>{
-     const location=prompt('Injured body part / location');if(!location?.trim())return;
-     const cause=prompt('Confirmed cause of injury');if(!cause?.trim())return;
-     const severity=prompt('Severity: minor / moderate / severe / critical','minor');
-     if(!['minor','moderate','severe','critical'].includes(severity))throw Error('Choose a supported severity');
-     const pain=Number(prompt('Pain from 0 to 10','3'));
-     if(!Number.isFinite(pain)||pain<0||pain>10)throw Error('Pain must be 0–10');
-     const id='manual_'+Date.now().toString(36);
-     const entry={id,location:location.trim(),cause:cause.trim(),severity,status:'fresh',pain,symptoms:'',limitations:'',treatment:'',scar:''};
-     await pushManual([...value,entry]);
-    };actions.append(wound);
-   }
-   const auto=document.createElement('button');auto.textContent=d.updateMode==='automatic'?'Auto: ON':d.updateMode==='manual'?'Auto: OFF':'Approval required';
-   auto.title='Automatic changes use evidence from chat; approval mode records proposals for review';
-   auto.onclick=async()=>{
-    const mode=d.updateMode==='automatic'?'approval':'automatic';
-    const result=await run('definition-edit',{key:d.owner+':'+d.id,updates:{updateMode:mode}});
-    view=result;publish();
-   };actions.append(auto);
-   const del=document.createElement('button');del.textContent='Delete tracker';del.title='Delete this tracker from the current chat';del.onclick=async()=>{if(!confirm('Delete “'+d.label+'” from this chat?'))return;try{const result=await run('definition-delete',{key:d.owner+':'+d.id});view=result;publish()}catch(e){notify(e)}};actions.append(del);
-   const evidence=view.context?.provenance?.filter(e=>e.key===d.owner+':'+d.id).at(-1);if(evidence){const source=document.createElement('small');source.textContent='Last change: '+evidence.reason;details.append(source);}
-   details.append(actions);tile.append(details);grid.append(tile);
+  for(const d of view.session.definitions.filter(d=>d.enabled!==false&&d.visibility!=='hidden')){
+   const key=d.owner+':'+d.id;if(!Object.hasOwn(view.context.state,key))continue;
+   const card=document.createElement('article');card.className='hero-track-card';const title=document.createElement('strong');title.textContent=d.label;
+   const value=view.context.state[key],text=document.createElement('div');text.className='hero-track-value';text.style.whiteSpace='pre-wrap';text.textContent=typeof value==='string'?value:JSON.stringify(value,null,2);card.append(title,text);grid.append(card);
   }
   trackerStrip.append(grid);
  }
- function messageCharacter(node){const message=c().chat?.[Number(node.getAttribute('mesid'))],avatar=message?.original_avatar||message?.force_avatar;let index=avatar?c().characters?.findIndex(ch=>ch.avatar===avatar):-1;if(index<0&&message?.name)index=c().characters?.findIndex(ch=>ch.name===message.name);return index>=0?index:Number(c().characterId);}
- document.addEventListener('hero-open-character-voice',e=>{const node=e.detail?.message;openCharacterVoice(node?messageCharacter(node):undefined).catch(notify)});
- function updateMessageMenus(){for(const node of document.querySelectorAll('#chat .mes')){if(node.querySelector('.hero-message-menu'))continue;const index=Number(node.getAttribute('mesid'));if(!Number.isInteger(index))continue;const menu=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Story actions';menu.className='hero-message-menu';menu.append(summary);if(!node.classList.contains('is_user')&&node.getAttribute('is_user')!=='true'){const voice=document.createElement('button');voice.type='button';voice.textContent='Character voice settings';voice.onclick=e=>{e.preventDefault();openCharacterVoice(messageCharacter(node)).catch(notify)};menu.append(voice)}for(const [label,action]of [['Bookmark',async()=>{const label=prompt('Bookmark name','Before the next scene');if(label)await run('bookmark',{index,label})}],['Branch Here',()=>run('fork',{mode:'branch',atIndex:index})],['Rollback to Here',()=>rewind(index)],['View State Here',async()=>{const p=await run('preview',{index}),{box}=dialog('State at this message'),pre=document.createElement('pre');const v=await rpc('/story/state-at',{id:view.session.id,index});const visible=new Set(v.definitions.filter(d=>d.visibility!=='hidden').map(d=>d.owner+':'+d.id));pre.textContent=JSON.stringify(Object.fromEntries(Object.entries(v.state).filter(([k])=>visible.has(k))),null,2)+'\nReversals from current state:\n'+p.changes.map(x=>x.key+' → '+JSON.stringify(x.to)).join('\n');box.append(pre)}]]){const b=document.createElement('button');b.textContent=label;b.onclick=e=>{e.preventDefault();Promise.resolve(action()).catch(notify)};menu.append(b);}node.append(menu);}}
  let currentGeneration='normal';c().eventSource.on(c().eventTypes.GENERATION_STARTED,type=>{currentGeneration=type;});
  // SillyTavern does not await async GENERATE_AFTER_DATA handlers. Never await
  // saveChat()/sync() here: the prompt may already be sent before hero_context
@@ -445,7 +350,7 @@ export async function initStory({getContext,frame,show}){
       clearTimeout(scheduled);scheduled=setTimeout(schedule,700);
      }
     }catch(error){
-     window.toastr?.warning('Trackers will retry; saved state is safe. '+error.message,'Tracker diagnostics');
+     window.toastr?.warning('WTracker will retry; the saved snapshot is unchanged. '+error.message,'Tracker diagnostics');
      clearTimeout(scheduled);scheduled=setTimeout(schedule,18000);
     }
    }

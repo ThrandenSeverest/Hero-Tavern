@@ -52,6 +52,19 @@ try {
     [IO.Directory]::CreateDirectory($Models) | Out-Null
     try { Start-Transcript -Path (Join-Path $Root 'install.log') -Append | Out-Null; $startedTranscript = $true } catch {}
 
+    $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
+    if (Test-Path -LiteralPath (Join-Path $Root 'Run\session.json')) {
+        Step 'Closing the previous Hero Tavern session before upgrading'
+        & (Join-Path $supportDirectory 'StopHeroTavern.ps1') -InstallationRoot $Root -ForUpdate
+    }
+
+    foreach($upgradePort in @(8000,8001)) {
+        $probe=New-Object Net.Sockets.TcpClient
+        $occupied=$false
+        try{$probe.Connect('127.0.0.1',$upgradePort);$occupied=$true}catch{}finally{$probe.Dispose()}
+        if($occupied){throw ('Port '+$upgradePort+' is still occupied. Close the previous Hero Tavern launcher before updating. No application files were replaced.')}
+    }
+
     Step '1/5 - Downloading portable Node.js LTS (official nodejs.org)'
     $nodeExe = Get-ChildItem -Path $Runtime -Filter 'node.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
     if (-not $nodeExe -or -not (Test-Path $nodeExe)) {
@@ -131,7 +144,7 @@ try {
     Step '4/5 - Installing model management and start scripts'
     $supportDirectory = Split-Path $MyInvocation.MyCommand.Path -Parent
     Remove-Item -LiteralPath (Join-Path $Root 'TrackerDelta.cjs') -Force -ErrorAction SilentlyContinue
-    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'StopHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'CapabilityAudit.cjs', 'CapabilityAuditUI.js', 'AppLifecycle.cjs', 'ModelPanel.html', 'TTSService.cjs', 'TTSWorker.py', 'TTSModelDownload.py', 'VoicePanel.js', 'SharedTools.js', 'ImageRequest.cjs', 'ModelTests.cjs', 'ModelTestsPanel.js', 'NovelWriter.cjs', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'AssistantWorkspace.cjs', 'AssistantPanel.js', 'ComfyAdapter.cjs', 'ComfyWorkflows.cjs', 'SceneComposition.cjs', 'ComfyWorkflowLibrary.cjs', 'ComfyRuntime.cjs', 'ComfyModelHub.cjs', 'ImageModelCenter.cjs', 'ImageModelCenterUI.js', 'LoRAManager.cjs', 'LoRALibraryUI.js', 'ComfyRecipes.cjs', 'EngineShutdown.cjs', 'EngineRuntime.cjs', 'DiskCare.cjs', 'ImageGallery.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'WTracker.cjs', 'WTrackerUpstream.cjs', 'WTracker-LICENSE.txt', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'WTrackerPanel.js', 'StoryPanel.js', 'CreatorPanel.js', 'WriterStore.cjs', 'WriterContext.cjs', 'WriterFlow.cjs', 'WriterAPI.cjs', 'Writer.html')) {
+    foreach ($filename in @('ModelManager.ps1', 'LaunchLocalAI.ps1', 'StartHeroTavern.ps1', 'StopHeroTavern.ps1', 'ModelTools.ps1', 'models.json', 'ConfigureTavern.cjs', 'ModelBridge.cjs', 'CapabilityAudit.cjs', 'CapabilityAuditUI.js', 'AppLifecycle.cjs', 'RuntimeVersion.cjs', 'ModelPanel.html', 'TTSService.cjs', 'TTSWorker.py', 'TTSModelDownload.py', 'VoicePanel.js', 'SharedTools.js', 'ImageRequest.cjs', 'ModelTests.cjs', 'ModelTestsPanel.js', 'NovelWriter.cjs', 'ReplyPipeline.cjs', 'ReplyFilters.cjs', 'ContextMemory.cjs', 'ImageService.cjs', 'Adventure.html', 'AdventureAdapter.js', 'spells.json', 'AutoTune.cjs', 'EngineHTTP.cjs', 'Performance.cjs', 'ImageStudio.cjs', 'AssistantWorkspace.cjs', 'AssistantPanel.js', 'ComfyAdapter.cjs', 'ComfyWorkflows.cjs', 'SceneComposition.cjs', 'ComfyWorkflowLibrary.cjs', 'ComfyRuntime.cjs', 'ComfyModelHub.cjs', 'ImageModelCenter.cjs', 'ImageModelCenterUI.js', 'LoRAManager.cjs', 'LoRALibraryUI.js', 'ComfyRecipes.cjs', 'EngineShutdown.cjs', 'EngineRuntime.cjs', 'DiskCare.cjs', 'ImageGallery.cjs', 'ModelProfiles.cjs', 'StoryState.cjs', 'WTracker.cjs', 'WTrackerUpstream.cjs', 'WTracker-LICENSE.txt', 'StoryStore.cjs', 'StoryAPI.cjs', 'ThinkingWorker.cjs', 'WTrackerPanel.js', 'StoryPanel.js', 'CreatorPanel.js', 'WriterStore.cjs', 'WriterContext.cjs', 'WriterFlow.cjs', 'WriterAPI.cjs', 'Writer.html')) {
         $source = Join-Path $supportDirectory $filename
         if (-not (Test-Path -LiteralPath $source)) { throw ('Installer resource missing: ' + $filename) }
         Copy-Item -LiteralPath $source -Destination (Join-Path $Root $filename) -Force
@@ -283,6 +296,8 @@ Re-running setup preserves chats, settings, characters and models.
     # In-progress downloads, image files, models, saves and old chats stay untouched.
     try { & $nodeExe (Join-Path $Root 'DiskCare.cjs') $Root; if ($LASTEXITCODE -ne 0) { Write-Host 'Disk cleanup skipped; use the Storage tab later.' -ForegroundColor Yellow } }
     catch { Write-Host ('Non-critical cleanup warning: ' + $_.Exception.Message) -ForegroundColor Yellow }
+    & $nodeExe (Join-Path $Root 'RuntimeVersion.cjs') $Root
+    if ($LASTEXITCODE -ne 0) { throw 'Installed runtime identity could not be verified.' }
     Write-Host 'Hero Tavern installed. Opening the chat UI; use Models to download Qwen.' -ForegroundColor Green
     Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'StartHeroTavern.ps1') + '"')
 } catch {

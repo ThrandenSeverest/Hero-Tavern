@@ -79,6 +79,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     fs.mkdirSync(models, { recursive: true });
     fs.mkdirSync(logs, { recursive: true });
     const catalog = JSON.parse(fs.readFileSync(path.join(root, 'models.json'), 'utf8'));
+    const runtime={...require('./RuntimeVersion.cjs').runtimeVersion(root),startedAt:new Date().toISOString()};
     const token = crypto.randomBytes(32).toString('hex');
     let download = null, backend = null, state = 'No model selected', lastAttempt = '', backendReady = false, checking = false;
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
@@ -303,7 +304,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     const snapshot = () => {
         let active = ''; try { active = selected(); } catch (e) { state = e.message; }
         if (download && fs.existsSync(download.part)) download.bytes = fs.statSync(download.part).size;
-        return { state, backendRunning: !!backend || starting, backendReady, selected: active,
+        return { runtime, state, backendRunning: !!backend || starting, backendReady, selected: active,
             tts:tts.status(),tuning:tuner.snapshot(),studio:studio.snapshot(),imageJob,assistant:assistant.snapshot(),pipeline:pipeline.runSnapshot(),profile:profileFor(root,active),loadedContext:backendReady?loadedContext:0,catalog, installed: fs.readdirSync(models).filter(x => x.endsWith('.gguf')),
             engineState, runningModel, backendError, apiURL: 'http://127.0.0.1:' + server.address().port + '/inference', engineURL: backendURL, generationState, contextDiagnostics, images:images.snapshot(),comfy:comfy.snapshot(),comfyRuntime:comfyRuntime.status(), imageModels:{choices:{global:imageCenter.choice('global'),chat:imageCenter.choice('chat'),adventure:imageCenter.choice('adventure')}}, vision:{...vision.snapshot(),busy:visionBusy,setup:visionSetup,setupError:visionSetupError},thinking:thinking.snapshot(), generation: readSettings(root),
             hardware: backendArguments(root, '').config,
@@ -354,6 +355,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         if(req.url.startsWith('/sdapi/v1/')){await nativeImages(req,res);return;}
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' "+comfy.snapshot().url+"; frame-ancestors 'self' http://127.0.0.1:8000 http://localhost:8000");
+        if(req.method==='GET'&&req.url==='/runtime-version'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(runtime));return;}
         const json = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
         if (req.method === 'GET' && req.url === '/') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

@@ -90,6 +90,17 @@ function Test-Port([int]$Port) {
     $client = New-Object Net.Sockets.TcpClient
     try { $client.Connect('127.0.0.1', $Port); return $true } catch { return $false } finally { $client.Dispose() }
 }
+function Assert-RuntimeVersion {
+    $manifest=Join-Path $root 'runtime-version.json'
+    if(-not (Test-Path -LiteralPath $manifest)){throw 'Runtime version is missing. Run the latest setup to verify this installation.'}
+    $expected=Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    try{$active=Invoke-RestMethod -Uri 'http://127.0.0.1:8001/runtime-version' -TimeoutSec 5}
+    catch{throw 'The running Hero Tavern service is from an older build. Exit Hero Tavern and run setup again.'}
+    if($active.runtimeHash -ne $expected.runtimeHash -or $active.trackerEngine -ne 'wtracker-1'){
+        throw 'Installed files and running Hero Tavern service do not match. Exit the old launcher and rerun setup.'
+    }
+    Write-Host ('Active WTracker runtime '+$active.runtimeHash.Substring(0,12)) -ForegroundColor Green
+}
 function Wait-Service([string]$Url, $Process, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
@@ -117,6 +128,7 @@ try {
             } catch { }
         }
         if ($owned) {
+            Assert-RuntimeVersion
             Start-Process 'http://127.0.0.1:8000/'
             Write-Host 'Existing verified Hero Tavern window opened.' -ForegroundColor Green
             return
@@ -170,6 +182,7 @@ try {
     $bridge = Start-Process $node -ArgumentList ('"' + (Join-Path $root 'ModelBridge.cjs') + '" "' + $root + '"') -WorkingDirectory $root -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'models.log') -RedirectStandardError (Join-Path $logs 'models-error.log')
     Write-SessionJournal
     Wait-Service 'http://127.0.0.1:8001/' $bridge 30
+    Assert-RuntimeVersion
     Start-Process 'http://127.0.0.1:8000/'
     Write-Host 'Hero Tavern is open. Use its Models button to download or select AI models.' -ForegroundColor Green
     Write-Host 'Use Exit Hero Tavern in the app sidebar, or press Enter in this launcher window.' -ForegroundColor Cyan

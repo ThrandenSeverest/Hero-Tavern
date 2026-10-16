@@ -233,6 +233,7 @@ const initHeroTavern = async () => {
         engine=event.data.state;
         const chip=document.getElementById('hero-engine-chip');
         chip.textContent=engine.generationState==='analyzing'?'Updating trackers…':engine.generationState==='remembering'?'Updating memory…':engine.generationState==='planning'?'Preparing reply…':engine.generationState==='responding'?'Writing reply…':engine.backendReady?'Local AI ready · '+engine.runningModel.replace(/\.gguf$/,''):engine.backendError?'AI needs attention':engine.backendRunning?'Loading local AI…':engine.selected?'AI stopped · Load model':'No model · Choose AI';
+        chip.title=engine.runtime?'Tracker engine: '+engine.runtime.trackerEngine+' · Runtime '+engine.runtime.runtimeHash.slice(0,12)+' · Started '+engine.runtime.startedAt:'Older service detected. Exit Hero Tavern and run the latest setup to activate the update.';
         chip.className='hero-chip'+(engine.backendReady?' ready':engine.backendError?' error':'');
         if(engine.backendReady)connectLocalAI(engine);
         else lastEngine='';

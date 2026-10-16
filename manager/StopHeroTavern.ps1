@@ -1,20 +1,23 @@
 # Emergency-safe alternative to browser Exit. Only acts on a verified session journal.
+param([string]$InstallationRoot=$PSScriptRoot,[switch]$ForUpdate)
 $ErrorActionPreference='Stop'
-$root=$PSScriptRoot
+$root=[IO.Path]::GetFullPath($InstallationRoot)
 $dir=Join-Path $root 'Run'
 $journal=Join-Path $dir 'session.json'
 if (-not (Test-Path -LiteralPath $journal)) { Write-Host 'Hero Tavern launcher has no recorded active session.'; return }
 try { $session=Get-Content -LiteralPath $journal -Raw | ConvertFrom-Json }
-catch { Write-Host 'Session record is invalid. No process was terminated.' -ForegroundColor Yellow; return }
+catch { if($ForUpdate){throw 'Session record is invalid. Close Hero Tavern before updating.'}; Write-Host 'Session record is invalid. No process was terminated.' -ForegroundColor Yellow; return }
 if (-not [string]::Equals([string]$session.root,$root,[StringComparison]::OrdinalIgnoreCase) -or
     [string]$session.launchId -notmatch '^[a-fA-F0-9]{32}$') {
+    if($ForUpdate){throw 'Session journal does not match this installation. Update stopped before replacing files.'}
     Write-Host 'Session journal does not match this installation. No process was terminated.' -ForegroundColor Red
     return
 }
 $signal=Join-Path $dir ('exit-'+$session.launchId+'.request')
 [IO.File]::WriteAllText($signal, '{"kind":"graceful-exit","source":"desktop-stop"}')
 Write-Host 'Hero Tavern shutdown requested. Waiting for text/image/voice models and chat servers to close...' -ForegroundColor Cyan
-for($n=0;$n -lt 90;$n++) {
+$shutdownPolls=if($ForUpdate){150}else{90}
+for($n=0;$n -lt $shutdownPolls;$n++) {
     if (-not (Test-Path -LiteralPath $journal)) { Write-Host 'Hero Tavern closed.' -ForegroundColor Green; return }
     Start-Sleep -Milliseconds 500
 }
@@ -41,3 +44,9 @@ foreach($role in @('bridge','tavern')){
     }
 }
 Write-Host 'Shutdown attempt complete. If another application owns ports 8000/8001, it was left untouched.'
+
+if($ForUpdate){
+    # A timed-out graceful shutdown is not a successful upgrade handoff.
+    # Never replace code while a launcher still owns the old service.
+    throw 'The previous Hero Tavern session did not close in time. Close its launcher, then rerun setup. No application files were replaced.'
+}

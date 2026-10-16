@@ -101,7 +101,9 @@ function createNovelWriter({backendURL,fetchBackend,getModelProfile=()=>({Templa
    }
    const baseline=await buildNovelPrompt(w,{model,maxInputTokens:inputBudget,countTokens:tokenCount});
    report.writerContext=baseline.diagnostics;
-   if(w.id)recordInspector(w.id,{at:Date.now(),writer:true,template:baseline.diagnostics.format,prompt:baseline.prompt,writerContext:baseline.diagnostics});
+   // A manuscript ID is not an Adventure/Chat session ID. Keep Writer diagnostics
+   // in lastRun instead of sending its UUID to the chat session inspector.
+   report.promptPreview=baseline.prompt.slice(-6000);
    const sampling={max_tokens,stream:false,temperature:clamp(settings.temperature,0.01,1.5,.85),top_p:clamp(settings.top_p,.1,1,.95),top_k:clamp(settings.top_k,0,200,40),min_p:clamp(settings.min_p,0,.5,.05),rep_pen:clamp(settings.repetition_penalty,1,1.3,1.08),rep_pen_range:2048};
    let prose='',problem='';
    for(let attempt=0;attempt<2;attempt++){

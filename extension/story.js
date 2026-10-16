@@ -319,7 +319,8 @@ export async function initStory({getContext,frame,show}){
   const current=c(),loc=location(),stored=current.chatMetadata?.hero_tavern||{};
   const matches=!!view?.session&&view.session.location?.filename===loc.filename&&view.session.location?.avatar===loc.avatar&&view.session.location?.group===loc.group;
   const sessionId=matches?view.session.id:stored.sessionId||'';
-  const messages=current.chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes}));
+  let messages=current.chat.map(m=>({role:m.is_user?'user':m.is_system?'system':'assistant',name:m.name,text:m.mes}));
+  if(currentGeneration==='swipe'&&messages.at(-1)?.role==='assistant')messages=messages.slice(0,-1);
   const char=current.characters?.[current.characterId],cardData=char?.data||char||{};
   data.hero_context={...(data.hero_context||{}),id:sessionId||legacy(),...(sessionId?{sessionId}:{ }),messages,generationType:currentGeneration};
   data.hero_context.character={

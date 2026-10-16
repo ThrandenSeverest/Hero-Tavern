@@ -9,11 +9,12 @@ function editMemory(root,id,{notes,reset=false}){if(typeof notes!=='string'||not
 function messagesFrom(input){if(!Array.isArray(input)||input.length>10000)throw Error('Invalid chat history.');return input.filter(x=>x&&typeof x.text==='string'&&x.text.trim()).map(x=>({role:x.role==='user'?'user':x.role==='system'?'system':'assistant',name:String(x.name||'').slice(0,100),text:x.role==='user'||x.role==='system'?x.text:filterReply(x.text,{stopAtSpeaker:false,removeModelTokens:true})})).filter(x=>x.text.trim());}
 const transcript=messages=>messages.map(x=>`${x.name||x.role}: ${x.text}`).join('\n');
 const chatML=messages=>messages.map(x=>`<|im_start|>${x.role}\n${x.name?x.name+': ':''}${x.text}<|im_end|>\n`).join('');
-function basePrompt(prompt){const systems=[...prompt.matchAll(/<\|im_start\|>system\n[\s\S]*?<\|im_end\|>\n?/g)].map(x=>x[0]);if(systems.length)return systems.join('');const first=prompt.indexOf('<|im_start|>user');return first>=0?prompt.slice(0,first):prompt.replace(/<\|im_start\|>assistant[\s\S]*$/,'');}
+function basePrompt(prompt){const systems=[...prompt.matchAll(/<\|im_start\|>system\n[\s\S]*?<\|im_end\|>\n?/g)].map(x=>x[0]);if(systems.length)return systems.join('');const first=prompt.indexOf('<|im_start|>');return first>=0?prompt.slice(0,first):prompt;}
 function createMemory({root,countTokens,complete,setDiagnostics=()=>{}}){
  async function prepare(body,budget,settings){
   const h=body.hero_context;if(!h)return body.prompt;
   const all=messagesFrom(h.messages),id=h.id;
+  if(h.generationType==='swipe'&&all.at(-1)?.role==='assistant')all.pop();
   if(!all.length)return body.prompt;
   let memory=readMemory(root,id);
   if(memory.covered>all.length||memory.hash!==digest(all.slice(0,memory.covered)))memory={...memory,summary:'',covered:0,hash:digest([])};
@@ -37,8 +38,10 @@ function createMemory({root,countTokens,complete,setDiagnostics=()=>{}}){
     return '['+label+']\n'+text;
    }).filter(Boolean).join('\n');
   const characterBlock=fields?'<|im_start|>system\n[Canonical SillyTavern character contract]\n'+fields+
-   '\nPortray THIS character, not a generic assistant. Respect their appearance, habits, temperament, motives, abilities and way of speaking. Respond in-scene with concrete reactions; never write the player’s choices, speech or actions. Current confirmed tracker state overrides older contradictory details, but not established identity.<|im_end|>\n':'';
-  const render=()=>base+characterBlock+(memory.notes||memory.summary?'<|im_start|>system\n[Continuity memory — past events, not new dialogue]\n'+memory.notes+'\n'+memory.summary+'<|im_end|>\n':'')+chatML(all.slice(start))+tail;
+   '\nUse these character facts as background. Confirmed current state takes precedence over older scene details; preserve established identity.<|im_end|>\n':'';
+  const continuing=h.generationType==='continue'&&all.at(-1)?.role==='assistant';
+  const renderHistory=()=>continuing?chatML(all.slice(start,-1))+'<|im_start|>assistant\n'+(all.at(-1).name?all.at(-1).name+': ':'')+all.at(-1).text:chatML(all.slice(start))+tail;
+  const render=()=>base+characterBlock+(memory.notes||memory.summary?'<|im_start|>system\n[Continuity memory — past events, not new dialogue]\n'+memory.notes+'\n'+memory.summary+'<|im_end|>\n':'')+renderHistory();
   // Keep the freshest turns verbatim, including the latest user action. Summarize only older turns.
   while(await countTokens(render())>budget){
    if(all.length-start<=2)throw Error('The character card, memory notes and latest turn exceed the loaded context. Increase Hardware context or shorten the card/notes.');

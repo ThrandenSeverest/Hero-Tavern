@@ -222,6 +222,7 @@ if(debugPage){try{const browser=await debugPage.evaluate(async()=>{const {getCon
   if(await panel.locator('#wtracker-values article').first().locator('details textarea').last().inputValue()!=='Protect the established injury.')throw Error('Background sync destroyed a field draft');
   await panel.getByRole('button',{name:'Save settings',exact:true}).first().click();
   await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions[0].version===2));
+  await panel.locator('details').filter({has:panel.locator('#wtracker-brief')}).locator('summary').click();
   await panel.locator('#wtracker-brief').fill('A courage tracker.');await panel.locator('#wtracker-design').click();
   await panel.locator('#wtracker-drafts').getByRole('button',{name:'Add field',exact:true}).click();
   await waitFor(async()=>await modelFrame.evaluate(()=>HeroStoryPanel.view.session.definitions.some(d=>d.id==='courage')));

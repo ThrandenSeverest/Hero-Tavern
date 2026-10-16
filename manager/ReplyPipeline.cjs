@@ -31,15 +31,19 @@ function saveSettings(root, input) {
     fs.writeFileSync(file+'.tmp',JSON.stringify(value,null,2)+'\n');fs.renameSync(file+'.tmp',file);return value;
 }
 function instructions(settings) {
-    return ['[Hero Tavern reply instructions]', 'Write only the next character reply. Stay in the scene and in character. Never describe how you will write, mention narrator roles, or give writer/assistant commentary. Never include private analysis, planning, reasoning headings, or think tags.',
-        settings.replyStyle==='dialogue'?'Write spoken dialogue only. Do not narrate actions or internal thoughts.':'Dialogue and scene narration are allowed; model reasoning is not part of the story.',
-        settings.avoidRepetition?'Answer the latest user message using the established conversation. Earlier assistant messages are history, not drafts to repeat. Advance the scene with a fresh response; do not simply echo the user or restate your last reply.':'', settings.instructions, '/no_think', '[/Hero Tavern reply instructions]'].filter(Boolean).join('\n');
+    return ['[Hero Tavern reply instructions]',
+        'Write the next reply as the selected character, responding to the latest user turn. Preserve established facts and the character’s voice. Leave the player’s dialogue, decisions and actions to the player. Return only the reply, without planning or commentary.',
+        settings.replyStyle==='dialogue'?'Use spoken dialogue only.':'Use dialogue and concrete scene action as appropriate.',
+        settings.avoidRepetition?'Add a new reaction or development without replaying earlier replies.':'',
+        settings.instructions, '[/Hero Tavern reply instructions]'].filter(Boolean).join('\n');
 }
 function replyPrompt(prompt, extra) {
     if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
     // Put controls before the final assistant prefill, not after it as assistant content.
-    const pattern = /(<\|im_start\|>assistant\s*(?:<think>\s*<\/think>\s*)?)$/i;
-    if (pattern.test(prompt)) return prompt.replace(pattern, (_match,tail) => '<|im_start|>system\n'+extra+'<|im_end|>\n'+tail);
+    const marker='<|im_start|>assistant\n',at=prompt.lastIndexOf(marker);
+    if(at>=0&&!prompt.slice(at+marker.length).includes('<|im_end|>')){
+        return prompt.slice(0,at)+'<|im_start|>system\n'+extra+'<|im_end|>\n'+prompt.slice(at);
+    }
     return extra+'\n\n'+prompt;
 }
 async function completionText(response) {
@@ -98,7 +102,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 return Buffer.byteLength(prompt,'utf8');
             };
             const taskInstruction=mode==='writer'?'You are a fiction continuation engine. Write only manuscript prose, preserving language, tense, viewpoint, voice and established facts. No character-reply framing, explanations, headings or analysis. /no_think':['image-prompt','utility'].includes(mode)?'Follow the requested task precisely. Return only its requested output, without model reasoning or roleplay commentary. /no_think':['adventure','adventure-json','adventure-dm','adventure-narrator'].includes(mode)?'Follow the requested Ilreon schema and rules exactly. Return valid JSON when requested, otherwise the requested narration or compact notes. Preserve authoritative game state; never output reasoning. /no_think':mode==='character'?'Create the requested character card as valid JSON. Return only the requested object without reasoning. /no_think':mode==='preview'?'Write the requested natural in-character test reply, without reasoning or JSON. /no_think':mode==='state'?'Return only the requested state-analysis JSON. Evidence must be exact, established and associated with the declared message and character. Do not invent state or include reasoning. /no_think':mode==='summary'?'Summarize the supplied established facts, without inventing details. Return factual notes only, no reasoning. /no_think':instructions(settings);
-            const directionInstruction=(body.hero_context?.character?'\n[Character consistency] Respect the selected character card: canonical appearance, personality, speech habits, abilities, values and motives. Show reactions through dialogue and action rather than a character profile. Do not write dialogue, thoughts or decisions for the user. Avoid generic agreement and repetition.':'')+(body.hero_context?.oneReply?'\n[One reply only] '+String(body.hero_context.oneReply).slice(0,3000):'')+(body.hero_context?.generationType==='continue'?'\nContinue the last assistant reply without repeating its existing text.':'');
+            const directionInstruction=(body.hero_context?.oneReply?'\n[One reply only] '+String(body.hero_context.oneReply).slice(0,3000):'')+(body.hero_context?.generationType==='continue'?'\nContinue the last assistant reply without repeating its existing text.':'');
             const stateInstruction=storyContext?'\n'+storyContext.text:'';
             const budgeted=enforceContext||!!body.hero_context||mode!=='chat';
             let replyTokens=['adventure-json','adventure-dm'].includes(mode)?Math.max(4096,settings.maxReplyTokens):mode==='adventure-narrator'?Math.max(3072,settings.maxReplyTokens):mode==='adventure'||mode==='character'||mode==='state'?Math.max(1024,settings.maxReplyTokens):settings.maxReplyTokens;
@@ -126,7 +130,8 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(mode==='chat'&&settings.thinkingMode==='separate'){
                 stage('planning');
-                const prompt=replyPrompt(body.prompt,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');
+                const planningBase=body.hero_context?.generationType==='continue'?body.prompt+'<|im_end|>\n<|im_start|>assistant\n':body.prompt;
+                const prompt=replyPrompt(planningBase,'[Private continuity outline]\nBriefly list the scene facts, character intent and next-reply goal. Do not write dialogue or a final answer. This outline is not shown to the user. /no_think\n[/Private continuity outline]');
                 if(settings.planningSource==='different'){
                     const worker=getPlanningBackend();const planningProfile=worker?.settings?.name?profileFor(root,worker.settings.name):{Template:'chatml'};if(!worker?.ready)throw Error('Load a separate planning model in Generation, or choose Use reply model.');
                     let planningPrompt=prompt;const budget=worker.settings.contextSize-settings.planningTokens-64;
@@ -135,6 +140,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                     plan=filterReply(await completionText(await fetchBackend(worker.url+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(modelRequest({prompt:planningPrompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4,stop:['<|im_end|>']},planningProfile)),signal:controller.signal})),settings).slice(0,6000);
                 }else plan=filterReply(await sendChecked({...body,prompt,stream:false,max_tokens:settings.planningTokens,temperature:0.4}),settings).slice(0,6000);
             }
+            if(plan&&isWriterNonProse(plan)){lastRun.planningRejected='Planner returned commentary instead of continuity notes';plan='';}
             if(mode==='writer'&&body.writerSettings?.writerTwoPass===true){
                 stage('writer-planning');
                 const w=body.hero_writer||{},draft=String(w.text||''),hasDraft=!!draft.trim();
@@ -163,7 +169,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             // Close an inherited reasoning prefill even in existing SillyTavern profiles.
             if(/<think>\s*$/i.test(prompt))prompt+='\n</think>\n';
             if(body.hero_context?.sessionId){let inspected=prompt.replace(/\[Private continuity notes[^\]]*\][\s\S]*?\[\/Private continuity notes\]/g,'[Private planning omitted]');for(const entry of storyContext?.lore||[])if(entry.visibility==='hidden'&&entry.text)inspected=inspected.split(entry.text).join('[Hidden lore omitted]');for(const entry of storyContext?.trackers||[])if(entry.hidden)inspected=inspected.split(JSON.stringify(entry.value)).join('[Hidden state omitted]');recordInspector(body.hero_context.sessionId,{at:Date.now(),prompt:renderPrompt(inspected,profile),template:profile.Template,promptTokens:await countTokens(prompt),replyTokens,contextSize,trackerKeys:storyContext?.trackers.map(x=>x.key)||[],omittedTrackers:storyContext?.omitted||[],lore:(storyContext?.lore||[]).map(e=>({id:e.id,label:e.visibility==='hidden'?'Hidden entry':e.label,active:e.active,reason:e.reason})),history:body.hero_context.messages.length,planningSource:settings.thinkingMode==='separate'?settings.planningSource:'off'});}
-            const request={...body,prompt,disableNativeThinking:true,writerContinuation:mode==='writer',stream:!!body.stream,max_tokens:replyTokens,temperature:mode==='utility'&&Number.isFinite(body.temperature)?body.temperature:['adventure-json','adventure-dm'].includes(mode)?0.35:settings.temperature,top_p:['adventure-json','adventure-dm'].includes(mode)?0.9:settings.top_p,top_k:['adventure-json','adventure-dm'].includes(mode)?20:settings.top_k,min_p:['adventure-json','adventure-dm'].includes(mode)?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
+            const request={...body,prompt,disableNativeThinking:true,writerContinuation:mode==='writer',assistantContinuation:mode==='chat'&&body.hero_context?.generationType==='continue',stream:!!body.stream,max_tokens:replyTokens,temperature:mode==='utility'&&Number.isFinite(body.temperature)?body.temperature:['adventure-json','adventure-dm'].includes(mode)?0.35:settings.temperature,top_p:['adventure-json','adventure-dm'].includes(mode)?0.9:settings.top_p,top_k:['adventure-json','adventure-dm'].includes(mode)?20:settings.top_k,min_p:['adventure-json','adventure-dm'].includes(mode)?0:settings.min_p,rep_pen_range:1024,rep_pen:settings.repetition_penalty,repetition_penalty:settings.repetition_penalty};
             const raw=await sendChecked(request);
             const filters=mode==='chat'?settings:{removeModelTokens:true,stopAtSpeaker:false};
             let text=filterReply(raw,filters);
@@ -183,26 +189,6 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
                 const retryRaw=await sendChecked({...request,prompt:retryPrompt,stop:[],noStopSequences:true,stream:false,max_tokens:retryTokens,temperature:0.65,top_p:0.94,min_p:0,top_k:20});
                 text=filterReply(retryRaw,{...filters,stopAtSpeaker:false,stopMarkers:[]});
                 lastRun.emptyReplyRecovery={...lastRun.emptyReplyRecovery,retryTokens,success:!!text,stopReset:true,noStopSequences:true,rawCharacters:retryRaw.length,visibleCharacters:text.length,template:profile.Template,thinkingControl:profile.Family==='Qwen3'?'qwen3-template-empty-thinking':'instruction'};
-                // Some Mistral-family GGUFs are bundled with the opposite instruction
-                // template. Try the alternate serializer once before rejecting the reply.
-                // This does not change the saved profile or fabricate chat content.
-                if(!text&&mode==='chat'&&['mistral-v3','mistral-v7'].includes(profile.Template)){
-                    stage('recovering-template-mismatch');
-                    const alternative=profile.Template==='mistral-v3'?'mistral-v7':'mistral-v3';
-                    const alternateProfile={...profile,Template:alternative};
-                    const finalPrompt=replyPrompt(body.prompt,extra+'\nWrite the character response now in natural speech and action. Do not explain the task or start a new instruction turn.');
-                    const altRequest={...request,prompt:finalPrompt,stream:false,stop:[],noStopSequences:true,max_tokens:retryTokens,temperature:0.7,top_p:0.95,min_p:0,top_k:30};
-                    try{
-                        const encoded=modelRequest(altRequest,alternateProfile);
-                        if(!budgeted||await countTokens(encoded.prompt,false)+retryTokens<=contextSize){
-                            const altRaw=await completionText(await fetchBackend(backendURL+'/v1/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(encoded),signal:controller.signal,timeoutMs:timeoutSeconds*1000,onEvent:trace}));
-                            text=filterReply(altRaw,{...filters,stopAtSpeaker:false,stopMarkers:[]});
-                            lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,rawCharacters:altRaw.length,visibleCharacters:text.length,success:!!text};
-                        }else lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,skipped:'Context budget'};
-                    }catch(alternativeError){
-                        lastRun.emptyReplyRecovery.alternateTemplate={template:alternative,error:errorDetails(alternativeError)};
-                    }
-                }
                 if(!text&&mode==='image-prompt'&&body.hero_image_context){text='Illustrate this visible scene with coherent composition, keeping the described people distinct. '+String(body.hero_image_context).replace(/<[^>]+>/g,'').slice(0,5000);lastRun.imagePromptFallback=true;}
                 if(!text)throw Error((/<think>|<\|channel\|>analysis/i.test(retryRaw)?'THINKING_ONLY':'EMPTY_OUTPUT')+': No visible reply after recovery. Model template: '+profile.Template+'; output budget: '+retryTokens+'. Open Diagnostics for request metadata. Your chat and trackers were preserved.');
             }
@@ -222,7 +208,7 @@ function createPipeline({root,backendURL,setState=()=>{},fetchBackend=engineFetc
             }
             if(meta||repetitive) {
                 const repairedPrompt=replyPrompt(body.prompt,extra+'\nCORRECT THE DRAFT: '+(repetitive||'The draft was writer commentary.')+' Write a fresh reply that answers the most recent user message and moves the scene forward. Do not reuse previous reply sentences, echo the user, announce narrator roles or explain how you will answer.');
-                text=filterReply(await sendChecked({...body,prompt:repairedPrompt,stream:false,max_tokens:replyTokens,temperature:repetitive?Math.max(0.75,Math.min(settings.temperature,1)):Math.min(settings.temperature,0.7),rep_pen:Math.max(settings.repetition_penalty,1.15),repetition_penalty:Math.max(settings.repetition_penalty,1.15),rep_pen_range:1024}),settings);
+                text=filterReply(await sendChecked({...request,prompt:repairedPrompt,stream:false,max_tokens:replyTokens,temperature:repetitive?Math.max(0.75,Math.min(settings.temperature,1)):Math.min(settings.temperature,0.7),rep_pen:Math.max(settings.repetition_penalty,1.15),repetition_penalty:Math.max(settings.repetition_penalty,1.15),rep_pen_range:1024}),settings);
                 if(settings.avoidRepetition&&repetitionIssue(text,history,settings.repetitionSensitivity))throw Error('The model repeated the conversation again. Try regenerate or adjust repetition sensitivity / sampling in Generation. The repeated draft was hidden.');
                 if(settings.repairMetaReplies&&isMetaReply(text))throw new Error('The model is still returning writer commentary. Review the character card and Generation writing instructions, then retry.');
             }

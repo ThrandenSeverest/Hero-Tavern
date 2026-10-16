@@ -20,21 +20,27 @@ function renderPrompt(prompt,profile={}){const template=profile.Template||'chatm
  }
  return result;}
 function modelRequest(request,profile){
- const {writerContinuation,disableNativeThinking,noStopSequences,...payload}=request;
+ const {writerContinuation,assistantContinuation,disableNativeThinking,noStopSequences,
+  stopping_strings,max_new_tokens,n_predict,num_predict,include_reasoning,...payload}=request;
+ // /v1/completions has one output budget and one stop list. Do not forward
+ // competing native-endpoint aliases inherited from the frontend.
+ const stopList=value=>typeof value==='string'?[value]:Array.isArray(value)?value.filter(s=>typeof s==='string'&&s):[];
+ const requestedStops=[...new Set([...stopList(request.stop),...stopList(stopping_strings)])];
+ payload.stop=noStopSequences?[]:requestedStops;
  const template=profile?.Template||'chatml';
  let prompt;
- if(writerContinuation&&template!=='chatml'){
+ if((writerContinuation||assistantContinuation)&&template!=='chatml'){
   // Mistral template endings would otherwise place </s> AFTER the existing
   // manuscript, making the model start an assistant explanation instead of
   // continuing an unfinished prose passage.
   const marker='<|im_start|>assistant\n',at=request.prompt.lastIndexOf(marker);
-  if(at<0)throw Error('Writer continuation requires an assistant prose prefill.');
+  if(at<0)throw Error('Continuation requires an assistant prose prefill.');
   const body=request.prompt.slice(at+marker.length),preamble=request.prompt.slice(0,at+marker.length);
   prompt=renderPrompt(preamble,profile).replace(/<\/s>\s*$/,'')+body;
  }else prompt=renderPrompt(request.prompt,profile);
  // Match Qwen3's published enable_thinking=false chat-template suffix only at an empty assistant boundary.
  if(template==='chatml'&&profile?.Family==='Qwen3'&&disableNativeThinking&&/<\|im_start\|>assistant\s*$/.test(prompt))prompt+='<think>\n\n</think>\n\n';
  if(template==='chatml')return {...payload,prompt};
- return {...payload,prompt,stop:noStopSequences?[]:[...new Set([...(request.stop||[]).filter(s=>!s.includes('im_end')&&!s.includes('im_start')), '</s>','[INST]'])]};
+ return {...payload,prompt,stop:noStopSequences?[]:[...new Set([...requestedStops.filter(s=>!s.includes('im_end')&&!s.includes('im_start')), '</s>','[INST]'])]};
 }
 module.exports={profileFor,renderPrompt,modelRequest};

@@ -85,6 +85,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
     let manager = null, starting = false, loadingSince = 0, runningModel = '', backendError = '', engineState = 'idle', stopIntent = '';
     const backendURL = 'http://127.0.0.1:' + backendPort;
     let visionBusy=false,visionSetup=null,visionSetupError='';
+    let workflowControl=null;
     let generationState = 'idle', contextDiagnostics = null,imageJob=false,textPausedForImages=false,queuedInference=0,launchConfig=null,launchArgs=[];
     const {profileFor,modelRequest}=require('./ModelProfiles.cjs');let loadedContext=0;
     const story=createStoryStore(root,{tavernPath});
@@ -336,6 +337,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
            });return;
          }
          if(tuner.snapshot()?.status==='running'&&req.url==='/inference/v1/completions'){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Hardware tuning is running; wait or cancel it in Hardware.'}}));return;}
+        if(workflowControl&&req.url==='/inference/v1/completions'){res.writeHead(409,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{message:'Workflow diagnostics are running. Stop or finish the diagnostic before chatting.'}}));return;}
         if(req.url.startsWith('/inference/') && !req.url.includes('/api/extra/abort') && !req.headers.origin){
             const isReply=req.url==='/inference/v1/completions'&&req.method==='POST';
             if(isReply)queuedInference++;
@@ -403,6 +405,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
         try {
             let body = ''; for await (const chunk of req) { body += chunk; if (body.length > (req.url.startsWith('/adventure/storage/')||req.url.startsWith('/writer/api/')||req.url==='/story/import'?128000000:((req.url==='/studio/generate'||req.url==='/gallery/import'||req.url==='/tts/import'||req.url==='/vision/analyze')?39000000:2000000))) throw new Error('Request too large.'); }
             const data = JSON.parse(body || '{}');
+            if(workflowControl&&(['/start','/stop','/select','/hardware','/model-profile','/performance/apply','/performance/tune','/tools/text','/model-tests/text','/diagnostics/text','/task'].includes(req.url)||req.url.startsWith('/studio/')&&req.url!=='/studio/status'||req.url.startsWith('/story/')&&['analyze','helper','test-character'].includes(req.url.split('/').pop())))throw Error('Finish or stop workflow diagnostics before another AI task or model change.');
             // Shared text works with the selected local model in every mode,
             // without the separate Assistant workflow's Qwen-only restriction.
             if(req.url==='/tools/text'){
@@ -420,6 +423,19 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             }
             if(req.url==='/app/exit'){if(data.confirm!==true)throw Error('Confirm application exit.');json(202,requestExit(root,process.env.HERO_LAUNCHER_TOKEN));return;}
             if(req.url==='/model-tests/record'){json(200,modelTests.record(data));return;}
+            if(req.url==='/model-tests/workflow'){
+                if(workflowControl||imageJob||textPausedForImages||generationState!=='idle'||queuedInference)throw Error('Finish active generation before running workflow diagnostics.');
+                if(!selected())throw Error('Select a text model in Models first.');
+                await ensureText();
+                const control=new AbortController();res.on('close',()=>{if(!res.writableEnded)control.abort()});
+                const {runWorkflowTest}=require('./ModelTests.cjs');
+                if(workflowControl)throw Error('Another workflow diagnostic started. Wait or stop it.');
+                workflowControl=control;let report;
+                try{report=await runWorkflowTest({kind:data.kind,settings:readSettings(root),contextSize:loadedContext||8192,signal:control.signal,
+                    makePipeline:(temporaryRoot,setDiagnostics,getStoryContext)=>{for(const name of ['models.json','model-profiles.json','backend.json']){const source=path.join(root,name);if(fs.existsSync(source))fs.copyFileSync(source,path.join(temporaryRoot,name));}return createPipeline({root:temporaryRoot,backendURL,getStoryContext,enforceContext:true,getModelProfile:()=>profileFor(root,runningModel||selected()),getContextSize:()=>loadedContext||8192,getPlanningBackend:()=>thinking.snapshot(),setDiagnostics,setState:value=>{generationState=value;}});}});}finally{workflowControl=null;}
+                const record=modelTests.record({kind:data.kind,model:runningModel||selected(),status:report.status,elapsedMs:report.elapsedMs,notes:report.notes,error:report.error,workflow:report,text:report.stages.map(s=>s.label+'\n'+(s.text||JSON.stringify(s.actual||{}))).join('\n\n')});
+                json(200,record);return;
+            }
             if(req.url==='/model-tests/text'){
                 // Benchmark instruction following in an isolated completion, not the chat/character pipeline.
                 // Never feed character card, chat history, Writer templates or global roleplay instructions.
@@ -491,7 +507,7 @@ function createBridge(root, { port = 8001, autoStart = true, backendCommand, bac
             if(req.url==='/diagnostics/text'||req.url==='/diagnostics/image'){
                 const started=Date.now();let report;try{if(req.url.endsWith('/text')){if(imageJob)await waitUntil(()=>!imageJob,null,1200000);if(!selected())throw Error('Load a text model in Models first.');if(!backendReady)await ensureText();if(typeof data.prompt!=='string'||!data.prompt.trim()||data.prompt.length>60000)throw Error('Enter a test prompt (up to 60000 characters).');const turns=Math.max(0,Math.min(100,Math.floor(Number(data.historyTurns)||0))),messages=Array.from({length:turns},(_,i)=>({role:i%2?'assistant':'user',text:'Diagnostic history turn '+i+': '+('A traveller promised a blue cloak beside the old inn. '.repeat(25))}));messages.push({role:'user',text:data.prompt});const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort()});const result=await pipeline.generate({prompt:'<|im_start|>system\nThis is an isolated local diagnostic, not an event in any saved story.<|im_end|>\n<|im_start|>user\n'+data.prompt+'<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'diagnostics-'+crypto.randomUUID(),messages,generationType:'normal'},stream:false},controller.signal);report={ok:true,type:'text',model:runningModel,template:profileFor(root,runningModel).Template,usage:result.usage,context:contextDiagnostics,text:result.choices[0].text};}else{const image=await studio.action('/studio/generate',{prompt:data.prompt||'A quiet fantasy tavern, detailed illustration.',negative_prompt:'blurry, low quality',width:data.width||512,height:data.height||512,steps:data.steps||20,seed:12345});report={ok:true,type:'image',model:images.snapshot().running,...image};}}catch(e){report={ok:false,type:req.url.endsWith('/text')?'text':'image',error:e.message,failure:errorDetails(e),failedStage:pipeline.runSnapshot()?.failedStage,suggestion:e.code==='ENGINE_DEADLINE'?'Engine exceeded configured request timeout. Check CUDA/offload, prompt length and logs.':e.code==='ECONNREFUSED'?'Engine stopped or crashed; inspect the included startup/error logs.':'Inspect failure causes, engine state and logs below.'};}report.environment=await diagnosticEnvironment();report.elapsedMs=Date.now()-started;if(report.usage)report.endToEndTokensPerSecond=Number((report.usage.completion_tokens/(report.elapsedMs/1000||1)).toFixed(2));report.at=new Date().toISOString();const folder=path.join(root,'Diagnostics');fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'latest-'+report.type+'.json'),JSON.stringify(report,null,2));json(200,report);return;
             }
-            if(req.url==='/generation/abort'){pipeline.abort();await Promise.allSettled([backendURL,thinking.snapshot().url].map(url=>engineFetch(url+'/api/extra/abort',{method:'POST',signal:AbortSignal.timeout(2000)})));json(200,{stopped:true});return;}
+            if(req.url==='/generation/abort'){workflowControl?.abort();pipeline.abort();await Promise.allSettled([backendURL,thinking.snapshot().url].map(url=>engineFetch(url+'/api/extra/abort',{method:'POST',signal:AbortSignal.timeout(2000)})));json(200,{stopped:true});return;}
 
             if(req.url==='/vision/configure'){if(!data.mmproj)throw Error('Select the matching multimodal projector.');json(200,await vision.configure(data));return;}
             if(req.url==='/vision/stop'){vision.stop();json(200,vision.snapshot());return;}

@@ -7,7 +7,7 @@ const PRESETS=Object.freeze({
  image2image:{label:'Image → Image',model:'selected edit-capable image model',prompt:'Edit the supplied image: change the main object to vivid BLUE. Preserve the original composition, viewpoint and background; change its color clearly.',width:768,height:768,steps:24,seed:-1,denoise:0.7,refine:false,preset:'raw'},
  image2text:{label:'Image → Text',model:'loaded local vision model + projector',question:'Describe the visible main subject and its color, composition, and surroundings in two factual sentences. Do not explain your task.'}
 });
-const kinds=Object.keys(PRESETS);
+const kinds=[...Object.keys(PRESETS),'tracker','writer-agency','character-long'];
 const GALLERY=/^\d{12,17}-[a-f0-9]{8,24}\.png$/;
 function imageStats(bytes){
  if(bytes.length<50||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw Error('Output is not a valid PNG.');
@@ -71,6 +71,7 @@ function createModelTests(root){
   if(typeof input.model!=='string'||input.model.length>200)throw Error('Invalid tested model.');
   const previous=history(),entry={id:crypto.randomUUID(),at:new Date().toISOString(),kind:input.kind,model:input.model,suiteId:typeof input.suiteId==='string'&&/^compare-[0-9]{10,16}$/.test(input.suiteId)?input.suiteId:null,status:input.status,elapsedMs:Number.isFinite(Number(input.elapsedMs))?Math.max(0,Math.round(Number(input.elapsedMs))):null,prompt:String(input.prompt||'').slice(0,5000),settings:input.settings&&typeof input.settings==='object'?input.settings:{},notes:Array.isArray(input.notes)?input.notes.slice(0,8).map(n=>String(n).slice(0,400)):[],text:String(input.text||'').slice(0,12000)};
   if(input.error){entry.error=String(input.error).slice(0,1500);entry.status='failed';}
+  if(input.workflow&&['tracker','writer-agency','character-long'].includes(input.kind)){const serialized=JSON.stringify(input.workflow);if(serialized.length>250000)throw Error('Workflow report too large.');entry.workflow=JSON.parse(serialized);}
   if(input.kind==='text2text'){
    if(!entry.error){
     const raw=entry.text.trim();
@@ -104,3 +105,100 @@ function createModelTests(root){
  return {presets:()=>PRESETS,history,record};
 }
 module.exports={PRESETS,imageStats,distance,createModelTests};
+// Exercise production pipelines on disposable stories, never a user's saves.
+const WORKFLOW_KINDS=['tracker','writer-agency','character-long'];
+function agencyFindings(text,name='Rowan'){
+ const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ const subject='(?:'+escaped+'|you|\\{\\{user\\}\\})';
+ const patterns=[
+  ['player speech',new RegExp('\\b'+subject+'\\s+(?:(?:quietly|softly|then)\\s+)?(?:say|says|said|ask|asks|asked|reply|replies|replied|whisper|whispers|whispered|shout|shouts|shouted)\\b','gi')],
+  ['player action or thought',new RegExp('\\b'+subject+'\\s+(?:(?:quietly|slowly|then)\\s+)?(?:decide[sd]?|think[s]?|thought|feel[s]?|felt|nod[s]?|nodded|smile[sd]?|walk[s]?|walked|step[s]?|stepped|reach(?:es|ed)?|agree[sd]?|accept[sd]?|take[s]?|took|open[s]?|opened|turn[s]?|turned)\\b','gi')],
+  ['unresolved player placeholder',/\{\{user\}\}/gi]
+ ];
+ const findings=[];for(const [rule,re] of patterns)for(const match of text.matchAll(re))findings.push({rule,evidence:text.slice(Math.max(0,match.index-45),match.index+match[0].length+100)});
+ return findings.slice(0,30);
+}
+function passageChecks(text,{expected=[],minWords=180,minParagraphs=3}={}){
+ const words=(text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)||[]).length;
+ const paragraphs=text.trim()?text.trim().split(/\n\s*\n/).filter(Boolean).length:0;
+ const missing=expected.filter(x=>!text.toLowerCase().includes(x.toLowerCase()));
+ return {words,paragraphs,minWords,minParagraphs,missing,passed:!!text.trim()&&words>=minWords&&paragraphs>=minParagraphs&&!missing.length};
+}
+async function runWorkflowTest({kind,makePipeline,settings={},contextSize=8192,signal}){
+ if(!WORKFLOW_KINDS.includes(kind))throw Error('Unknown workflow diagnostic.');
+ const os=require('node:os'),temp=fs.mkdtempSync(path.join(os.tmpdir(),'hero-workflow-'));
+ const report={kind,status:'passed',startedAt:new Date().toISOString(),stages:[],notes:[],contextSize,automaticOnly:true};
+ let context=null;const started=Date.now();
+ const ensureActive=()=>{if(signal?.aborted)throw Error('Workflow diagnostic cancelled.');};
+ try{
+  const {saveSettings}=require('./ReplyPipeline.cjs');
+  // Local diagnostic overrides are written only to the disposable root.
+  report.settings=saveSettings(temp,{...settings,maxReplyTokens:1024,replyStyle:'mixed',memoryEnabled:true,recentMessages:100,instructions:'Write at least three substantial paragraphs, about 220–350 words. Preserve established scene facts. Do not speak or act for the player.'});
+  let storyContext=()=>null;
+  const pipeline=makePipeline(temp,value=>{context=value},(id,query)=>storyContext(id,query));
+  const complete=async(body,mode='chat')=>{ensureActive();const at=Date.now();const result=await pipeline.generate(body,signal,{mode});return {text:String(result.choices?.[0]?.text||''),usage:result.usage,context:context?{...context}:null,elapsedMs:Date.now()-at};};
+  if(kind==='tracker'){
+   const {createStoryStore}=require('./StoryStore.cjs'),{createStoryAPI}=require('./StoryAPI.cjs'),W=require('./WTracker.cjs');
+   const folder=path.join(temp,'SillyTavern/data/default-user/chats/Mira');fs.mkdirSync(folder,{recursive:true});
+   const file=path.join(folder,'Diagnostic.jsonl'),loc={avatar:'Mira.png',filename:'Diagnostic'};
+   fs.writeFileSync(file,[{character_name:'Mira',chat_metadata:{}},{name:'Mira',mes:'Mira arrives at Stonebridge with exactly 12 coins. The town clock reads 09:15.',is_user:false,extra:{}}].map(JSON.stringify).join('\n')+'\n');
+   const store=createStoryStore(temp),view=store.sync(loc),id=view.session.id,session=store.get(id);
+   storyContext=(sessionId,query)=>store.view(sessionId,query).context;
+   const owner='character:'+session.characterId;
+   session.definitions=[['location','text','Unknown'],['coins','number',0],['clock','clock','--:--']].map(([id,type,initialValue])=>W.validateDefinition({id,type,initialValue,owner,label:id,updateMode:'automatic',alwaysInject:true}));
+   session.events=[];store.saveSession(session);
+   const snapshots=[];const api=createStoryAPI(store,{generate:async(...args)=>{const result=await pipeline.generate(...args);snapshots.push(String(result.choices?.[0]?.text||''));return result;}},{contextSize:()=>contextSize});
+   for(const [label,narration,expected] of [
+    ['Initial extraction',null,{location:'Stonebridge',coins:12,clock:'09:15'}],
+    ['Update after a new passage','Mira leaves Stonebridge and enters Oak Inn. After paying 3 coins, she has exactly 9 coins left. The inn clock reads 09:30.',{location:'Oak Inn',coins:9,clock:'09:30'}]
+   ]){
+    ensureActive();
+    if(narration){const old=store.view(id);fs.writeFileSync(file,[old.header,...old.messages,{name:'Mira',mes:narration,is_user:false,extra:{}}].map(JSON.stringify).join('\n')+'\n');store.sync(loc);}
+    const before=fs.readFileSync(file,'utf8'),at=Date.now();let updated=await api.action('/story/analyze',{id},signal);
+    const actual=Object.fromEntries(Object.keys(expected).map(key=>[key,updated.context.state[owner+':'+key]]));
+    const checks=Object.entries(expected).map(([key,value])=>({check:key,expected:value,actual:actual[key],passed:key==='location'?String(actual[key]).toLowerCase().includes(value.toLowerCase()):actual[key]===value}));
+    const reopened=createStoryStore(temp).view(id);
+    checks.push({check:'Saved state survives reopening',passed:JSON.stringify(updated.context.state)===JSON.stringify(reopened.context.state)});
+    checks.push({check:'Confirmed state appears in next reply context',passed:reopened.context.text.includes(String(expected.location))&&reopened.context.text.includes(String(expected.coins))});
+    checks.push({check:'Chat text preserved',passed:before===fs.readFileSync(file,'utf8')});
+    checks.push({check:'Extraction completed with real model request',passed:updated.session.lastAnalysis?.modelUsed===true&&!updated.session.lastAnalysis?.partial});
+    report.stages.push({label,status:checks.every(c=>c.passed)?'passed':'failed',checks,actual,modelOutput:snapshots.at(-1)||'',analysis:updated.session.lastAnalysis,elapsedMs:Date.now()-at});
+   }
+   const question='What are Mira’s confirmed location, remaining coins and clock time? Copy the exact saved location and HH:mm time, and write the coin count as a digit. Do not change the scene.';
+   const result=await complete({prompt:'<|im_start|>system\nRead confirmed state for this isolated diagnostic.<|im_end|>\n<|im_start|>assistant\n',hero_context:{id,sessionId:id,messages:[{role:'user',text:question}],oneReply:'Verify the saved tracker values exactly, without inventing new events.'},stream:false});
+   const checks=passageChecks(result.text,{expected:['Oak Inn','9','09:30'],minWords:1,minParagraphs:1});
+   report.stages.push({label:'Next reply uses saved tracker state',status:checks.passed?'passed':'failed',...result,checks});
+  }else if(kind==='writer-agency'){
+   report.notes.push('Agency detection is an English heuristic. Review the saved outputs; a clean scan does not prove that every player action was avoided.');
+   const cases=[
+    ['Player speech','say','Rowan says, "What happened to the bridge?"\n\n', 'Mira answers Rowan’s question; leave Rowan’s next words and choices unwritten.'],
+    ['Player action','do','Rowan places a sealed map on the desk.\n\n', 'Mira examines the map and reacts; leave Rowan’s next actions and thoughts unwritten.'],
+    ['Open decision','continue','Mira holds out two sealed letters, awaiting Rowan’s choice.\n\n', 'Describe Mira and the surroundings while the choice remains with Rowan.']
+   ];
+   for(const [label,operation,text,note] of cases){
+    const body={prompt:'',hero_writer:{text,prompt:'A quiet mystery in a riverside inn. Mira is the innkeeper. Rowan is the player, controlled only by the author.',persona:{name:'Rowan',description:'The player-controlled traveller; {{user}} refers to Rowan.'},operation,note,settings:{protectPlayerSpeech:true,protectPlayerActions:true,finishSentences:true}},writerSettings:{maxReplyTokens:1024,protectPlayerSpeech:true,protectPlayerActions:true}};
+    const result=await complete(body,'writer'),findings=agencyFindings(result.text),checks=passageChecks(result.text,{minWords:80,minParagraphs:1});
+    report.stages.push({label,status:!result.text.trim()||findings.length?'failed':checks.passed?'passed':'warning',...result,findings,checks,input:body.hero_writer});
+   }
+  }else{
+   report.notes.push('Three sequential character replies use actual prior generated replies. Longer responses require at least 180 words and three paragraphs each.');
+   const messages=[{role:'user',text:'Our boat is named Silver Heron. The package contains ember glass. We must deliver it to the bell tower before dusk.'},{role:'assistant',name:'Mira',text:'I have recorded the boat, cargo and destination in my journal.'}];
+   const entries=Array.from({length:48},(_,i)=>({role:i%2?'assistant':'user',text:`Travel journal entry ${i+1}: We pass landmark ${i+1}, inspect the quay, discuss the weather, and compare the route with the harbour map. The ferryman checks his ropes and the market stalls close in turn. No one changes our boat, cargo, or destination.`}));
+   messages.push(...entries);
+   const prompts=[['Boat','Mira, explain your plan for preparing our boat for departure. Include its established name.',['Silver Heron']],['Cargo','Mira, describe how you will keep our established cargo safe during the crossing. Name it.',['ember glass']],['Destination','Mira, plan the final delivery. Name our original destination and explain the next obstacle.',['bell tower']]];
+   for(const [label,question,expected] of prompts){
+    messages.push({role:'user',text:question+' Respond in at least three substantial paragraphs, 220–350 words, without deciding or speaking for Rowan.'});
+    const body={prompt:'<|im_start|>system\nIsolated character diagnostic: Mira is a practical river guide. Rowan is the player.<|im_end|>\n<|im_start|>assistant\n',hero_context:{id:'diagnostic-character',messages:messages.map(x=>({...x})),character:{name:'Mira',description:'An experienced river guide, calm and observant.'},generationType:'normal'},stream:false};
+    const result=await complete(body),checks=passageChecks(result.text,{expected}),findings=agencyFindings(result.text);
+    const longContext=(result.usage?.prompt_tokens||0)>=3000;
+    report.stages.push({label,status:!checks.passed||findings.length?'failed':longContext?'passed':'warning',...result,checks,findings,longContextVerified:longContext,minimumPromptTokens:3000,requestedReplyTokens:1024,inputMessages:messages.length,question});
+    messages.push({role:'assistant',name:'Mira',text:result.text});
+   }
+   if(report.stages.some(s=>!s.longContextVerified))report.notes.push('Long context was not verified at 3000 prompt tokens on every turn. Increase the loaded context (8192 or more recommended) and rerun.');
+  }
+ }catch(error){report.error=error.message;report.status='failed';}
+ finally{report.elapsedMs=Date.now()-started;fs.rmSync(temp,{recursive:true,force:true});}
+ if(report.stages.some(s=>s.status==='failed'))report.status='failed';else if(report.status!=='failed'&&report.stages.some(s=>s.status==='warning'))report.status='warning';
+ return report;
+}
+Object.assign(module.exports,{WORKFLOW_KINDS,agencyFindings,passageChecks,runWorkflowTest});

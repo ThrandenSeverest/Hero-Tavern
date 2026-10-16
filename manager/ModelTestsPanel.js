@@ -32,7 +32,7 @@
   notify(currentController?'Stopping '+(kindNames[currentKind]||currentKind)+'…':'Stopping after the current preflight operation…');
   if(currentController)currentController.abort();
  };
- const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text',tts:'Text → Speech'};
+ const kindNames={text2text:'Text → Text',text2image:'Text → Image',image2image:'Image → Image',image2text:'Image → Text',tts:'Text → Speech',tracker:'Tracker workflow','writer-agency':'Writer · player agency','character-long':'Character · 3 long-context replies'};
  const base=(chosenModel)=>{
   const model=chosenModel||$('model-test-model').value;
   const opts=model==='sdxl'?{steps:28,cfg_scale:6,sampler_name:'DPM++ 2M Karras',scheduler:'karras'}:model==='flux-klein'?{steps:4,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:model==='z-turbo'?{steps:9,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'}:{steps:25,cfg_scale:1,sampler_name:'Euler',scheduler:'simple'};
@@ -61,6 +61,7 @@
    wrap.append(title,info,prompt);
    if(entry.imageName){const img=document.createElement('img');img.src='/images/output/'+entry.imageName;img.loading='lazy';img.alt='Actual model test output';img.style.cssText='max-width:280px;width:100%;max-height:340px;object-fit:contain;display:block;border-radius:8px';wrap.append(img);}
    if(entry.text){const block=document.createElement('pre');block.textContent=entry.text.slice(0,2000);wrap.append(block);}
+   if(entry.workflow){const detail=document.createElement('details'),summary=document.createElement('summary'),output=document.createElement('pre');summary.textContent='Full workflow evidence · '+entry.workflow.stages.length+' stages';output.textContent=JSON.stringify(entry.workflow,null,2);detail.append(summary,output);wrap.append(detail);}
    if(entry.comparison){const comp=document.createElement('p');comp.className='small';comp.textContent='Compared with previous: byte-identical '+entry.comparison.identicalBytes+' · mean color difference '+(entry.comparison.meanColorDifference??'unavailable');wrap.append(comp);}
    box.append(wrap);
   }
@@ -73,7 +74,10 @@
   const started=Date.now(),model=override?.model||$('model-test-model').value,progress=label=>notify(label+' · '+model+' · bounded test (Stop available). Image tests unload text automatically; it reloads at the next chat request.');
   let report={kind,model,status:'passed',prompt:'',settings:{},elapsedMs:0,suiteId:override?.suiteId||null};
   try{
-   if(kind==='text2text'){
+   if(['tracker','writer-agency','character-long'].includes(kind)){
+    progress('Running '+kindNames[kind]);
+    const result=await callTest('/model-tests/workflow',{kind},kind,900000);history.push(result);showHistory();notify(kindNames[kind]+' · '+result.status.toUpperCase());return result;
+   }else if(kind==='text2text'){
     progress('Running local text-instruction test');
     const prompt=presets.text2text.prompt;
     const r=await callTest('/model-tests/text',{},'text2text',35000);
@@ -110,7 +114,7 @@
   try{const result=await record(report);notify((result.status==='passed'?'PASS':'CHECK')+' · '+kindNames[kind]+' · '+(result.elapsedMs/1000).toFixed(1)+' sec'+(result.error?' · '+result.error:''));return result;}
   catch(e){notify('Could not save test report: '+e.message);return {...report,error:report.error||e.message};}
  }
- const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-diagnostic-flow','model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
+ const busyToggle=v=>{active=v;$('model-test-stop').disabled=!v;for(const x of ['model-test-run-diagnostic-flow','model-test-run-all','model-test-compare-installed','model-test-run-text2text','model-test-run-tracker','model-test-run-writer-agency','model-test-run-character-long','model-test-run-text2image','model-test-run-image2image','model-test-run-image2text'])$(x).disabled=v;};
  async function guarded(fn){if(active)return;stopRequested=false;busyToggle(true);try{await fn();await gallery()}catch(e){notify(e.message)}finally{busyToggle(false)}}
 
  // Full diagnosis is deliberately separate from individual history cards and from
@@ -118,6 +122,9 @@
  const FLOW_STAGES=[
   ['preflight','Engine connections and hardware'],
   ['text','Text → Text · isolated exact-instruction test'],
+  ['tracker','Tracker · extract, update, save and inject state'],
+  ['writer-agency','Writer · do not speak or act for the player'],
+  ['character-long','Character · three longer replies with long history'],
   ['imageA','Text → Image · red teapot'],
   ['imageB','Text → Image · green frog'],
   ['edit','Image → Image · edit reference'],
@@ -211,6 +218,7 @@
   };
   if(!engine?.selected&&!engine?.runningModel)skipFlow('text','No text model selected');
   else await add('text','text2text');
+  for(const kind of ['tracker','writer-agency','character-long']){if(!engine?.selected&&!engine?.runningModel)skipFlow(kind,'No text model selected');else await add(kind,kind);}
   const selected=$('model-test-model').value,pack=(comfy?.packs||[]).find(x=>x.id===selected);
   const imageReady=!!pack?.installed;
   if(!imageReady){
@@ -255,6 +263,7 @@
   const suite=[];
   const add=async (kind,config)=>{if(stopRequested)return null;const result=await run(kind,config);suite.push(result);if(result?.status==='failed'&&/cancelled|timed out/i.test(result.error||''))stopRequested=true;return result;};
   await add('text2text');
+  for(const kind of ['tracker','writer-agency','character-long'])await add(kind);
   await add('text2image');
   await add('text2image',{second:true});
   if(!stopRequested){
@@ -291,7 +300,7 @@
   const summary=results.reduce((groups,item)=>{const m=groups[item.model]??={passed:0,warning:0,failed:0,skipped:0,seconds:0};m[item.status]=(m[item.status]||0)+1;m.seconds+=Math.round((item.elapsedMs||0)/1000);return groups},{});
   notify((stopRequested?'Comparison stopped. ':'Sequential comparison complete. ')+JSON.stringify(summary)+' · per-model images and timings below.');
  });
- for(const kind of ['text2text','text2image','image2image','image2text'])$('model-test-run-'+kind).onclick=()=>guarded(()=>run(kind));
+ for(const kind of ['text2text','tracker','writer-agency','character-long','text2image','image2image','image2text'])$('model-test-run-'+kind).onclick=()=>guarded(()=>run(kind));
  $('model-test-refresh').onclick=()=>guarded(refresh);
  $('model-test-export').onclick=()=>{
   const anchor=document.createElement('a'),blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),presets,history},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob);
